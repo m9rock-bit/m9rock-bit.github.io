@@ -80,15 +80,6 @@ input,select{
 .streak{font-size:38px;font-weight:700;color:#7fd1c1;line-height:1}
 .note{font-size:12px;color:#6f7a8c;line-height:1.7;margin-top:14px}
 textarea{width:100%;height:150px;background:#12161d;color:#a8b4c6;border:1px solid #2c3441;border-radius:10px;padding:11px;font-size:11px;font-family:ui-monospace,Menlo,monospace}
-/* 姿勢イラスト */
-.figbox{margin:14px 0 4px;text-align:center}
-.fig{width:100%;max-width:300px;height:auto;background:#151a23;border:1px solid #232b38;border-radius:12px;padding:4px}
-.fig .bd{fill:none;stroke:#7fd1c1;stroke-width:3.2;stroke-linecap:round;stroke-linejoin:round}
-.fig .fl{stroke:#46536a;stroke-width:2;fill:none}
-.fig .fl2{stroke:#46536a;stroke-width:2;fill:none;stroke-dasharray:4 4}
-.fig .pole{stroke:#5b6a85;stroke-width:9;stroke-linecap:round}
-.fig .mo{stroke:#8a94a6;stroke-width:1.6;fill:none;stroke-dasharray:4 4}
-.fig .mo2{stroke:#8a94a6;stroke-width:2.4;fill:none}
 .phase{text-align:center;font-size:13.5px;font-weight:700;color:#f0c08a;margin:6px 0 -4px;line-height:1.5}
 .phase.hide{display:none}
 .timer.prep{color:#f0c08a;font-weight:300}
@@ -113,7 +104,6 @@ textarea{width:100%;height:150px;background:#12161d;color:#a8b4c6;border:1px sol
   <div id="rphase" class="phase hide"></div>
   <div id="rtimer" class="timer">0:00</div>
   <div id="rnext" class="next"></div>
-  <div id="rfig" class="figbox"></div>
   <div id="rhow" class="how"></div>
   <details class="ease"><summary>できない・つらいときは（緩和措置）</summary><p id="rease"></p></details>
   <div class="ctrl">
@@ -195,68 +185,6 @@ D:{name:"夜のフル",time:"15分",tag:"就寝前・余裕のある日",cls:"",
  {n:"長い呼気の呼吸",f:"breath",s:90,side:null,how:"仰向けのまま、4秒吸って8秒吐くを7〜8回。吐く時間を長くするのが副交感神経を優位にするポイント。",ease:"4秒吸って6秒吐くに短縮してよい。"}
 ]}};
 
-/* ===================== 姿勢イラスト（線画） ===================== */
-const FIG={
-calf:{g:'<line x1="8" y1="80" x2="112" y2="80" class="fl"/><line x1="90" y1="8" x2="90" y2="80" class="fl"/><path d="M41 73 L41 79" class="mo"/>',
-  h:[42,14],l:[[[42,20],[42,46]],[[42,26],[64,30],[88,30]],[[42,26],[34,38],[36,48]],[[42,46],[41,63],[41,73]],[[41,73],[53,79]]]},
-hip9090:{g:'',
-  h:[60,18],l:[[[60,24],[60,38]],[[52,26],[38,26],[34,34]],[[68,26],[82,26],[86,34]],[[54,38],[30,46],[30,68]],[[66,38],[88,50],[66,70]]]},
-swingFB:{g:'<line x1="8" y1="80" x2="112" y2="80" class="fl"/><line x1="92" y1="8" x2="92" y2="80" class="fl"/><path d="M52 76 Q66 66 70 50" class="mo"/>',
-  h:[40,14],l:[[[40,20],[40,48]],[[40,26],[64,28],[90,28]],[[40,26],[32,38],[34,48]],[[40,48],[40,64],[40,79]],[[40,48],[58,56],[70,50]]]},
-swingLR:{g:'<line x1="8" y1="80" x2="112" y2="80" class="fl"/><path d="M50 76 Q70 70 88 52" class="mo"/>',
-  h:[60,14],l:[[[60,20],[60,48]],[[60,26],[46,32],[38,28]],[[60,26],[74,32],[82,28]],[[60,48],[56,64],[56,79]],[[60,48],[76,56],[88,50]]]},
-wgs:{g:'<line x1="8" y1="79" x2="112" y2="79" class="fl"/>',
-  h:[46,30],l:[[[44,38],[40,58]],[[40,58],[56,60],[56,78]],[[40,58],[26,72],[16,79]],[[44,38],[50,54],[52,72]],[[44,38],[52,26],[60,14]]]},
-hipcircle:{g:'<line x1="8" y1="80" x2="112" y2="80" class="fl"/><line x1="94" y1="8" x2="94" y2="80" class="fl"/><ellipse cx="72" cy="44" rx="15" ry="9" class="mo"/>',
-  h:[40,14],l:[[[40,20],[40,48]],[[40,26],[64,28],[92,28]],[[40,26],[32,38],[34,48]],[[40,48],[40,64],[40,79]],[[40,48],[62,44],[60,62]]]},
-armcircle:{g:'<line x1="8" y1="80" x2="112" y2="80" class="fl"/><circle cx="36" cy="24" r="13" class="mo"/><circle cx="84" cy="24" r="13" class="mo"/>',
-  h:[60,16],l:[[[60,22],[60,52]],[[60,28],[46,20],[36,12]],[[60,28],[74,20],[84,12]],[[60,52],[52,66],[52,79]],[[60,52],[68,66],[68,79]]]},
-wallslide:{g:'<line x1="8" y1="80" x2="112" y2="80" class="fl"/><rect x="26" y="6" width="68" height="74" class="fl2"/>',
-  h:[60,16],l:[[[60,22],[60,52]],[[60,28],[44,28],[42,12]],[[60,28],[76,28],[78,12]],[[60,52],[52,66],[52,79]],[[60,52],[68,66],[68,79]]]},
-neckside:{g:'<line x1="8" y1="78" x2="112" y2="78" class="fl"/>',
-  h:[66,26],l:[[[62,32],[60,64]],[[61,38],[76,30],[70,22]],[[61,38],[48,50],[46,64]],[[60,64],[42,74],[58,77]],[[60,64],[78,74],[62,77]]]},
-neckrot:{g:'<line x1="8" y1="78" x2="112" y2="78" class="fl"/><path d="M66 26 L74 26" class="mo2"/>',
-  h:[60,24],l:[[[60,30],[60,64]],[[60,38],[48,52],[44,64]],[[60,38],[72,52],[76,64]],[[60,64],[42,74],[58,77]],[[60,64],[78,74],[62,77]]]},
-gomuarm:{g:'<line x1="8" y1="78" x2="112" y2="78" class="fl"/>',
-  h:[60,18],l:[[[60,26],[60,58]],[[46,30],[74,30]],[[46,30],[44,16],[56,24]],[[74,30],[82,50],[66,40]],[[60,58],[44,68],[58,75]],[[60,58],[76,68],[62,75]]]},
-sittwist:{g:'<line x1="8" y1="78" x2="112" y2="78" class="fl"/><path d="M66 20 L74 22" class="mo2"/>',
-  h:[60,20],l:[[[60,26],[60,60]],[[60,30],[78,42],[84,58]],[[60,30],[48,40],[70,50]],[[60,60],[42,72],[58,76]],[[60,60],[78,72],[62,76]]]},
-baddhaSit:{g:'<line x1="8" y1="78" x2="112" y2="78" class="fl"/>',
-  h:[60,16],l:[[[60,22],[60,52]],[[60,28],[46,42],[56,58]],[[60,28],[74,42],[64,58]],[[60,52],[34,64],[58,73]],[[60,52],[86,64],[62,73]]]},
-fig4sit:{g:'<line x1="8" y1="78" x2="112" y2="78" class="fl"/>',
-  h:[40,24],l:[[[40,30],[40,60]],[[40,34],[28,48],[24,60]],[[40,60],[64,48],[70,72]],[[40,60],[52,74],[66,52]]]},
-poleInner:{g:'<line x1="62" y1="70" x2="94" y2="52" class="pole"/>',
-  h:[20,44],l:[[[26,44],[64,44]],[[32,44],[40,32],[32,24]],[[32,44],[40,56],[32,64]],[[64,44],[86,44],[104,44]],[[64,44],[78,62],[94,68]]]},
-frog:{g:'<line x1="8" y1="80" x2="112" y2="80" class="fl"/>',
-  h:[60,16],l:[[[48,28],[72,28]],[[48,28],[42,42],[40,54]],[[72,28],[78,42],[80,54]],[[60,22],[60,52]],[[50,52],[70,52]],[[50,52],[28,62],[34,76]],[[70,52],[92,62],[86,76]]]},
-baddhaFwd:{g:'<line x1="8" y1="78" x2="112" y2="78" class="fl"/>',
-  h:[70,48],l:[[[40,68],[62,54]],[[40,68],[58,62],[72,72]],[[40,68],[52,73],[72,72]],[[62,55],[70,63],[78,70]]]},
-fig4sup:{g:'<line x1="8" y1="76" x2="112" y2="76" class="fl"/>',
-  h:[18,66],l:[[[24,68],[52,68]],[[52,68],[40,46],[52,36]],[[52,68],[64,50],[46,56]],[[30,68],[36,54],[44,50]]]},
-straddle:{g:'',
-  h:[60,14],l:[[[60,20],[60,46]],[[60,46],[36,66],[26,78]],[[60,46],[84,66],[94,78]],[[54,26],[40,20],[30,12]],[[66,26],[80,20],[90,12]]]},
-poleBasic:{g:'<line x1="60" y1="12" x2="60" y2="58" class="pole"/><line x1="8" y1="80" x2="112" y2="80" class="fl"/>',
-  h:[60,16],l:[[[60,22],[60,56]],[[60,28],[42,34],[30,30]],[[60,28],[78,34],[90,30]],[[60,56],[52,70],[52,79]],[[60,56],[68,70],[68,79]]]},
-poleGlute:{g:'<line x1="56" y1="58" x2="80" y2="58" class="pole"/>',
-  h:[22,40],l:[[[28,42],[62,46]],[[62,46],[84,52],[100,46]],[[62,46],[80,30],[96,34]],[[32,42],[34,26],[28,18]]]},
-poleLat:{g:'<line x1="30" y1="44" x2="52" y2="48" class="pole"/>',
-  h:[30,28],l:[[[36,34],[70,44]],[[38,34],[24,26],[12,22]],[[70,44],[88,54],[100,50]],[[70,44],[84,38],[98,42]]]},
-gomuleg:{g:'<line x1="8" y1="78" x2="112" y2="78" class="fl"/>',
-  h:[60,14],l:[[[60,20],[60,46]],[[60,26],[46,38],[40,50]],[[60,26],[74,38],[80,50]],[[60,48],[50,60],[84,64]],[[60,48],[70,70],[36,74]]]},
-suptwist:{g:'<rect x="34" y="6" width="52" height="78" rx="8" class="fl2"/><path d="M54 14 L46 14" class="mo2"/>',
-  h:[60,14],l:[[[60,20],[60,50]],[[60,26],[42,28],[30,26]],[[60,26],[78,28],[90,26]],[[60,50],[82,58],[82,74]],[[60,50],[76,64],[86,76]]]},
-legswall:{g:'<line x1="8" y1="78" x2="96" y2="78" class="fl"/><line x1="96" y1="8" x2="96" y2="78" class="fl"/>',
-  h:[20,66],l:[[[26,68],[74,72]],[[74,72],[86,40],[90,14]],[[32,69],[36,56],[28,50]]]},
-breath:{g:'<line x1="8" y1="78" x2="112" y2="78" class="fl"/><path d="M30 46 Q40 34 52 42" class="mo"/><path d="M38 38 Q48 26 60 34" class="mo"/>',
-  h:[22,64],l:[[[28,66],[62,70]],[[62,70],[76,52],[86,74]],[[32,67],[42,58],[52,66]]]}
-};
-function fig(id){
-  const f=FIG[id]; if(!f) return "";
-  const l=(f.l||[]).map(p=>`<polyline points="${p.map(q=>q.join(",")).join(" ")}" class="bd"/>`).join("");
-  const h=f.h?`<circle cx="${f.h[0]}" cy="${f.h[1]}" r="6" class="bd"/>`:"";
-  return `<svg viewBox="0 0 120 90" class="fig">${f.g||""}${h}${l}</svg>`;
-}
-
 const CHECKS=[
  {k:"straddle",label:"開脚幅（かかとの内側どうしの距離）",unit:"cm",hint:"壁にお尻と背中をつけて座り、開けるところまで開いて測る",type:"number"},
  {k:"baddha",label:"合蹠・膝の高さ（床から膝の最高点）",unit:"cm",hint:"足裏を合わせて座り、膝が床から何cm浮いているか",type:"number"},
@@ -269,7 +197,7 @@ const CHECKS=[
 
 /* ===================== 保存 ===================== */
 const KEY="bmc_stretch_v1";
-const DEF={prep:5,voice:1,beep:1,fig:1};
+const DEF={prep:5,voice:1,beep:1};
 let DB={sessions:[],checks:[],settings:{}};
 try{const r=localStorage.getItem(KEY); if(r) DB=JSON.parse(r);}catch(e){}
 if(!DB.sessions) DB.sessions=[];
@@ -321,7 +249,7 @@ function home(){
     <button class="card" onclick="go('log')"><div class="t">実施ログ・データ書き出し</div>
       <div class="d">${DB.sessions.length}件の実施記録 ／ ${DB.checks.length}件のチェック</div></button>
     <button class="card" onclick="go('set')"><div class="t">設定</div>
-      <div class="d">準備時間 ${S().prep?S().prep+"秒":"なし"} ／ 音声 ${S().voice?"あり":"なし"} ／ イラスト ${S().fig?"表示":"非表示"}</div></button>
+      <div class="d">準備時間 ${S().prep?S().prep+"秒":"なし"} ／ 音声 ${S().voice?"あり":"なし"}</div></button>
     <p class="note">下限のルール：疲れている日は「カエルストレッチ＋合蹠前屈」の2種目（2分）だけでも実施とみなします。ゼロにしないことが最優先です。</p>`;
 }
 
@@ -335,15 +263,14 @@ function settings(){
     <select id="s_prep">${[0,3,5,8,10,15,20].map(v=>`<option value="${v}" ${s.prep===v?"selected":""}>${v===0?"なし（すぐ次の種目へ）":v+"秒"}</option>`).join("")}</select>
     <label>音声ガイド<small>種目名・左右・秒数の読み上げ</small></label>${sw("s_voice",s.voice)}
     <label>カウントダウン音<small>残り3秒からのビープ音</small></label>${sw("s_beep",s.beep)}
-    <label>姿勢のイラスト<small>種目ごとの線画を表示します</small></label>${sw("s_fig",s.fig)}
     <button class="btn" onclick="saveSet()">保存する</button>
     <button class="btn ghost" onclick="go('home')">戻る</button>
-    <p class="note">バージョン：v2（2026-07-29）／この表示が出ていれば更新版です。<br>
-    イラストは写真ではなく線画（棒人間）です。おおまかな体の向き・関節の角度をつかむためのもので、細かいフォームは各種目の説明文を優先してください。</p>`;
+    <p class="note">バージョン：v4（2026-08-08）／この表示が出ていれば更新版です。<br>
+    v3で姿勢の線画イラストを削除しました（分かりづらいとのご指摘のため）。フォームは各種目の説明文と「できない・つらいときは」を参照してください。</p>`;
 }
 function saveSet(){
   const g=id=>parseInt(document.getElementById(id).value);
-  DB.settings={prep:g("s_prep"),voice:g("s_voice"),beep:g("s_beep"),fig:g("s_fig")};
+  DB.settings={prep:g("s_prep"),voice:g("s_voice"),beep:g("s_beep")};
   save(); go("home");
 }
 
@@ -446,9 +373,6 @@ function paint(){
   R("rcount").textContent=(idx+1)+" / "+P[cur].steps.length;
   const nx=P[cur].steps[idx+1];
   R("rnext").textContent=nx?"次：" + nx.n + (nx.side?"（"+nx.side+"）":""):"最後の種目です";
-  const box=R("rfig");
-  if(S().fig){ box.innerHTML=fig(st.f); box.style.display="block"; }
-  else { box.innerHTML=""; box.style.display="none"; }
 }
 function step(){
   const st=P[cur].steps[idx];
@@ -511,9 +435,11 @@ function togglePause(){
 function finish(){
   const sec=Math.round((Date.now()-startT)/1000);
   DB.sessions.push({date:today(),prog:P[cur].name,done:idx+1,total:P[cur].steps.length,sec});
-  save(); say("おつかれさまでした");
-  close_();
-  setTimeout(()=>alert("完了：" + P[cur].name + "\n" + (idx+1) + "/" + P[cur].steps.length + "種目 ・ " + fmt(sec)),120);
+  save();
+  close_(true);                 /* v4: 完了の読み上げを打ち切らない */
+  chimeDone();                  /* v4: 完了チャイム（音声オフでも鳴る） */
+  say("ストレッチ完了です。おつかれさまでした。");
+  setTimeout(()=>alert("完了：" + P[cur].name + "\n" + (idx+1) + "/" + P[cur].steps.length + "種目 ・ " + fmt(sec)),900);
 }
 function quit(){
   if(idx>0 && !confirm("中断しますか？（ここまでの分を記録します）")) return;
@@ -524,9 +450,9 @@ function quit(){
   }
   close_();
 }
-function close_(){
+function close_(keepSpeech){
   clearInterval(tid);
-  try{ speechSynthesis.cancel(); }catch(e){}
+  if(!keepSpeech){ try{ speechSynthesis.cancel(); }catch(e){} }
   R("runner").style.display="none";
   document.body.style.overflow="";
   try{wake&&wake.release();wake=null;}catch(e){}
@@ -535,6 +461,12 @@ function close_(){
 
 /* 音声・ビープ */
 let ac=null;
+/* v4: 完了チャイム。種目の切り替え音（単発880Hz）と区別できる上昇3音。
+   設定の読み上げ／ビープをどちらもオフにしていても必ず鳴らす（完了に気づけない、というご指摘への対応） */
+function chimeDone(){
+  const seq=[[784,.22,0],[988,.22,240],[1319,.55,480]];
+  seq.forEach(function(s){ setTimeout(function(){ beep(s[0],s[1]); }, s[2]); });
+}
 function beep(f,d){
   try{
     ac=ac||new (window.AudioContext||window.webkitAudioContext)();
