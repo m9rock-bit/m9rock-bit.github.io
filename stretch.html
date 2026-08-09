@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Stretch">
+<meta name="theme-color" content="#12151c">
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'%3E%3Crect width='180' height='180' rx='40' fill='%2312151c'/%3E%3Cpath d='M90 34c9 0 16 7 16 16s-7 16-16 16-16-7-16-16 7-16 16-16z' fill='%237fd1c1'/%3E%3Cpath d='M90 72c-6 0-11 4-13 10l-9 30-22 22a9 9 0 1 0 13 13l25-25 6-19 6 19 25 25a9 9 0 1 0 13-13l-22-22-9-30c-2-6-7-10-13-10z' fill='%237fd1c1'/%3E%3C/svg%3E">
+<title>B.M.C. ストレッチ</title>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0}
+body{
+  background:#12151c;color:#e8ecf2;
+  font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif;
+  padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+  -webkit-user-select:none;user-select:none;
+}
+.wrap{max-width:560px;margin:0 auto;padding:16px 16px 40px}
+h1{font-size:19px;margin:4px 0 2px;letter-spacing:.02em}
+.sub{color:#8a94a6;font-size:12.5px;margin:0 0 18px;line-height:1.6}
+.card{
+  background:#1a1f29;border:1px solid #262d3a;border-radius:14px;
+  padding:15px 16px;margin-bottom:11px;display:block;width:100%;text-align:left;
+  color:inherit;font:inherit;cursor:pointer;transition:transform .08s;
+}
+.card:active{transform:scale(.985)}
+.card .t{font-size:16px;font-weight:600;display:flex;align-items:center;gap:9px}
+.card .d{font-size:12.5px;color:#8a94a6;margin-top:5px;line-height:1.55}
+.badge{font-size:11px;background:#232b38;color:#9fb0c8;border-radius:6px;padding:2px 7px;font-weight:500}
+.badge.hot{background:#3a2620;color:#f0a68a}
+.badge.core{background:#1e3b36;color:#7fd1c1}
+.sec{font-size:12px;color:#6f7a8c;margin:22px 0 9px;letter-spacing:.06em}
+.btn{
+  display:block;width:100%;padding:15px;border-radius:12px;border:none;
+  background:#7fd1c1;color:#10161c;font-size:16px;font-weight:700;
+  font-family:inherit;cursor:pointer;margin-top:10px;
+}
+.btn.ghost{background:#232b38;color:#cbd5e3;font-weight:600}
+.btn.sm{padding:11px;font-size:14px}
+.row{display:flex;gap:9px}
+.row>*{flex:1}
+
+/* runner */
+#runner{display:none;position:fixed;inset:0;background:#12151c;z-index:10;overflow-y:auto}
+.rwrap{max-width:560px;margin:0 auto;padding:calc(env(safe-area-inset-top) + 12px) 16px calc(env(safe-area-inset-bottom) + 20px)}
+.rtop{display:flex;justify-content:space-between;align-items:center;font-size:12.5px;color:#8a94a6}
+.xbtn{background:none;border:none;color:#8a94a6;font-size:22px;line-height:1;padding:4px 8px;cursor:pointer}
+.prog{height:4px;background:#232b38;border-radius:3px;margin:12px 0 22px;overflow:hidden}
+.prog i{display:block;height:100%;background:#7fd1c1;width:0;transition:width .3s}
+.exname{font-size:25px;font-weight:700;line-height:1.35;margin:0 0 6px}
+.side{display:inline-block;font-size:13px;font-weight:700;background:#7fd1c1;color:#10161c;border-radius:6px;padding:3px 10px;margin-bottom:10px}
+.side.none{display:none}
+.timer{font-size:76px;font-weight:200;text-align:center;font-variant-numeric:tabular-nums;margin:14px 0 4px;letter-spacing:-.03em}
+.timer.warn{color:#f0a68a}
+.next{text-align:center;color:#6f7a8c;font-size:12.5px;min-height:18px;margin-bottom:20px}
+.how{background:#1a1f29;border:1px solid #262d3a;border-radius:12px;padding:14px;font-size:14px;line-height:1.75;color:#c8d2e0}
+.ease{margin-top:9px;border:1px solid #2f2a24;background:#1f1c19;border-radius:12px;padding:0 14px;overflow:hidden}
+.ease summary{cursor:pointer;font-size:13.5px;font-weight:600;color:#f0c08a;padding:12px 0;list-style:none}
+.ease summary::-webkit-details-marker{display:none}
+.ease p{font-size:13.5px;line-height:1.75;color:#d8c9b4;margin:0 0 13px}
+.ctrl{display:flex;gap:9px;margin-top:18px}
+.ctrl button{
+  flex:1;padding:15px 0;border-radius:12px;border:none;background:#232b38;color:#cbd5e3;
+  font-size:15px;font-weight:600;font-family:inherit;cursor:pointer
+}
+.ctrl button.main{flex:1.6;background:#7fd1c1;color:#10161c;font-weight:700}
+
+/* forms */
+label{display:block;font-size:13.5px;color:#c8d2e0;margin:15px 0 6px;line-height:1.5}
+label small{display:block;color:#6f7a8c;font-size:11.5px;margin-top:3px}
+input,select{
+  width:100%;padding:13px;border-radius:10px;border:1px solid #2c3441;
+  background:#12161d;color:#e8ecf2;font-size:16px;font-family:inherit
+}
+.log{font-size:13px;color:#a8b4c6;line-height:1.7;border-bottom:1px solid #232b38;padding:11px 0}
+.log b{color:#e8ecf2;font-weight:600}
+.streak{font-size:38px;font-weight:700;color:#7fd1c1;line-height:1}
+.note{font-size:12px;color:#6f7a8c;line-height:1.7;margin-top:14px}
+textarea{width:100%;height:150px;background:#12161d;color:#a8b4c6;border:1px solid #2c3441;border-radius:10px;padding:11px;font-size:11px;font-family:ui-monospace,Menlo,monospace}
+.phase{text-align:center;font-size:13.5px;font-weight:700;color:#f0c08a;margin:6px 0 -4px;line-height:1.5}
+.phase.hide{display:none}
+.timer.prep{color:#f0c08a;font-weight:300}
+.warnbox{background:#2a1d18;border:1px solid #4a3226;border-radius:12px;padding:14px;font-size:13px;line-height:1.75;color:#f0c9b4;margin-bottom:14px}
+.warnbox b{color:#ffb995}
+.hide{display:none}
+</style>
+</head>
+<body>
+
+<div id="app" class="wrap"></div>
+
+<div id="runner"><div class="rwrap">
+  <div class="rtop">
+    <button class="xbtn" onclick="quit()">✕</button>
+    <span id="rname"></span>
+    <span id="rcount"></span>
+  </div>
+  <div class="prog"><i id="rbar"></i></div>
+  <div id="rside" class="side none"></div>
+  <h2 id="rex" class="exname"></h2>
+  <div id="rphase" class="phase hide"></div>
+  <div id="rtimer" class="timer">0:00</div>
+  <div id="rnext" class="next"></div>
+  <div id="rhow" class="how"></div>
+  <details class="ease"><summary>できない・つらいときは（緩和措置）</summary><p id="rease"></p></details>
+  <div class="ctrl">
+    <button onclick="jump(-1)">◀ 戻る</button>
+    <button class="main" id="rpause" onclick="togglePause()">一時停止</button>
+    <button onclick="jump(1)">スキップ ▶</button>
+  </div>
+</div></div>
+
+<script>
+/* ===================== プログラムデータ ===================== */
+const P = {
+A:{name:"朝の始動",time:"5分",tag:"ジム運動前",cls:"",
+   desc:"動的ストレッチ。ここで柔軟性を伸ばそうとせず、関節を温めて怪我を防ぐのが目的。",
+   steps:[
+ {n:"足首まわし＋その場カーフ",f:"calf",s:15,side:"右",how:"片脚ずつつま先立ちになり、足首を大きく10回まわす。",ease:"壁に手をついて支える。"},
+ {n:"足首まわし＋その場カーフ",f:"calf",s:15,side:"左",how:"反対側も同じ。",ease:"壁に手をついて支える。"},
+ {n:"90/90 ヒップスイッチ",f:"hip9090",s:60,side:null,how:"床に座り両膝を90度に開いて片側に倒す→反対側へ。ゆっくり10往復。股関節の内旋と外旋を両方使う。",ease:"手を後ろについて上体を支える。可動範囲を半分にしてよい。"},
+ {n:"レッグスイング（前後）",f:"swingFB",s:20,side:"右",how:"壁に手をつき、脚を前後に振る。最後に力を入れず、振り子のように。",ease:"振り幅を膝の高さまでに抑える。"},
+ {n:"レッグスイング（前後）",f:"swingFB",s:20,side:"左",how:"反対側も同じ。",ease:"振り幅を小さく。"},
+ {n:"レッグスイング（左右）",f:"swingLR",s:20,side:"右",how:"同じ姿勢で脚を体の前で左右に振る。内ももの動的な準備。",ease:"振り幅を小さく。"},
+ {n:"レッグスイング（左右）",f:"swingLR",s:20,side:"左",how:"反対側も同じ。",ease:"振り幅を小さく。"},
+ {n:"ワールドグレイテストストレッチ",f:"wgs",s:30,side:"右",how:"大きく前に踏み込み、前脚の内側に両手をつく。前脚側の手を天井へ開いて胸を回旋。3回。",ease:"後ろ膝を床につける。回旋は肘を天井に向ける程度でよい。"},
+ {n:"ワールドグレイテストストレッチ",f:"wgs",s:30,side:"左",how:"反対側も同じ。",ease:"後ろ膝を床につける。"},
+ {n:"立位ヒップサークル",f:"hipcircle",s:15,side:"右",how:"膝を腰の高さに上げ、外→後ろへ大きくまわす。8回。",ease:"壁に手をつく。円を小さく。"},
+ {n:"立位ヒップサークル",f:"hipcircle",s:15,side:"左",how:"反対側も同じ。",ease:"壁に手をつく。"},
+ {n:"アームサークル",f:"armcircle",s:20,side:null,how:"腕を大きく前まわし10回、後ろまわし10回。",ease:"小さくてよい。"},
+ {n:"壁スライド",f:"wallslide",s:20,side:null,how:"壁に背中と腕をつけ、腕を上下にスライド10回。肩の可動域の準備。",ease:"壁につかず、その場で万歳の上げ下げ。"}
+]},
+B:{name:"サウナ座位",time:"5分",tag:"サウナ室内",cls:"hot",
+   desc:"座ったまま完結する軽めの静的ストレッチ。肩の左右差の是正と合蹠の準備が目的。",
+   warn:true,
+   steps:[
+ {n:"首の側屈",f:"neckside",s:20,side:"右へ倒す",how:"座って片手で反対側の頭を軽く倒す。引っ張らず、頭の重みだけ。",ease:"手は添えず、頭の重みだけで倒す。"},
+ {n:"首の側屈",f:"neckside",s:20,side:"左へ倒す",how:"反対側も同じ。",ease:"手を添えない。"},
+ {n:"首の回旋",f:"neckrot",s:20,side:"右",how:"顎を軽く引き、ゆっくり右を向いて止まる。",ease:"可動域の半分で止める。"},
+ {n:"首の回旋",f:"neckrot",s:20,side:"左",how:"反対側も同じ。",ease:"可動域の半分で止める。"},
+ {n:"牛の顔・腕 ★苦手な側",f:"gomuarm",s:30,side:"左手が上・右手が下",how:"背中で上下から手を近づける。届かなくてよい。これが今いちばん硬い組み合わせ。",ease:"タオルを縦に垂らして両手で持つ。指が届かなくても効果は同じ。"},
+ {n:"牛の顔・腕",f:"gomuarm",s:30,side:"右手が上・左手が下",how:"できる側。左右のバランスを取るため両方やる。",ease:"タオルを使う。"},
+ {n:"座位ツイスト",f:"sittwist",s:20,side:"右",how:"骨盤は正面のまま、上体だけ回して止まる。",ease:"手を膝に置いて軽く支える。"},
+ {n:"座位ツイスト",f:"sittwist",s:20,side:"左",how:"反対側も同じ。",ease:"手を膝に置く。"},
+ {n:"合蹠（座位）",f:"baddhaSit",s:40,side:null,how:"足裏どうしを合わせ、かかとを体から少し離した位置に。背すじを伸ばし、膝は自然に落とす。",ease:"膝を手で押さないこと。かかとをさらに前に置くと楽になる。"},
+ {n:"座位フィギュア4",f:"fig4sit",s:30,side:"右足首を左膝へ",how:"足首を反対の膝の上に乗せ、背すじを伸ばしたまま軽く前傾。お尻の外側＝牛の顔の脚の準備。",ease:"前傾せず、乗せるだけでもよい。"},
+ {n:"座位フィギュア4",f:"fig4sit",s:30,side:"左足首を右膝へ",how:"反対側も同じ。",ease:"乗せるだけでよい。"}
+]},
+C:{name:"夜の基本",time:"5分",tag:"就寝前・毎日",cls:"core",
+   desc:"柔軟性向上の主役。ストレッチポールを使用。これを毎日の基準にする。",
+   steps:[
+ {n:"ポール：内ももローリング",f:"poleInner",s:30,side:"右",how:"うつ伏せで片脚を横に開き、内ももをポールに乗せる。膝上〜股関節の間を体重をかけてゆっくり往復。",ease:"体重を抜いて軽く当てるだけ。痛い一点で止めて呼吸する方法でもよい。"},
+ {n:"ポール：内ももローリング",f:"poleInner",s:30,side:"左",how:"反対側も同じ。",ease:"体重を抜く。"},
+ {n:"カエルストレッチ ★開脚の主役",f:"frog",s:60,side:null,how:"四つ這いから両膝を左右に開き、すねを床につけ、つま先は外向き。お尻を後ろに引いて止まる。呼吸を止めない。",ease:"膝が痛ければ膝の下にタオル。幅を狭くする。お尻を引く量を減らす。"},
+ {n:"合蹠前屈（バッダコナーサナ）",f:"baddhaFwd",s:60,side:null,how:"足裏を合わせて座り、背すじを伸ばしたまま股関節から前に倒す。背中を丸めない。",ease:"お尻の下に折りたたんだタオルを敷くと骨盤が立って一気に楽になる。膝の下にクッション。前傾せず座るだけでも可。"},
+ {n:"仰向けフィギュア4",f:"fig4sup",s:30,side:"右足首を左膝へ",how:"仰向けで片足首を反対の膝に乗せ、下の太ももを両手で胸に引き寄せる。お尻の外側＝牛の顔の脚。",ease:"頭は床につけたまま。タオルを太ももに回して引く。"},
+ {n:"仰向けフィギュア4",f:"fig4sup",s:30,side:"左足首を右膝へ",how:"反対側も同じ。",ease:"タオルで引く。"},
+ {n:"開脚前屈",f:"straddle",s:60,side:null,how:"開ける角度で開脚し、背すじを伸ばしたまま股関節から前傾。つま先は天井向き、膝は伸ばしすぎない。",ease:"お尻の下にタオル。壁にお尻と背中をつけて座り、前傾なしで開くだけでもよい。"}
+]},
+D:{name:"夜のフル",time:"15分",tag:"就寝前・余裕のある日",cls:"",
+   desc:"ほぐし＋伸ばし＋入眠のためのリラックス。終わったらそのまま音声に切り替えて布団へ。",
+   steps:[
+ {n:"ポール：基本ポジション",f:"poleBasic",s:60,side:null,how:"ポールを背骨に沿わせて仰向けに乗り、腕を横に広げて脱力。胸が開く。",ease:"頭が乗らなければ枕を足す。膝を立てる。"},
+ {n:"ポール：内ももローリング",f:"poleInner",s:30,side:"右",how:"うつ伏せで片脚を横に開き、内ももを往復。",ease:"体重を抜く。"},
+ {n:"ポール：内ももローリング",f:"poleInner",s:30,side:"左",how:"反対側も同じ。",ease:"体重を抜く。"},
+ {n:"ポール：お尻・外もも",f:"poleGlute",s:30,side:"右",how:"横向きで骨盤の少し下〜太もも外側をポールに乗せて往復。牛の顔の脚の準備。",ease:"反対の脚を前について体重を分散。"},
+ {n:"ポール：お尻・外もも",f:"poleGlute",s:30,side:"左",how:"反対側も同じ。",ease:"体重を分散。"},
+ {n:"ポール：脇の下・広背筋",f:"poleLat",s:30,side:"右",how:"横向きで脇の下をポールに乗せ、小さく往復。牛の顔の腕（上側）の準備。",ease:"体重を軽く。"},
+ {n:"ポール：脇の下・広背筋",f:"poleLat",s:30,side:"左",how:"反対側も同じ。",ease:"体重を軽く。"},
+ {n:"カエルストレッチ ★開脚の主役",f:"frog",s:90,side:null,how:"四つ這いから両膝を左右に開き、すねを床に、つま先は外向き。お尻を後ろに引いて止まる。",ease:"膝下にタオル。幅を狭く。引く量を減らす。"},
+ {n:"合蹠前屈（バッダコナーサナ）",f:"baddhaFwd",s:60,side:null,how:"足裏を合わせ、背すじを伸ばしたまま股関節から前傾。",ease:"お尻の下にタオル。膝の下にクッション。"},
+ {n:"開脚前屈",f:"straddle",s:90,side:null,how:"開ける角度で開脚し、背すじを伸ばしたまま前傾。膝は伸ばしすぎない。",ease:"お尻の下にタオル。壁に背をつけて座るだけでもよい。"},
+ {n:"仰向けフィギュア4",f:"fig4sup",s:30,side:"右足首を左膝へ",how:"下の太ももを両手で胸へ引き寄せる。",ease:"タオルで引く。"},
+ {n:"仰向けフィギュア4",f:"fig4sup",s:30,side:"左足首を右膝へ",how:"反対側も同じ。",ease:"タオルで引く。"},
+ {n:"牛の顔・脚",f:"gomuleg",s:30,side:"右膝が上",how:"座って膝を上下に重ね、足は左右のお尻の外側へ。",ease:"重ならなくてよい。上の膝をできるだけ中央へ寄せて座るだけでOK。お尻が浮くならお尻の下にタオルを敷いて水平を作る。"},
+ {n:"牛の顔・脚",f:"gomuleg",s:30,side:"左膝が上",how:"反対側も同じ。",ease:"お尻の下にタオル。"},
+ {n:"牛の顔・腕 ★苦手な側",f:"gomuarm",s:30,side:"左手が上・右手が下",how:"背中で上下から手を近づける。",ease:"タオルを縦に垂らして両手で持つ。"},
+ {n:"牛の顔・腕",f:"gomuarm",s:30,side:"右手が上・左手が下",how:"できる側。",ease:"タオルを使う。"},
+ {n:"仰向けねじり",f:"suptwist",s:45,side:"右へ倒す",how:"仰向けで両膝を揃えて片側に倒し、顔は反対へ。力を抜いて呼吸。",ease:"膝の下にクッション。"},
+ {n:"仰向けねじり",f:"suptwist",s:45,side:"左へ倒す",how:"反対側も同じ。",ease:"膝の下にクッション。"},
+ {n:"壁に脚を上げる",f:"legswall",s:60,side:null,how:"壁にお尻を近づけて仰向けになり、脚を壁に立てかけて脱力。",ease:"お尻を壁から離す。脚を軽く曲げる。"},
+ {n:"長い呼気の呼吸",f:"breath",s:90,side:null,how:"仰向けのまま、4秒吸って8秒吐くを7〜8回。吐く時間を長くするのが副交感神経を優位にするポイント。",ease:"4秒吸って6秒吐くに短縮してよい。"}
+]}};
+
+const CHECKS=[
+ {k:"straddle",label:"開脚幅（かかとの内側どうしの距離）",unit:"cm",hint:"壁にお尻と背中をつけて座り、開けるところまで開いて測る",type:"number"},
+ {k:"baddha",label:"合蹠・膝の高さ（床から膝の最高点）",unit:"cm",hint:"足裏を合わせて座り、膝が床から何cm浮いているか",type:"number"},
+ {k:"gomu_leg_r",label:"牛の顔・脚（右膝が上）",type:"select",opts:["0：膝が重ならない","1：重なるがお尻が浮く","2：重なってお尻も床につく"]},
+ {k:"gomu_leg_l",label:"牛の顔・脚（左膝が上）",type:"select",opts:["0：膝が重ならない","1：重なるがお尻が浮く","2：重なってお尻も床につく"]},
+ {k:"gomu_arm_r",label:"牛の顔・腕（右手が上）指先の距離",unit:"cm",hint:"触れていれば0、重なっていればマイナスで",type:"number"},
+ {k:"gomu_arm_l",label:"牛の顔・腕（左手が上）指先の距離",unit:"cm",hint:"こちらが苦手な側",type:"number"},
+ {k:"forward",label:"前屈",type:"select",opts:["0：指先が床","1：手のひらが床","2：拳が床"]}
+];
+
+/* ===================== 保存 ===================== */
+const KEY="bmc_stretch_v1";
+const DEF={prep:5,voice:1,beep:1};
+let DB={sessions:[],checks:[],settings:{}};
+try{const r=localStorage.getItem(KEY); if(r) DB=JSON.parse(r);}catch(e){}
+if(!DB.sessions) DB.sessions=[];
+if(!DB.checks) DB.checks=[];
+DB.settings=Object.assign({},DEF,DB.settings||{});
+const S=()=>DB.settings;
+function save(){try{localStorage.setItem(KEY,JSON.stringify(DB));}catch(e){alert("端末に保存できませんでした。記録画面から書き出して保管してください。");}}
+const today=()=>new Date().toLocaleDateString("sv-SE");
+const fmt=s=>Math.floor(s/60)+":"+String(Math.floor(s%60)).padStart(2,"0");
+
+function streak(){
+  const days=[...new Set(DB.sessions.map(s=>s.date))].sort().reverse();
+  if(!days.length) return 0;
+  let n=0, d=new Date();
+  if(days[0]!==today()){ d.setDate(d.getDate()-1); if(days[0]!==d.toLocaleDateString("sv-SE")) return 0; }
+  for(const day of days){
+    if(day===d.toLocaleDateString("sv-SE")){ n++; d.setDate(d.getDate()-1); } else break;
+  }
+  return n;
+}
+
+/* ===================== 画面 ===================== */
+const app=document.getElementById("app");
+let view="home";
+function go(v){view=v;render();window.scrollTo(0,0);}
+
+function render(){
+  if(view==="home") return home();
+  if(view==="check") return check();
+  if(view==="log") return log();
+  if(view==="set") return settings();
+}
+
+function home(){
+  const n=DB.sessions.filter(s=>s.date===today()).length;
+  app.innerHTML=`
+    <h1>B.M.C. ストレッチ</h1>
+    <p class="sub">目標：180度開脚 ／ 合蹠で膝を床へ ／ 牛の顔のポーズ<br>
+    連続 <b style="color:#7fd1c1">${streak()}</b> 日 ・ 今日 ${n} 回実施</p>
+    <div class="sec">プログラム</div>
+    ${Object.keys(P).map(k=>{const p=P[k];return `
+      <button class="card" onclick="start('${k}')">
+        <div class="t">${p.name}<span class="badge ${p.cls}">${p.time}</span><span class="badge">${p.tag}</span></div>
+        <div class="d">${p.desc}</div>
+      </button>`}).join("")}
+    <div class="sec">記録</div>
+    <button class="card" onclick="go('check')"><div class="t">週1回のセルフチェック</div>
+      <div class="d">${DB.checks.length?"前回："+DB.checks[DB.checks.length-1].date:"まだ記録がありません"} ・ 日曜の夜、体が冷えているときに測る</div></button>
+    <button class="card" onclick="go('log')"><div class="t">実施ログ・データ書き出し</div>
+      <div class="d">${DB.sessions.length}件の実施記録 ／ ${DB.checks.length}件のチェック</div></button>
+    <button class="card" onclick="go('set')"><div class="t">設定</div>
+      <div class="d">準備時間 ${S().prep?S().prep+"秒":"なし"} ／ 音声 ${S().voice?"あり":"なし"}</div></button>
+    <p class="note">下限のルール：疲れている日は「カエルストレッチ＋合蹠前屈」の2種目（2分）だけでも実施とみなします。ゼロにしないことが最優先です。</p>`;
+}
+
+function settings(){
+  const s=S(), sw=(id,v)=>`<select id="${id}"><option value="1" ${v?"selected":""}>あり</option><option value="0" ${v?"":"selected"}>なし</option></select>`;
+  app.innerHTML=`
+    <h1>設定</h1>
+    <p class="sub">変更は「保存する」を押した時点から、次に始めるプログラムに反映されます。</p>
+    <label>次のポーズへの準備時間
+      <small>種目と種目の間に入る、次のポーズを読み上げて体勢を作るための時間です</small></label>
+    <select id="s_prep">${[0,3,5,8,10,15,20].map(v=>`<option value="${v}" ${s.prep===v?"selected":""}>${v===0?"なし（すぐ次の種目へ）":v+"秒"}</option>`).join("")}</select>
+    <label>音声ガイド<small>種目名・左右・秒数の読み上げ</small></label>${sw("s_voice",s.voice)}
+    <label>カウントダウン音<small>残り3秒からのビープ音</small></label>${sw("s_beep",s.beep)}
+    <button class="btn" onclick="saveSet()">保存する</button>
+    <button class="btn ghost" onclick="go('home')">戻る</button>
+    <p class="note">バージョン：v4（2026-08-08）／この表示が出ていれば更新版です。<br>
+    v3で姿勢の線画イラストを削除しました（分かりづらいとのご指摘のため）。フォームは各種目の説明文と「できない・つらいときは」を参照してください。</p>`;
+}
+function saveSet(){
+  const g=id=>parseInt(document.getElementById(id).value);
+  DB.settings={prep:g("s_prep"),voice:g("s_voice"),beep:g("s_beep")};
+  save(); go("home");
+}
+
+function check(){
+  const last=DB.checks[DB.checks.length-1];
+  app.innerHTML=`
+    <h1>セルフチェック</h1>
+    <p class="sub">プログラムをやる前・体が冷えている状態で測ってください。温まった後だと数値が良く出て、比較できなくなります。</p>
+    ${CHECKS.map(c=>`
+      <label>${c.label}${c.unit?"（"+c.unit+"）":""}
+        ${c.hint?`<small>${c.hint}</small>`:""}</label>
+      ${c.type==="number"
+        ? `<input type="number" inputmode="decimal" step="0.5" id="c_${c.k}" value="${last&&last.v[c.k]!=null?last.v[c.k]:""}" placeholder="${last&&last.v[c.k]!=null?"前回 "+last.v[c.k]:""}">`
+        : `<select id="c_${c.k}">${c.opts.map((o,i)=>`<option value="${i}" ${last&&String(last.v[c.k])===String(i)?"selected":""}>${o}</option>`).join("")}</select>`}
+    `).join("")}
+    <label>メモ（任意）</label><input id="c_memo" placeholder="体調・気づいたことなど">
+    <button class="btn" onclick="saveCheck()">保存する</button>
+    <button class="btn ghost" onclick="go('home')">戻る</button>`;
+}
+function saveCheck(){
+  const v={};
+  CHECKS.forEach(c=>{const e=document.getElementById("c_"+c.k);
+    v[c.k]=c.type==="number"?(e.value===""?null:parseFloat(e.value)):parseInt(e.value);});
+  DB.checks.push({date:today(),v,memo:document.getElementById("c_memo").value});
+  save(); alert("保存しました"); go("home");
+}
+
+function log(){
+  const s=[...DB.sessions].reverse().slice(0,40);
+  app.innerHTML=`
+    <h1>記録</h1>
+    <div style="display:flex;gap:22px;align-items:baseline;margin:14px 0 6px">
+      <div><div class="streak">${streak()}</div><div class="sub" style="margin:2px 0 0">連続日数</div></div>
+      <div><div class="streak">${DB.sessions.length}</div><div class="sub" style="margin:2px 0 0">通算</div></div>
+      <div><div class="streak">${DB.sessions.filter(x=>x.date>=new Date(Date.now()-6048e5).toLocaleDateString("sv-SE")).length}</div><div class="sub" style="margin:2px 0 0">直近7日</div></div>
+    </div>
+    <div class="sec">セルフチェックの推移</div>
+    ${DB.checks.length?DB.checks.slice().reverse().slice(0,8).map(c=>
+      `<div class="log"><b>${c.date}</b> 開脚 ${c.v.straddle??"-"}cm ／ 合蹠 ${c.v.baddha??"-"}cm ／ 牛の顔・脚 右${c.v.gomu_leg_r??"-"}・左${c.v.gomu_leg_l??"-"}${c.memo?"<br>"+c.memo:""}</div>`
+    ).join(""):`<p class="sub">まだありません</p>`}
+    <div class="sec">実施ログ</div>
+    ${s.length?s.map(x=>`<div class="log"><b>${x.date}</b> ${x.prog}（${x.done}/${x.total}種目・${fmt(x.sec)}）</div>`).join(""):`<p class="sub">まだありません</p>`}
+    <div class="sec">データ書き出し</div>
+    <p class="sub">下のテキストをコピーして、Obsidianのノートに貼り付けてください。次のプログラム提案に使います。</p>
+    <textarea id="dump" readonly>${JSON.stringify(DB)}</textarea>
+    <div class="row">
+      <button class="btn sm" onclick="copyAll()">コピー</button>
+      <button class="btn sm ghost" onclick="dl()">ファイルで保存</button>
+    </div>
+    <button class="btn ghost" onclick="go('home')">戻る</button>
+    <p class="note">記録はこの端末のブラウザ内に保存されています。定期的に書き出して保管してください。</p>`;
+}
+function copyAll(){
+  const t=document.getElementById("dump");
+  t.removeAttribute("readonly");
+  t.select(); t.setSelectionRange(0,999999);
+  let ok=false;
+  try{ ok=document.execCommand("copy"); }catch(e){}
+  t.setAttribute("readonly","");
+  const done=r=>alert(r?"コピーしました":"コピーできませんでした。テキストを長押しして選択・コピーしてください");
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(t.value).then(()=>done(true),()=>done(ok));
+  } else done(ok);
+}
+function dl(){
+  const b=new Blob([JSON.stringify(DB,null,1)],{type:"application/json"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(b); a.download="stretch_"+today()+".json"; a.click();
+}
+
+/* ===================== タイマー ===================== */
+let cur=null,idx=0,left=0,tid=null,paused=false,startT=0,wake=null,phase="work";
+const R=id=>document.getElementById(id);
+
+function start(k){
+  if(P[k].warn && !confirm(
+    "【サウナ内での注意】\n\n"+
+    "・最大の70%で止める（痛気持ちいいの手前）。熱で痛みを感じにくく、伸ばしすぎやすい\n"+
+    "・必ず下段に座り、入室してすぐの前半に行う\n"+
+    "・5分を超えて続けない\n"+
+    "・入る前に水分を摂る\n"+
+    "・めまい・吐き気・動悸・ふらつきが出たら即中止して退室\n\n"+
+    "確認して開始しますか？")) return;
+  cur=k; idx=0; paused=false; startT=Date.now();
+  R("runner").style.display="block";
+  R("rname").textContent=P[k].name;
+  R("rpause").textContent="一時停止";
+  document.body.style.overflow="hidden";
+  try{ speechSynthesis.cancel(); }catch(e){}
+  navigator.wakeLock?.request("screen").then(w=>wake=w).catch(()=>{});
+  step();
+}
+function paint(){
+  const st=P[cur].steps[idx];
+  R("rex").textContent=st.n;
+  const sd=R("rside");
+  if(st.side){sd.textContent=st.side;sd.className="side";}else{sd.className="side none";}
+  R("rhow").textContent=st.how;
+  R("rease").textContent=st.ease;
+  R("rcount").textContent=(idx+1)+" / "+P[cur].steps.length;
+  const nx=P[cur].steps[idx+1];
+  R("rnext").textContent=nx?"次：" + nx.n + (nx.side?"（"+nx.side+"）":""):"最後の種目です";
+}
+function step(){
+  const st=P[cur].steps[idx];
+  paint();
+  if(S().prep>0){
+    phase="prep"; left=S().prep;
+    R("rphase").textContent="準備 ・ このあと "+st.s+"秒";
+    R("rphase").className="phase";
+    say("次は、"+st.n.replace("★苦手な側","")+(st.side?"、"+st.side:"")+"。"+st.s+"秒。準備してください");
+  }else{
+    phase="work"; left=st.s;
+    R("rphase").className="phase hide";
+    say(st.n.replace("★苦手な側","")+(st.side?"、"+st.side:"")+"、"+st.s+"秒");
+  }
+  tick(true);
+  clearInterval(tid);
+  tid=setInterval(()=>{ if(!paused){ left--; tick(); } },1000);
+}
+function toWork(){
+  const st=P[cur].steps[idx];
+  phase="work"; left=st.s;
+  R("rphase").className="phase hide";
+  beep(880,.18);
+  say("スタート");
+  tick(true);
+}
+function tick(init){
+  const st=P[cur].steps[idx];
+  R("rtimer").textContent=fmt(Math.max(left,0));
+  R("rtimer").className="timer"+(phase==="prep"?" prep":(left<=3?" warn":""));
+  const base=phase==="prep"?0:(1-left/st.s);
+  R("rbar").style.width=((idx+base)/P[cur].steps.length*100)+"%";
+  if(init) return;
+  if(S().beep&&(left===3||left===2||left===1)) beep(660,.09);
+  if(left<=0){
+    if(phase==="prep") toWork();
+    else { beep(880,.3); next(); }
+  }
+}
+function next(){
+  clearInterval(tid);
+  if(idx<P[cur].steps.length-1){ idx++; step(); } else finish();
+}
+function jump(d){
+  clearInterval(tid);
+  try{ speechSynthesis.cancel(); }catch(e){}
+  if(d>0&&phase==="prep"){ toWork(); startLoop(); return; }
+  if(d<0&&idx===0){ step(); return; }
+  if(d>0&&idx===P[cur].steps.length-1){ finish(); return; }
+  idx+=d; step();
+}
+function startLoop(){
+  clearInterval(tid);
+  tid=setInterval(()=>{ if(!paused){ left--; tick(); } },1000);
+}
+function togglePause(){
+  paused=!paused;
+  R("rpause").textContent=paused?"再開":"一時停止";
+}
+function finish(){
+  const sec=Math.round((Date.now()-startT)/1000);
+  DB.sessions.push({date:today(),prog:P[cur].name,done:idx+1,total:P[cur].steps.length,sec});
+  save();
+  close_(true);                 /* v4: 完了の読み上げを打ち切らない */
+  chimeDone();                  /* v4: 完了チャイム（音声オフでも鳴る） */
+  say("ストレッチ完了です。おつかれさまでした。");
+  setTimeout(()=>alert("完了：" + P[cur].name + "\n" + (idx+1) + "/" + P[cur].steps.length + "種目 ・ " + fmt(sec)),900);
+}
+function quit(){
+  if(idx>0 && !confirm("中断しますか？（ここまでの分を記録します）")) return;
+  if(idx>0){
+    const sec=Math.round((Date.now()-startT)/1000);
+    DB.sessions.push({date:today(),prog:P[cur].name+"（途中）",done:idx,total:P[cur].steps.length,sec});
+    save();
+  }
+  close_();
+}
+function close_(keepSpeech){
+  clearInterval(tid);
+  if(!keepSpeech){ try{ speechSynthesis.cancel(); }catch(e){} }
+  R("runner").style.display="none";
+  document.body.style.overflow="";
+  try{wake&&wake.release();wake=null;}catch(e){}
+  render();
+}
+
+/* 音声・ビープ */
+let ac=null;
+/* v4: 完了チャイム。種目の切り替え音（単発880Hz）と区別できる上昇3音。
+   設定の読み上げ／ビープをどちらもオフにしていても必ず鳴らす（完了に気づけない、というご指摘への対応） */
+function chimeDone(){
+  const seq=[[784,.22,0],[988,.22,240],[1319,.55,480]];
+  seq.forEach(function(s){ setTimeout(function(){ beep(s[0],s[1]); }, s[2]); });
+}
+function beep(f,d){
+  try{
+    ac=ac||new (window.AudioContext||window.webkitAudioContext)();
+    const o=ac.createOscillator(),g=ac.createGain();
+    o.frequency.value=f;o.connect(g);g.connect(ac.destination);
+    g.gain.setValueAtTime(.18,ac.currentTime);
+    g.gain.exponentialRampToValueAtTime(.001,ac.currentTime+d);
+    o.start();o.stop(ac.currentTime+d);
+  }catch(e){}
+}
+function say(t){
+  try{
+    if(!S().voice) return;
+    const u=new SpeechSynthesisUtterance(t);
+    u.lang="ja-JP";u.rate=1.05;
+    speechSynthesis.speak(u);
+  }catch(e){}
+}
+render();
+</script>
+</body>
+</html>
