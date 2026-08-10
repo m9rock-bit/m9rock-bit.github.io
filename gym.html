@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Gym">
+<meta name="theme-color" content="#12151c">
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'%3E%3Crect width='180' height='180' rx='40' fill='%2312151c'/%3E%3Crect x='30' y='78' width='120' height='24' rx='8' fill='%23e0a86a'/%3E%3Crect x='18' y='62' width='24' height='56' rx='8' fill='%23e0a86a'/%3E%3Crect x='138' y='62' width='24' height='56' rx='8' fill='%23e0a86a'/%3E%3C/svg%3E">
+<title>B.M.C. 筋トレ記録</title>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0}
+body{
+  background:#12151c;color:#e8ecf2;
+  font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif;
+  padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+  -webkit-user-select:none;user-select:none;
+}
+.wrap{max-width:560px;margin:0 auto;padding:16px 16px 44px}
+h1{font-size:19px;margin:4px 0 2px;letter-spacing:.02em}
+h2{font-size:15px;margin:0 0 3px}
+.sub{color:#8a94a6;font-size:12.5px;margin:0 0 16px;line-height:1.65}
+.card{background:#1a1f29;border:1px solid #262d3a;border-radius:14px;padding:15px 16px;margin-bottom:11px}
+.sec{font-size:12px;color:#6f7a8c;margin:24px 0 9px;letter-spacing:.06em}
+.btn{
+  display:block;width:100%;padding:17px;border-radius:12px;border:none;
+  background:#e0a86a;color:#20160c;font-size:17px;font-weight:700;
+  font-family:inherit;cursor:pointer;margin-top:10px;
+}
+.btn.ghost{background:#232b38;color:#cbd5e3;font-weight:600;font-size:14px;padding:12px}
+.btn.link{background:none;color:#8a94a6;font-size:13px;padding:9px;font-weight:500;text-decoration:underline}
+.btn:disabled{opacity:.45}
+.row{display:flex;gap:9px}
+.row>*{flex:1}
+
+.big{font-size:64px;font-weight:200;text-align:center;font-variant-numeric:tabular-nums;margin:6px 0 2px;letter-spacing:-.03em;line-height:1.1}
+.bigsub{text-align:center;color:#8a94a6;font-size:13px;margin-bottom:6px}
+
+.pill{display:inline-block;background:#232b38;border:1px solid #303a4a;border-radius:999px;padding:3px 10px;font-size:12px;color:#cbd5e3;margin-right:6px}
+.prev{color:#8a94a6;font-size:13px;margin-top:5px;line-height:1.6}
+.prev b{color:#cbd5e3;font-weight:600}
+
+.sets{display:flex;gap:7px;margin-top:11px}
+.setb{
+  flex:1;background:#232b38;border:1px solid #303a4a;color:#8a94a6;border-radius:10px;
+  padding:11px 4px;font-size:12.5px;font-family:inherit;cursor:pointer;text-align:center;line-height:1.5;
+}
+.setb.done{background:#2a2418;border-color:#5a4526;color:#e8d9bf}
+.setb b{display:block;font-size:15px;color:inherit;font-weight:700}
+
+.stepper{display:flex;align-items:center;gap:9px;margin-top:8px}
+.stepper button{
+  width:46px;height:46px;border-radius:11px;border:1px solid #303a4a;background:#232b38;
+  color:#cbd5e3;font-size:21px;font-family:inherit;cursor:pointer;flex:none;
+}
+.stepper .val{flex:1;text-align:center;font-size:20px;font-variant-numeric:tabular-nums}
+.stepper .val small{display:block;font-size:11px;color:#6f7a8c;margin-top:2px}
+
+.ex{border-top:1px solid #232b38;padding:13px 2px}
+.ex:first-of-type{border-top:none}
+.ex .t{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.hint{color:#cbd5e3;font-size:12.5px;line-height:1.7;background:#1f1c19;border:1px solid #2f2a24;border-radius:10px;padding:11px 13px;margin-top:11px}
+.note{color:#6f7a8c;font-size:12px;line-height:1.75;margin:10px 0 0}
+label{display:block;font-size:12.5px;color:#8a94a6;margin:12px 0 5px}
+select,input[type=number],input[type=date]{
+  width:100%;background:#12151c;border:1px solid #303a4a;color:#e8ecf2;
+  border-radius:10px;padding:12px;font-size:15px;font-family:inherit;
+}
+textarea{width:100%;height:120px;background:#12151c;border:1px solid #303a4a;color:#8a94a6;border-radius:10px;padding:10px;font-size:11px;font-family:ui-monospace,monospace}
+.hr{height:1px;background:#232b38;margin:22px 0}
+.log{border-top:1px solid #232b38;padding:11px 2px;font-size:13.5px;line-height:1.6}
+.log:first-of-type{border-top:none}
+.log small{color:#8a94a6;display:block;font-size:12px;margin-top:3px}
+/* v2: 経過時間の帯。15分で満たされ、そのあとも色は変えない（超過を赤で見せないため） */
+.bar{height:4px;background:#232b38;border-radius:3px;margin:12px 0 2px;overflow:hidden}
+.bar i{display:block;height:100%;background:#7fd1c1;width:0;transition:width .9s linear}
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+
+<script>
+/* =========================================================================
+   B.M.C. 筋トレ記録（gym.html） v2 — 2026-08-09
+   （v1: 2026-08-09）
+
+   ■ v2 での変更（Manamiさんのご指示・チャット 2026-08-09）
+     > アプリの休憩タイマーが1分に固定になっているが、デフォルト20秒にしてください。
+     > また実行するを押してから、そのプログラム全体をどのくらいの時間で実行しているかを
+     > 計測するタイマー機能を搭載してください。15分で終われるよう、ダラダラやらないため。
+
+     1. 休憩タイマー 60秒固定 → **既定20秒＋その場で変更可**（REST_DEF / DB.settings.rest）。
+        「固定を別の固定に置き換えない」ため、休憩中の画面と種目画面の両方に±ボタンを置き、
+        変えた値がそのまま次回の既定になる。休憩中に変えると動いているカウントにも即反映。
+     2. **全体経過時間タイマー**を追加（機能5）。「◯◯ を始める」を押した時刻から計測し、
+        実施中は常時表示。目安は15分（TARGET_MIN）。所要時間はセッションに記録する。
+
+   ■ 経過時間タイマーで「やらないこと」（fast.html の安全条件と同じ考え方）
+     ・最短記録・自己ベスト・連続達成を作らない
+     ・15分を超えても **色を変えない・バツを出さない・警告音を鳴らさない**
+       （15分は目安であって、達成/未達を判定する基準ではない）
+     ・記録一覧を所要時間で並べ替えない。速い回を強調しない
+     ・**休憩を削って急ぐ動機を作らない。**帯の下に常時その旨を置く。
+       15分をまたいだ瞬間だけ、やわらかい単発音を1回鳴らして終わり（以後は無音）
+     ・フォームを崩して急ぐ理由を作らないため、回数が落ちたら
+       「休憩を延ばす」提案を出す（dropHint。速さと逆方向へ働く安全弁）
+
+   ■ 出所
+     ・種目・重量・回数の初期値は 20_Projects/Private/B.M.C/筋トレプログラム_2026-08-08.md §1
+     ・重さの上げ方（ダブル・プログレッション）は同 §2 変更①
+     ・v1の機能は4つだけ（同 §2 変更② / ヒアリングQ7でご承認済み）
+        1. マシン選択 → 重量・セット記録
+        2. 今日どのルーティン（A/B/C）をやるべきかの表示
+        3. 前回の重量・回数を表示 → 同じならタップ1回で記録
+        4. セット間の休憩タイマー＋終了音
+        5. （v2で追加）全体の経過時間タイマー
+
+   ■ この画面が「やらないこと」（fast.html と同じ方針で揃えています）
+     ・連続日数・自己ベスト・達成バッジを持たない。streak/best は実装しない
+     ・できなかった日を赤やバツで見せない。記録一覧は時系列のみ
+     ・8/31までは「重量を上げなくてよい」期間。上げるべきという催促を出さない
+       （筋トレプログラム §3。減量中に重量が伸びないのは失敗ではない）
+
+   ■ 8/31までの扱い
+     ダブル・プログレッションの判定は内部では常に動かすが、画面に「上げましょう」と
+     出すのは 2026-09-01 以降にする（PROG_FROM）。それまでは静かに数えておくだけ。
+   ========================================================================= */
+
+const KEY="bmc_gym_v1";
+const PROG_FROM=new Date(2026,8,1).getTime();   /* 2026-09-01 から重量アップの案内を出す */
+
+/* ---------- プログラム定義（筋トレプログラム_2026-08-08 §1・§2） ---------- */
+const PROGRAM=[
+  {id:"tri", name:"トライセッププッシュダウン", r:"A", w:6.5,  reps:15, cap:18, step:1.0,  unit:"kg"},
+  {id:"bul", name:"ブルガリアンスクワット",     r:"A", w:12,   reps:10, cap:13, step:2.0,  unit:"kg", memo:"片足ずつ"},
+  {id:"lat", name:"ラットプルダウン",           r:"B", w:28,   reps:12, cap:15, step:2.5,  unit:"kg"},
+  {id:"add", name:"ヒップアダクション",         r:"B", w:29,   reps:8,  cap:12, step:2.5,  unit:"kg",
+   memo:"9月に上げるときはこの種目だけ急がない（12回まで伸びてから）"},
+  {id:"abd", name:"ヒップアブダクション",       r:"B", w:36,   reps:12, cap:15, step:2.5,  unit:"kg"},
+  {id:"crm", name:"クランチ（マシン）",         r:"B", w:18,   reps:10, cap:14, step:2.5,  unit:"kg"},
+  {id:"che", name:"チェストプレス（マシン）",   r:"C", w:17.5, reps:8,  cap:12, step:2.5,  unit:"kg"},
+  {id:"rdl", name:"ルーマニアンデッドリフト",   r:"C", w:24,   reps:12, cap:15, step:2.5,  unit:"kg"},
+  {id:"bic", name:"バイシクルクランチ",         r:"C", w:0,    reps:15, cap:20, step:0,    unit:"自重"}
+];
+const SETS=3;
+const ROUTINES=["A","B","C"];
+
+/* ---------- v2: 休憩の長さ（既定値・その場で変更可） ----------
+   「1分固定 → 既定20秒」。**固定を別の固定に置き換えない**のが要点なので、
+   値は設定として持ち、休憩中の画面からも種目画面からもその場で動かせるようにする。
+   変えた値はそのまま次回以降の既定になる（設定画面を探しに行かなくてよい）。      */
+const REST_DEF=20, REST_MIN=10, REST_MAX=180, REST_STEP=10;
+
+/* ---------- v2: 全体経過時間の目安 ----------
+   15分は「ダラダラやらないための目安」であって、達成/未達を判定する基準ではない。
+   超えても失敗ではないので、赤・バツ・警告音・記録への○×は一切作らない。       */
+const TARGET_MIN=15;
+
+/* ---------- 保存 ---------- */
+let DB={sessions:[],active:null,settings:{}};
+try{const r=localStorage.getItem(KEY); if(r) DB=JSON.parse(r);}catch(e){}
+if(!DB.sessions) DB.sessions=[];
+if(DB.active===undefined) DB.active=null;
+if(!DB.settings) DB.settings={};
+if(typeof DB.settings.rest!=="number") DB.settings.rest=REST_DEF;
+function restSec(){ return DB.settings.rest; }
+function save(){
+  try{ localStorage.setItem(KEY,JSON.stringify(DB)); }
+  catch(e){ alert("端末に保存できませんでした。下の書き出し欄からコピーして保管してください。"); }
+}
+
+/* ---------- ユーティリティ ---------- */
+function ex(id){ return PROGRAM.filter(function(e){return e.id===id})[0]; }
+function exOf(r){ return PROGRAM.filter(function(e){return e.r===r}); }
+function ymd(ms){ const d=new Date(ms); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
+function mdw(ms){ const d=new Date(ms),w="日月火水木金土"[d.getDay()]; return (d.getMonth()+1)+"/"+d.getDate()+"("+w+")"; }
+function fmtW(e,w){ return e.unit==="自重" ? "自重" : (Math.round(w*100)/100)+"kg"; }
+
+/* 完了したセッションのみ（記録として確定したもの） */
+function done(){ return DB.sessions.filter(function(s){return s.sets && s.sets.length}); }
+
+/* --- 機能2: 今日どれをやるべきか ---
+   直前にやったルーティンの次を出す。A→B→C→A。まだ記録がなければ A。
+   ※「◯日空いた」といった催促は出さない。 */
+function suggestRoutine(){
+  const d=done();
+  if(!d.length) return "A";
+  const last=d[d.length-1].routine;
+  const i=ROUTINES.indexOf(last);
+  return ROUTINES[(i+1)%ROUTINES.length];
+}
+
+/* --- 機能3: 前回の重量・回数 --- */
+function lastOf(id){
+  const d=done();
+  for(let i=d.length-1;i>=0;i--){
+    const hit=d[i].sets.filter(function(s){return s.id===id});
+    if(hit.length) return {w:hit[hit.length-1].w, reps:Math.min.apply(null,hit.map(function(s){return s.reps})), date:d[i].date, n:hit.length};
+  }
+  return null;
+}
+
+/* --- ダブル・プログレッション（筋トレプログラム §2 変更①）---
+   「決めた回数を3セットとも余裕をもってできた日が2回続いたら、次から1段上げる」
+   ここでは「3セットすべてがレンジ上限(cap)に達した日」を1回と数え、
+   同じ重量で2日続いたら案内を出す。9/1より前は数えるだけで表示しない。 */
+function progressReady(id){
+  const e=ex(id); if(!e || !e.step) return null;
+  const d=done(); let hits=0, w=null;
+  for(let i=d.length-1;i>=0;i--){
+    const s=d[i].sets.filter(function(x){return x.id===id});
+    if(!s.length) continue;
+    const allCap = s.length>=SETS && s.every(function(x){return x.reps>=e.cap});
+    const sameW  = (w===null) || (s[0].w===w);
+    if(allCap && sameW){ w=s[0].w; hits++; if(hits>=2) return {w:w, next:Math.round((w+e.step)*100)/100}; }
+    else break;
+  }
+  return null;
+}
+function showProgress(){ return Date.now()>=PROG_FROM; }
+
+/* ---------- 音 ---------- */
+let ac=null;
+function beep(f,d){
+  try{
+    ac=ac||new (window.AudioContext||window.webkitAudioContext)();
+    const o=ac.createOscillator(),g=ac.createGain();
+    o.frequency.value=f;o.connect(g);g.connect(ac.destination);
+    g.gain.setValueAtTime(.18,ac.currentTime);
+    g.gain.exponentialRampToValueAtTime(.001,ac.currentTime+d);
+    o.start();o.stop(ac.currentTime+d);
+  }catch(e){}
+}
+/* 休憩終わりの合図。stretch.html v4 と同じ上昇3音（設定に関係なく鳴る） */
+function chimeDone(){
+  [[784,.22,0],[988,.22,240],[1319,.55,480]].forEach(function(s){
+    setTimeout(function(){ beep(s[0],s[1]); }, s[2]);
+  });
+}
+
+/* 15分の目安に達したときの合図。休憩終わりの3音とは別物と分かるよう、
+   単発のやわらかい1音にする。急かす音にしない（警告音にしない）。 */
+function chimeMark(){ beep(587,.5); }
+
+/* ---------- 休憩タイマー（機能4／v2で既定20秒・その場で変更可） ---------- */
+let restEnd=0, restTimer=null;
+function startRest(){
+  restEnd=Date.now()+restSec()*1000;
+  if(restTimer) clearInterval(restTimer);
+  restTimer=setInterval(function(){
+    if(Date.now()>=restEnd){ clearInterval(restTimer); restTimer=null; restEnd=0; chimeDone(); }
+    render();
+  },1000);
+  render();
+}
+function stopRest(){ if(restTimer) clearInterval(restTimer); restTimer=null; restEnd=0; render(); }
+function restLeft(){ return restEnd ? Math.max(0,Math.ceil((restEnd-Date.now())/1000)) : 0; }
+
+/* 休憩の長さを変える。休憩中なら、いま動いているカウントダウンにも即反映する。
+   変えた値は次回からの既定になる。 */
+function bumpRest(d){
+  const before=DB.settings.rest;
+  /* 10秒刻みにそろえる。20→30→40… と切りのよい値だけを通す
+     （ジムで片手で押すので、25秒・35秒のような半端な値に落ちないようにする） */
+  let v=Math.round((before+d*REST_STEP)/REST_STEP)*REST_STEP;
+  DB.settings.rest=Math.min(REST_MAX,Math.max(REST_MIN,v));
+  save();
+  if(restEnd) restEnd += (DB.settings.rest-before)*1000;
+  if(restEnd && restEnd<=Date.now()) stopRest(); else render();
+}
+
+/* ---------- v2: 全体の経過時間（機能5） ----------
+   startSession() で押した時刻からの経過。目的は「15分で終われるよう、ダラダラやらないため」。
+   ・所要時間は記録として残すが、速さの順位づけ・最短の表示・連続達成は作らない
+   ・15分を超えても色を変えない／記号を出さない／音で急かさない
+   ・休憩を削って急ぐ動機を作らない（下の注記を画面に常時置く）               */
+function elapsedSec(){ return DB.active ? Math.floor((Date.now()-DB.active.date)/1000) : 0; }
+function mmss(s){ return Math.floor(s/60)+":"+String(s%60).padStart(2,"0"); }
+
+let sessionTimer=null;
+function startSessionClock(){
+  if(sessionTimer) clearInterval(sessionTimer);
+  sessionTimer=setInterval(function(){
+    /* 15分をまたいだ瞬間に1回だけ、やわらかい合図を鳴らす。以後は鳴らさない。 */
+    if(DB.active && !DB.active.marked && elapsedSec()>=TARGET_MIN*60){
+      DB.active.marked=true; save(); chimeMark();
+    }
+    render();
+  },1000);
+}
+function stopSessionClock(){ if(sessionTimer) clearInterval(sessionTimer); sessionTimer=null; }
+
+/* 経過時間の帯。15分で満たされ、そのあとは満たされたまま。色は変えない。 */
+function clockCard(){
+  const s=elapsedSec(), pct=Math.min(100, s/(TARGET_MIN*60)*100);
+  return `<div class="card">
+    <div class="big" style="font-size:40px;margin:0">${mmss(s)}</div>
+    <div class="bigsub">開始からの経過 ／ 目安 ${TARGET_MIN}分</div>
+    <div class="bar"><i style="width:${pct}%"></i></div>
+    <p class="note">${s>=TARGET_MIN*60
+      ? `${TARGET_MIN}分の目安を過ぎました。<strong>残りはご自分のペースで大丈夫です。</strong>`
+      : `ダラダラ長くならないための目安です。`}
+    <br><strong>休憩を削って急ぐ必要はありません。</strong>${TARGET_MIN}分は達成・未達を測る基準ではありません。</p>
+  </div>`;
+}
+
+/* 休憩の長さを変えるUI（休憩中でなくても出す） */
+function restStepper(){
+  return `<label>セット間の休憩</label>
+  <div class="stepper">
+    <button onclick="bumpRest(-1)">−</button>
+    <div class="val">${restSec()}秒<small>ここで変えると次回からもこの長さです</small></div>
+    <button onclick="bumpRest(1)">＋</button>
+  </div>`;
+}
+
+/* ---------- v2: 休憩が短すぎたときの受け皿 ----------
+   【なぜ要るか】筋トレプログラム_2026-08-08 の目的は 8/31まで「いまの筋肉を減らさない」。
+   維持に効くのは重さ（強度）で、休憩が短いと2・3セット目の重さ・回数が落ちやすい。
+   既定20秒はご指示どおり必ず入れたうえで、落ちたときだけ「休憩を延ばす」選択肢を
+   その場で出して吸収する。
+   【言い方の条件】回数が落ちたことを本人の失敗として書かない。原因を休憩の長さの側に置き、
+   タップ1つで直せる形にする。赤・バツ・「失敗」は使わない。無視しても何も起きない。   */
+function dropHint(id){
+  const s=DB.active; if(!s) return "";
+  const mine=s.sets.filter(function(x){return x.id===id});
+  if(mine.length<2) return "";
+  const dropped = mine.some(function(x,i){ return i>0 && x.reps < mine[0].reps; });
+  if(!dropped || restSec()>=60) return "";
+  return `<div class="hint">
+    2セット目以降の回数が1セット目より下がりました。<strong>休憩が短いときによく起きます。</strong>
+    重さを保てるほうが「いまの筋肉を減らさない」という8月の目的には効きます。
+    <br><button class="btn ghost" style="margin-top:9px" onclick="bumpRest(1)">休憩を ${restSec()+REST_STEP}秒 にする</button>
+    <span class="note">このままでも構いません。次のセットから戻ることもあります。</span>
+  </div>`;
+}
+
+/* ===================== 画面 ===================== */
+let view="home", curId=null, tmpW=null, tmpR=null;
+function go(v){ view=v; render(); }
+
+function render(){
+  const A=document.getElementById("app");
+  if(view==="log")  return void(A.innerHTML=viewLog());
+  if(view==="work" && DB.active) return void(A.innerHTML=viewWork());
+  if(view==="ex" && DB.active && curId) return void(A.innerHTML=viewEx());
+  view = DB.active ? "work" : "home";
+  A.innerHTML = DB.active ? viewWork() : viewHome();
+}
+
+/* --- ホーム --- */
+function viewHome(){
+  const r=suggestRoutine();
+  const list=exOf(r).map(function(e){
+    const l=lastOf(e.id);
+    return `<div class="ex">
+      <div class="t"><h2>${e.name}</h2><span class="pill">${fmtW(e,l?l.w:e.w)}</span></div>
+      <div class="prev">${l ? `前回 <b>${fmtW(e,l.w)} × ${l.reps}回 × ${l.n}セット</b>（${mdw(l.date)}）`
+                            : `記録なし。まずは <b>${fmtW(e,e.w)} × ${e.reps}回 × ${SETS}セット</b> から`}</div>
+    </div>`;
+  }).join("");
+  const d=done();
+  return `
+  <h1>筋トレ記録</h1>
+  <p class="sub">1回15分・3種目・各3セット。<strong>8/31までは重さを上げなくて構いません</strong>（いまの筋肉を減らさないことが目的です）。<br>始めると<strong>開始からの経過時間</strong>が出ます。15分は目安で、超えても構いません。</p>
+
+  <div class="card">
+    <div class="sec" style="margin:0 0 6px">今日おすすめのルーティン</div>
+    <div class="big" style="font-size:44px;margin:2px 0">${r}</div>
+    <div class="bigsub">${exOf(r).length}種目 / 前回は ${d.length?d[d.length-1].routine+"（"+mdw(d[d.length-1].date)+"）":"—"}</div>
+    <button class="btn" onclick="startSession('${r}')">${r} を始める</button>
+    <div class="row">
+      ${ROUTINES.filter(function(x){return x!==r}).map(function(x){
+        return `<button class="btn ghost" onclick="startSession('${x}')">${x} にする</button>`;}).join("")}
+    </div>
+  </div>
+
+  <div class="sec">${r} の内容</div>
+  <div class="card">${list}</div>
+
+  <div class="sec">休憩の長さ</div>
+  <div class="card">${restStepper()}
+    <p class="note">既定は20秒です。<strong>短くしすぎると2・3セット目の重さが落ちやすくなります。</strong>落ちたときはその場で延ばせます（アプリからも声をかけます）。</p>
+  </div>
+
+  <button class="btn ghost" onclick="go('log')">これまでの記録（${d.length}回）</button>
+  ${showProgress() ? "" : `<p class="note">重さを上げるルール（3セットとも上限回数を2回続けたら1段上げる）は、<strong>9/1から</strong>案内します。それまでは記録だけ残ります。</p>`}`;
+}
+
+/* --- セッション中 --- */
+function viewWork(){
+  const s=DB.active;
+  const list=exOf(s.routine).map(function(e){
+    const n=s.sets.filter(function(x){return x.id===e.id}).length;
+    const l=lastOf(e.id);
+    return `<div class="ex">
+      <div class="t"><h2>${e.name}</h2><span class="pill">${n}/${SETS}セット</span></div>
+      <div class="prev">${l ? `前回 <b>${fmtW(e,l.w)} × ${l.reps}回</b>` : `目安 <b>${fmtW(e,e.w)} × ${e.reps}回</b>`}</div>
+      <button class="btn ghost" onclick="openEx('${e.id}')">${n>=SETS?"記録を見直す":"記録する"}</button>
+    </div>`;
+  }).join("");
+  return `
+  <h1>${s.routine} を実施中</h1>
+  <p class="sub">${mdw(s.date)} ／ 記録済み ${s.sets.length} セット</p>
+  ${clockCard()}
+  <div class="card">${list}</div>
+  <div class="card">${restStepper()}</div>
+  <button class="btn" onclick="finishSession()">今日はここまで（保存する）</button>
+  <button class="btn link" onclick="cancelSession()">この回を残さずにやめる</button>`;
+}
+
+/* --- 種目ごとの記録画面 --- */
+function viewEx(){
+  const e=ex(curId), s=DB.active;
+  const mine=s.sets.filter(function(x){return x.id===curId});
+  const l=lastOf(curId);
+  if(tmpW===null) tmpW = l ? l.w : e.w;
+  if(tmpR===null) tmpR = l ? l.reps : e.reps;
+
+  const pg=progressReady(curId);
+  const left=restLeft();
+
+  return `
+  <h1>${e.name}</h1>
+  <p class="sub">${l ? `前回 <strong>${fmtW(e,l.w)} × ${l.reps}回 × ${l.n}セット</strong>（${mdw(l.date)}）`
+                     : `はじめての記録です。目安は ${fmtW(e,e.w)} × ${e.reps}回。`}
+  ${e.memo?`<br>${e.memo}`:""}</p>
+
+  <div class="card" style="padding-bottom:6px">
+    <div style="display:flex;justify-content:space-between;align-items:baseline">
+      <span class="sec" style="margin:0">開始からの経過</span>
+      <strong style="font-size:18px;font-variant-numeric:tabular-nums">${mmss(elapsedSec())}</strong>
+    </div>
+    <div class="bar"><i style="width:${Math.min(100,elapsedSec()/(TARGET_MIN*60)*100)}%"></i></div>
+    <p class="note" style="margin-top:6px">目安 ${TARGET_MIN}分。<strong>超えても構いません。休憩を削って急がないでください。</strong></p>
+  </div>
+
+  ${left ? `<div class="card">
+    <div class="big">${Math.floor(left/60)}:${String(left%60).padStart(2,"0")}</div>
+    <div class="bigsub">休憩</div>
+    ${restStepper()}
+    <button class="btn ghost" onclick="stopRest()">休憩を切り上げる</button>
+  </div>` : `<div class="card">${restStepper()}</div>`}
+
+  ${dropHint(curId)}
+
+  <div class="card">
+    <div class="sets">
+      ${[0,1,2].map(function(i){
+        const d=mine[i];
+        return `<div class="setb${d?" done":""}">${i+1}セット目<b>${d?fmtW(e,d.w)+" × "+d.reps:"—"}</b></div>`;
+      }).join("")}
+    </div>
+
+    <button class="btn" onclick="quickAdd()" ${mine.length>=SETS?"disabled":""}>
+      ${mine.length>=SETS ? "3セット終わりました" : `${fmtW(e,tmpW)} × ${tmpR}回 で記録`}
+    </button>
+    <p class="note">前回と同じならこのままタップ1回で記録できます。変えたいときだけ下で直してください。</p>
+
+    ${e.unit==="自重" ? "" : `
+    <label>重さ</label>
+    <div class="stepper">
+      <button onclick="bumpW(-1)">−</button>
+      <div class="val">${fmtW(e,tmpW)}<small>1段 ${e.step}kg</small></div>
+      <button onclick="bumpW(1)">＋</button>
+    </div>`}
+
+    <label>回数</label>
+    <div class="stepper">
+      <button onclick="bumpR(-1)">−</button>
+      <div class="val">${tmpR}<small>上限の目安 ${e.cap}回</small></div>
+      <button onclick="bumpR(1)">＋</button>
+    </div>
+  </div>
+
+  ${(pg && showProgress()) ? `<div class="hint">
+    <strong>${fmtW(e,pg.w)} で ${e.cap}回×${SETS}セットが2回続きました。</strong>
+    次から <strong>${fmtW(e,pg.next)}</strong> に上げて、回数は ${e.reps}回まで戻して構いません。
+    <br>上げたくない日は上げなくて大丈夫です。この案内は消えません。
+  </div>` : ""}
+
+  ${mine.length ? `<button class="btn link" onclick="undoSet()">最後の1セットを取り消す</button>` : ""}
+  <button class="btn ghost" onclick="tmpW=null;tmpR=null;go('work')">種目一覧へ戻る</button>`;
+}
+
+/* --- 記録一覧 --- */
+function viewLog(){
+  const d=done().slice().reverse();
+  return `
+  <h1>これまでの記録</h1>
+  <p class="sub">新しい順。<strong>並べ替えや強調はしていません。</strong></p>
+  <div class="card">
+    ${d.length ? d.map(function(s){
+      const by={};
+      s.sets.forEach(function(x){ (by[x.id]=by[x.id]||[]).push(x); });
+      const inner=Object.keys(by).map(function(id){
+        const e=ex(id), a=by[id];
+        return e.name+" "+fmtW(e,a[0].w)+" × "+a.map(function(x){return x.reps}).join("/")+"回";
+      }).join("<br>");
+      /* v2: 所要時間は事実として並べるだけ。速い順に並べ替えない・最短を出さない・
+         15分を超えた回に印を付けない。すべて同じ字面。 */
+      const head=mdw(s.date)+" ルーティン"+s.routine
+        +(typeof s.sec==="number" ? " ／ "+mmss(s.sec) : "")
+        +(typeof s.rest==="number" ? "（休憩"+s.rest+"秒）" : "");
+      return `<div class="log"><strong>${head}</strong><small>${inner}</small></div>`;
+    }).join("") : '<p class="note">まだ記録はありません。</p>'}
+  </div>
+  <p class="note">所要時間は記録として並べているだけです。<strong>速さの順位づけ・最短の表示はしません。</strong>${TARGET_MIN}分を超えた回にも印は付きません。</p>
+  <button class="btn ghost" onclick="go('home')">戻る</button>
+
+  <div class="hr"></div>
+  <div class="sec">データ書き出し</div>
+  <textarea readonly onclick="this.select()">${JSON.stringify(DB)}</textarea>
+  <p class="note">記録はこの端末のブラウザ内にだけ保存されています。ときどきコピーして保管してください。</p>`;
+}
+
+/* ===================== 操作 ===================== */
+function startSession(r){
+  DB.active={date:Date.now(),routine:r,sets:[],marked:false};
+  save(); tmpW=null; tmpR=null; startSessionClock(); go("work");
+}
+function openEx(id){ curId=id; tmpW=null; tmpR=null; go("ex"); }
+function bumpW(d){
+  const e=ex(curId); if(!e.step) return;
+  tmpW=Math.max(0, Math.round((tmpW + d*e.step)*100)/100); render();
+}
+function bumpR(d){ tmpR=Math.max(1, tmpR+d); render(); }
+
+function quickAdd(){
+  const e=ex(curId), s=DB.active;
+  if(s.sets.filter(function(x){return x.id===curId}).length>=SETS) return;
+  s.sets.push({id:curId,w:tmpW,reps:tmpR,t:Date.now()});
+  save();
+  if(s.sets.filter(function(x){return x.id===curId}).length<SETS) startRest();
+  else { stopRest(); chimeDone(); }
+  render();
+}
+function undoSet(){
+  const s=DB.active;
+  for(let i=s.sets.length-1;i>=0;i--){ if(s.sets[i].id===curId){ s.sets.splice(i,1); break; } }
+  save(); render();
+}
+function finishSession(){
+  const s=DB.active;
+  if(!s.sets.length){
+    if(!confirm("1セットも記録されていません。この回を残さずに終わりますか？")) return;
+    DB.active=null; save(); stopRest(); stopSessionClock(); return go("home");
+  }
+  s.date=s.date||Date.now();
+  s.sec=elapsedSec();          /* v2: 所要時間を事実として残す（順位づけはしない） */
+  s.rest=restSec();            /* そのとき使っていた休憩の長さ。あとで見比べるため */
+  DB.sessions.push(s); DB.active=null; save(); stopRest(); stopSessionClock(); go("log");
+}
+function cancelSession(){
+  if(!confirm("この回を残さずにやめますか？")) return;
+  DB.active=null; save(); stopRest(); stopSessionClock(); go("home");
+}
+
+/* 再読み込みしても、実施中のセッションの経過時間は続きから動く */
+if(DB.active) startSessionClock();
+render();
+</script>
+</body>
+</html>
