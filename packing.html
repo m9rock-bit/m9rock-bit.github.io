@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Packing">
+<meta name="theme-color" content="#12151c">
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'%3E%3Crect width='180' height='180' rx='40' fill='%2312151c'/%3E%3Crect x='44' y='62' width='92' height='72' rx='12' fill='none' stroke='%23e2b979' stroke-width='9'/%3E%3Cpath d='M72 62V50a10 10 0 0 1 10-10h16a10 10 0 0 1 10 10v12' fill='none' stroke='%23e2b979' stroke-width='9' stroke-linecap='round'/%3E%3C/svg%3E">
+<title>定番パッキングリスト</title>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0}
+body{
+  background:#12151c;color:#e8ecf2;
+  font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif;
+  padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+  -webkit-user-select:none;user-select:none;
+}
+.wrap{max-width:560px;margin:0 auto;padding:16px 16px 48px}
+h1{font-size:19px;margin:4px 0 2px;letter-spacing:.02em}
+.sub{color:#8a94a6;font-size:12.5px;margin:0 0 15px;line-height:1.65}
+.card{background:#1a1f29;border:1px solid #262d3a;border-radius:14px;padding:8px 14px 12px;margin-bottom:11px}
+.sec{font-size:12px;color:#6f7a8c;margin:22px 0 9px;letter-spacing:.06em}
+.btn{
+  display:block;width:100%;padding:16px;border-radius:12px;border:none;
+  background:#e2b979;color:#171310;font-size:16.5px;font-weight:700;
+  font-family:inherit;cursor:pointer;margin-top:10px;
+}
+.btn.ghost{background:#232b38;color:#cbd5e3;font-weight:600;font-size:14px;padding:12px}
+.btn.link{background:none;color:#8a94a6;font-size:13px;padding:9px;font-weight:500;text-decoration:underline}
+.row{display:flex;gap:9px}
+.row>*{flex:1}
+
+/* リストのタブ */
+.tabs{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:13px}
+.tab{
+  background:#232b38;border:1px solid #303a4a;color:#9aa6b8;border-radius:999px;
+  padding:9px 15px;font-size:13.5px;font-family:inherit;cursor:pointer;
+}
+.tab.on{background:#3a3527;border-color:#6b5a37;color:#f0dcb8}
+.tab.add{border-style:dashed;color:#8a94a6}
+
+/* 項目 */
+.it{display:flex;align-items:flex-start;gap:11px;padding:12px 2px;border-top:1px solid #232b38;cursor:pointer}
+.it:first-child{border-top:none}
+.bx{
+  flex:none;width:23px;height:23px;margin-top:1px;border-radius:6px;
+  border:1.8px solid #3f4a5c;display:flex;align-items:center;justify-content:center;
+  font-size:14px;color:#12151c;
+}
+.it.on .bx{background:#e2b979;border-color:#e2b979}
+.it.on .tx{color:#68727f;text-decoration:line-through}
+.tx{font-size:15px;line-height:1.5;flex:1}
+.hd{
+  padding:15px 2px 6px;font-size:12px;color:#8a7a5c;letter-spacing:.04em;
+  border-top:1px solid #232b38;font-weight:700;
+}
+.hd:first-child{border-top:none}
+.mini{background:none;border:1px solid #303a4a;color:#8a94a6;border-radius:8px;font-size:12px;padding:5px 8px;font-family:inherit;cursor:pointer;flex:none}
+.left{color:#8a94a6;font-size:12.5px;margin:2px 0 0;text-align:right}
+
+.note{color:#6f7a8c;font-size:12px;line-height:1.75;margin:9px 0 0}
+.warn{
+  margin-top:12px;font-size:12.5px;line-height:1.7;color:#c3b49c;
+  background:#1f1c19;border:1px solid #2f2a24;border-radius:10px;padding:11px 13px;
+}
+label{display:block;font-size:12.5px;color:#8a94a6;margin:12px 0 5px}
+input[type=text]{
+  width:100%;background:#12151c;border:1px solid #303a4a;color:#e8ecf2;
+  border-radius:10px;padding:12px;font-size:15px;font-family:inherit;
+}
+textarea{
+  width:100%;height:170px;background:#12151c;border:1px solid #303a4a;color:#cbd5e3;
+  border-radius:10px;padding:11px;font-size:13px;line-height:1.6;font-family:inherit;
+  -webkit-user-select:text;user-select:text;
+}
+textarea.out{height:110px;font-size:11px;color:#8a94a6;font-family:ui-monospace,monospace}
+.hr{height:1px;background:#232b38;margin:22px 0}
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+
+<script>
+/* =========================================================================
+   定番パッキングリスト（packing.html） v1 — 2026-08-14
+   B.M.C. 作成。依頼元は H.M.C.（指示_2026-08-14_定番パッキングリストアプリの作成）。
+
+   ■ 依頼の必須要件（変更しないでください）
+     0. ワンタップで全チェックを外せる  ← この1点で案A（Obsidian）が落ちた要件
+     A. 既存リストに項目を自分で足せる（削除・並べ替えも可）
+     B. リストそのものを新規作成できる
+     C. テキストを貼り付けて取り込める（新規作成・既存への追記の両方）
+
+   ■ 正本はこのアプリ側です（依頼 §3。ここが今回いちばん壊れやすい箇所）
+     Obsidian の 提案_2026-08-12_定番パッキングリスト §4 は「初回に読み込ませる種」に
+     格下げ済み。したがって：
+
+       ★ 種（SEED）は、保存データが1件も無いときにだけ読み込む。★
+       ★ アプリを更新（このファイルを差し替え）しても、種で上書きしない。★
+
+     これを守らないと、Manamiさんが足した項目・作ったリストが更新のたびに消えます。
+     下の load() の `if(raw)` 分岐を、いかなる理由でも「毎回 SEED をマージする」形に
+     変えないでください。項目を足したいときは、アプリ内の「項目を足す」か
+     「貼り付けて取り込む」を使えば済みます。
+
+   ■ 保存先の寿命についての判断（依頼 §4。B.M.C.に委ねられた点）
+     ブラウザのローカル保存を使います。そのうえで両方やりました。
+       ・「この端末のブラウザにだけ保存されている」ことを画面に常時1行出す
+       ・書き出し／取り込みでテキスト退避できるようにする
+         （要件Cの取り込み欄があるので、書き出し側を足すだけで往復になる）
+
+   ■ 作らないこと（依頼 §6）
+     ・3本目以降のシーン（日帰りおでかけ・プール等）を先に用意しない
+     ・日程・人数から数量を自動計算しない
+     ・持ち物の写真登録を作らない
+     ・Obsidian との自動同期を作らない（書き戻し経路も作らない）
+
+   ■ お子さんの表記
+     「長女つ」「次女し」のまま。このファイルは GitHub Pages（外部）に置かれます。
+     claude_shared/claude.md §1・H.M.C. claude.md §5。実名に直さないでください。
+   ========================================================================= */
+
+const KEY="bmc_packing_v1";
+
+/* ---------- 種（初回のみ） ----------
+   出所: 提案_2026-08-12_定番パッキングリスト §4（H.M.C.）。以後 §4 は更新されません。
+   "#" 始まりの行は見出し（チェックできない区切り）になります。 */
+const SEED=[
+ {name:"♨️ サウナ", items:[
+   "#必ず要るもの",
+   "サウナハット","速乾タオル（薄手）1枚","フェイスタオル 1枚","着替えの下着 1セット",
+   "ビニール袋 2枚（濡れタオル用・洗濯物用）","飲みもの（館内で買うなら不要）",
+   "#あると違うもの",
+   "基礎化粧品（小分け）","ヘアゴム・ヘアクリップ","常備薬","生理用品（必要な時期なら）",
+   "#施設で借りられるか先に見る",
+   "館内着","バスタオル","シャンプー・ボディソープ"
+ ]},
+ {name:"🧳 泊まり", items:[
+   "#身につけていく／持たない判断",
+   "靴は1足で足りるか","ボトムスは1本で足りるか",
+   "#衣類",
+   "トップス（泊数分）","インナー（吸汗速乾）","下着・靴下（泊数＋1）","羽織り1枚（冷房対策）",
+   "パジャマ（宿の備品で足りるなら持たない）",
+   "#洗面・スキンケア",
+   "基礎化粧品（小分け容器）","洗顔料","メイク道具（最小限）","日焼け止め","常備薬・頭痛薬",
+   "生理用品（必要な時期なら）",
+   "#電源まわり",
+   "スマホ充電器＋ケーブル","モバイルバッテリー","イヤホン",
+   "#子ども（長女つ・次女し）",
+   "着替え（泊数＋1）","下着・靴下","歯ブラシ","移動中のひまつぶし（本・タブレット）",
+   "常備薬・体温計","おやつ・飲みもの",
+   "#その他",
+   "財布・交通系IC","エコバッグ（折りたたみ）","ビニール袋 2枚","マスク・ハンカチ・ティッシュ",
+   "宿・チケットの予約情報",
+   "#帰る前に数える欄",
+   "充電器・ケーブルを回収したか","干したもの・浴室のものを回収したか"
+ ]}
+];
+
+/* ---------- 保存 ---------- */
+let DB=null, cur=0, edit=false, view="list";
+
+function mkItem(s){
+  const t=String(s);
+  return t.charAt(0)==="#" ? {t:t.slice(1).trim(), h:true} : {t:t.trim(), done:false};
+}
+function seed(){
+  return {lists: SEED.map(function(l){
+    return {name:l.name, items:l.items.map(mkItem)};
+  })};
+}
+function load(){
+  let raw=null;
+  try{ raw=localStorage.getItem(KEY); }catch(e){}
+  if(raw){
+    /* ★ 保存データがある＝アプリが正本。種は一切混ぜない（依頼 §3）★ */
+    try{ DB=JSON.parse(raw); }catch(e){ DB=seed(); }
+    if(!DB || !Array.isArray(DB.lists) || !DB.lists.length) DB=seed();
+    DB.lists.forEach(function(l){
+      if(!Array.isArray(l.items)) l.items=[];
+      l.items.forEach(function(it){ if(!it.h && it.done===undefined) it.done=false; });
+    });
+  }else{
+    DB=seed(); save();
+  }
+  if(cur>=DB.lists.length) cur=0;
+}
+function save(){
+  try{ localStorage.setItem(KEY,JSON.stringify(DB)); }
+  catch(e){ alert("この端末に保存できませんでした。下の「書き出し」からコピーして控えておいてください。"); }
+}
+function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+function L(){ return DB.lists[cur]; }
+
+/* ---------- 貼り付けの取り込み（要件C） ----------
+   1行1項目として読めれば十分。作り込まない（依頼 §2「ここを作り込まないでください」）。
+   落とすのは行頭の記号だけ。"#" 始まりは見出しとして扱う。 */
+function parse(text){
+  return String(text).split(/\r?\n/).map(function(line){
+    let s=line.replace(/　/g," ").trim();
+    s=s.replace(/\*\*/g,"");                    /* 太字の ** を先に落とす（先に落とさないと
+                                                   **太字** の先頭 * を箇条書きと誤認する） */
+    s=s.replace(/^[-*・‧•]\s*/,"");            /* -, *, ・ など */
+    s=s.replace(/^\[[ xX]\]\s*/,"");            /* - [ ] の残り */
+    s=s.replace(/^\d+[.)]\s*/,"");              /* 1. 1) */
+    s=s.replace(/^#+\s*/, function(m){ return "#"; });
+    s=s.trim();
+    return s;
+  }).filter(function(s){ return s && s!=="#"; })
+    .map(mkItem);
+}
+
+/* ===================== 画面 ===================== */
+function go(v){ view=v; render(); }
+function render(){
+  const A=document.getElementById("app");
+  if(view==="paste")  return void(A.innerHTML=viewPaste());
+  if(view==="data")   return void(A.innerHTML=viewData());
+  A.innerHTML=viewList();
+}
+
+function tabs(){
+  let h='<div class="tabs">'+DB.lists.map(function(l,i){
+    return '<button class="tab'+(i===cur?' on':'')+'" onclick="pick('+i+')">'+esc(l.name)+'</button>';
+  }).join("");
+  h+='<button class="tab add" onclick="newList()">＋ リストを作る</button></div>';
+  return h;
+}
+
+function viewList(){
+  const l=L();
+  const items=l.items;
+  const box=items.map(function(it,i){
+    if(it.h) return '<div class="hd">'+esc(it.t)
+      +(edit?' <button class="mini" onclick="delItem('+i+')">消す</button>':'')+'</div>';
+    if(edit) return '<div class="it"><div class="tx">'+esc(it.t)+'</div>'
+      +'<button class="mini" onclick="mv('+i+',-1)">↑</button>'
+      +'<button class="mini" onclick="mv('+i+',1)">↓</button>'
+      +'<button class="mini" onclick="delItem('+i+')">消す</button></div>';
+    return '<div class="it'+(it.done?' on':'')+'" onclick="tap('+i+')">'
+      +'<div class="bx">'+(it.done?'✓':'')+'</div><div class="tx">'+esc(it.t)+'</div></div>';
+  }).join("");
+
+  const real=items.filter(function(it){return !it.h;});
+  const left=real.filter(function(it){return !it.done;}).length;
+
+  return `
+  <h1>定番パッキングリスト</h1>
+  <p class="sub">出かける前にチェックして、<strong>帰ってきたら「全部外す」を1回押すだけ</strong>で次回また使えます。</p>
+
+  ${tabs()}
+
+  <button class="btn" onclick="clearAll()">全部外す</button>
+  <p class="left">${real.length ? "残り "+left+" / "+real.length : "&nbsp;"}</p>
+
+  <div class="card">
+    ${box || '<p class="note">まだ項目がありません。下の「項目を足す」か「貼り付けて取り込む」から入れてください。</p>'}
+  </div>
+
+  <div class="row">
+    <button class="btn ghost" onclick="addItem()">項目を足す</button>
+    <button class="btn ghost" onclick="toggleEdit()">${edit?"編集をやめる":"並べ替え・削除"}</button>
+  </div>
+  <button class="btn ghost" onclick="go('paste')">貼り付けて取り込む</button>
+  ${edit?'<button class="btn ghost" onclick="addHead()">見出しを足す</button>':""}
+
+  ${edit?`<div class="hr"></div>
+  <div class="sec">このリストそのもの</div>
+  <div class="row">
+    <button class="btn ghost" onclick="renameList()">名前を変える</button>
+    <button class="btn ghost" onclick="delList()">リストを消す</button>
+  </div>`:""}
+
+  <div class="warn">このリストは<strong>この端末のこのブラウザにだけ</strong>保存されています。
+  履歴の消去や別の端末では出てきません。<br>
+  足した項目・作ったリストを残しておきたいときは、下の「書き出し・取り込み」からコピーして控えておいてください。</div>
+  <button class="btn link" onclick="go('data')">書き出し・取り込み</button>`;
+}
+
+function viewPaste(){
+  return `
+  <h1>貼り付けて取り込む</h1>
+  <p class="sub">1行1項目として読み込みます。<strong>行頭の「- 」「・」「1. 」やチェックの記号は自動で落とします</strong>ので、
+  そのまま貼って構いません。<br>
+  行頭に <strong>#</strong> を付けた行は<strong>見出し</strong>（チェックできない区切り）になります。</p>
+  <div class="card" style="padding:14px">
+    <textarea id="pt" placeholder="ここに貼り付けてください&#10;&#10;#衣類&#10;- Tシャツ 2枚&#10;・下着&#10;1. 靴下"></textarea>
+  </div>
+  <button class="btn" onclick="doPaste('add')">いま開いているリスト（${esc(L().name)}）に足す</button>
+  <button class="btn ghost" onclick="doPaste('new')">新しいリストとして取り込む</button>
+  <button class="btn ghost" onclick="go('list')">戻る</button>
+  <p class="note">どちらも、いまある項目を消しません。「足す」は末尾に付け足します。</p>`;
+}
+
+function viewData(){
+  return `
+  <h1>書き出し・取り込み</h1>
+  <p class="sub">端末を替えるとき、履歴を消す前に、ここのテキストをコピーして控えておいてください。</p>
+
+  <div class="sec">書き出し（コピーする）</div>
+  <div class="card" style="padding:14px">
+    <textarea class="out" readonly onclick="this.select()">${esc(JSON.stringify(DB))}</textarea>
+  </div>
+
+  <div class="sec">取り込み（控えから戻す）</div>
+  <div class="card" style="padding:14px">
+    <textarea id="rt" placeholder="控えておいたテキストを貼り付けてください"></textarea>
+  </div>
+  <button class="btn ghost" onclick="restore()">この内容で置き換える</button>
+  <p class="note"><strong>置き換えると、いまのリストは全部入れ替わります。</strong>先に上の書き出しをコピーしておくと安全です。</p>
+  <button class="btn ghost" onclick="go('list')">戻る</button>`;
+}
+
+/* ===================== 操作 ===================== */
+function pick(i){ cur=i; edit=false; save(); render(); }
+function toggleEdit(){ edit=!edit; render(); }
+
+function tap(i){
+  const it=L().items[i]; if(!it||it.h) return;
+  it.done=!it.done; save(); render();
+}
+/* 要件0: タップ1回。確認は挟まない（外すだけで何も失われないため） */
+function clearAll(){
+  L().items.forEach(function(it){ if(!it.h) it.done=false; });
+  save(); render();
+}
+function addItem(){
+  const v=prompt("足す項目を書いてください。");
+  if(v===null) return;
+  const t=v.trim(); if(!t) return;
+  L().items.push({t:t,done:false}); save(); render();
+}
+function addHead(){
+  const v=prompt("見出しを書いてください。（例: 洗面・スキンケア）");
+  if(v===null) return;
+  const t=v.trim().replace(/^#+\s*/,""); if(!t) return;
+  L().items.push({t:t,h:true}); save(); render();
+}
+function delItem(i){
+  const it=L().items[i]; if(!it) return;
+  if(!confirm("「"+it.t+"」を消しますか？")) return;
+  L().items.splice(i,1); save(); render();
+}
+function mv(i,d){
+  const a=L().items, j=i+d;
+  if(j<0||j>=a.length) return;
+  const t=a[i]; a[i]=a[j]; a[j]=t; save(); render();
+}
+function newList(){
+  const v=prompt("新しいリストの名前を書いてください。（例: 家族旅行の持ち物）");
+  if(v===null) return;
+  const t=v.trim(); if(!t) return;
+  DB.lists.push({name:t,items:[]}); cur=DB.lists.length-1; edit=false; save(); render();
+}
+function renameList(){
+  const v=prompt("リストの名前", L().name);
+  if(v===null) return;
+  const t=v.trim(); if(!t) return;
+  L().name=t; save(); render();
+}
+function delList(){
+  if(DB.lists.length<=1){ alert("最後の1つは消せません。中身を消すか、名前を変えてお使いください。"); return; }
+  if(!confirm("リスト「"+L().name+"」を、中の項目ごと消しますか？\nこの操作は戻せません。")) return;
+  DB.lists.splice(cur,1); if(cur>=DB.lists.length) cur=DB.lists.length-1;
+  edit=false; save(); render();
+}
+function doPaste(mode){
+  const el=document.getElementById("pt");
+  const items=parse(el?el.value:"");
+  if(!items.length){ alert("読み取れる行がありませんでした。"); return; }
+  if(mode==="new"){
+    const v=prompt("新しいリストの名前を書いてください。","取り込んだリスト");
+    if(v===null) return;
+    const t=(v.trim()||"取り込んだリスト");
+    DB.lists.push({name:t,items:items}); cur=DB.lists.length-1;
+  }else{
+    L().items=L().items.concat(items);
+  }
+  save(); go("list");
+}
+function restore(){
+  const el=document.getElementById("rt");
+  let o=null;
+  try{ o=JSON.parse(el?el.value:""); }catch(e){}
+  if(!o||!Array.isArray(o.lists)||!o.lists.length){ alert("読み取れませんでした。書き出したテキストをそのまま貼り付けてください。"); return; }
+  if(!confirm("いまのリストを、この内容で置き換えます。よろしいですか？")) return;
+  DB=o; cur=0; edit=false;
+  DB.lists.forEach(function(l){
+    if(!Array.isArray(l.items)) l.items=[];
+    l.items.forEach(function(it){ if(!it.h && it.done===undefined) it.done=false; });
+  });
+  save(); go("list");
+}
+
+load(); render();
+</script>
+</body>
+</html>
