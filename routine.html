@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Switch">
+<meta name="theme-color" content="#12151c">
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'%3E%3Crect width='180' height='180' rx='40' fill='%2312151c'/%3E%3Ccircle cx='90' cy='96' r='46' fill='none' stroke='%23e0a86a' stroke-width='14'/%3E%3Crect x='81' y='34' width='18' height='58' rx='9' fill='%23e0a86a'/%3E%3C/svg%3E">
+<title>B.M.C. 切り替えルーティン</title>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0}
+body{
+  background:#12151c;color:#e8ecf2;
+  font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif;
+  padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+  -webkit-user-select:none;user-select:none;
+}
+.wrap{max-width:560px;margin:0 auto;padding:16px 16px 44px}
+h1{font-size:19px;margin:4px 0 2px;letter-spacing:.02em}
+.sub{color:#8a94a6;font-size:12.5px;margin:0 0 16px;line-height:1.65}
+.card{background:#1a1f29;border:1px solid #262d3a;border-radius:14px;padding:15px 16px;margin-bottom:11px}
+.sec{font-size:12px;color:#6f7a8c;margin:24px 0 9px;letter-spacing:.06em}
+.btn{
+  display:block;width:100%;padding:17px;border-radius:12px;border:none;
+  background:#e0a86a;color:#20160c;font-size:17px;font-weight:700;
+  font-family:inherit;cursor:pointer;margin-top:10px;
+}
+.btn.ghost{background:#232b38;color:#cbd5e3;font-weight:600;font-size:14px;padding:12px}
+.btn.link{background:none;color:#8a94a6;font-size:13px;padding:9px;font-weight:500;text-decoration:underline}
+.btn.save{background:#2a3a2c;color:#cfe6d2}
+.row{display:flex;gap:9px}
+.row>*{flex:1}
+
+.big{font-size:64px;font-weight:200;text-align:center;font-variant-numeric:tabular-nums;margin:6px 0 2px;letter-spacing:-.03em;line-height:1.1}
+.big.over{color:#8a94a6;font-size:52px}
+.bigsub{text-align:center;color:#8a94a6;font-size:13px;margin-bottom:6px}
+.bar{height:5px;background:#232b38;border-radius:3px;overflow:hidden;margin:10px 0 2px}
+.bar>i{display:block;height:100%;background:#e0a86a}
+
+.setb{
+  display:block;width:100%;text-align:left;background:#1a1f29;border:1px solid #262d3a;
+  color:#e8ecf2;border-radius:13px;padding:15px 16px;font-size:15.5px;font-family:inherit;
+  cursor:pointer;margin-bottom:10px;line-height:1.5;font-weight:600;
+}
+.setb small{display:block;color:#8a94a6;font-size:12.5px;font-weight:400;margin-top:4px;line-height:1.6}
+.setb.rescue{background:#221a1a;border-color:#40292a}
+
+.step{
+  display:flex;gap:12px;align-items:flex-start;background:#1a1f29;border:1px solid #262d3a;
+  border-radius:12px;padding:14px 15px;margin-bottom:9px;cursor:pointer;
+}
+.step.cur{border-color:#e0a86a;background:#211d18}
+.step.done{opacity:.42}
+.step .n{
+  flex:none;width:26px;height:26px;border-radius:8px;background:#232b38;color:#8a94a6;
+  font-size:13px;display:flex;align-items:center;justify-content:center;font-weight:700;margin-top:1px;
+}
+.step.cur .n{background:#e0a86a;color:#20160c}
+.step.done .n{background:#2a3a2c;color:#9ec8a4}
+.step .t{flex:1;font-size:15px;line-height:1.55}
+.step .t em{display:block;font-style:normal;color:#8a94a6;font-size:12px;margin-top:3px}
+.step .t s{color:#6f7a8c}
+
+.hint{color:#cbd5e3;font-size:12.5px;line-height:1.7;background:#1f1c19;border:1px solid #2f2a24;border-radius:10px;padding:11px 13px;margin-top:11px}
+.note{color:#6f7a8c;font-size:12px;line-height:1.75;margin:10px 0 0}
+.ok{color:#9ec8a4}
+textarea{
+  width:100%;min-height:190px;background:#12151c;border:1px solid #303a4a;color:#e8ecf2;
+  border-radius:10px;padding:12px;font-size:14px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+  line-height:1.8;-webkit-user-select:text;user-select:text;
+}
+label{display:block;font-size:12.5px;color:#8a94a6;margin:12px 0 5px}
+.toggle{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:4px 0}
+.toggle b{font-weight:600;font-size:14px}
+.sw{width:52px;height:31px;border-radius:999px;background:#303a4a;border:none;position:relative;cursor:pointer;flex:none}
+.sw.on{background:#e0a86a}
+.sw i{position:absolute;top:3px;left:3px;width:25px;height:25px;border-radius:50%;background:#e8ecf2;transition:left .15s}
+.sw.on i{left:24px}
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+<script>
+/* ============================================================
+   B.M.C. 切り替えルーティン (routine.html)
+   作成: B.M.C.(Claude) / 2026-08-14
+   設計の前提（変えないでください）:
+   - このアプリは「その場の道具」です。記録の正は Obsidian のままで、
+     ここから日次ノート・Points Tracker へは一切書きません。
+   - 連続日数・達成率・できなかった日の記録は持ちません。
+     「崩れた日が画面に残る」形を作らないためです。
+   - 途中参加・飛ばし・崩れたあとの再開を、いつでもできるようにしてあります
+     （順番どおりにしか進めない作りが「総くずれして戻れない」の正体のため）。
+   ============================================================ */
+
+var KEY = "bmc_routine_v1";
+
+/* --- 既定のルーティン ---------------------------------------
+   すべて既存の記録から採っています（新しく思いついた行動は入れていません）。
+   出どころは各セットの note に書いています。
+   秒|文言 の形式。アプリ内の「文言を編集」からいつでも変えられます。 */
+var DEFAULTS = {
+  home: {
+    icon:"🏠", name:"在宅勤務・夕方の切り替え", limit:900,
+    note:"仕事を終える瞬間に押します。在宅は「帰る」動作がないので、これが唯一の切れ目です。",
+    steps:[
+      "60|PCを閉じて、視界の外へ置く（別室・引き出し・カバンの中）",
+      "60|洗面所へ行ってマウスウォッシュ",
+      "300|温かい飲み物を1杯いれて、キッチンの外で飲み切る",
+      "480|両手がふさがることを1つ始める（子どもとゲーム／お風呂の準備）"
+    ]
+  },
+  commute: {
+    icon:"🚃", name:"帰路（職場を出たら）", limit:600,
+    note:"駅の店より手前で押します。8/13はスーパーが電車より先でした。",
+    steps:[
+      "30|イヤホンを付ける",
+      "30|ゲームを起動する（両手がふさがるもの。音声だけにしない）",
+      "480|夢中になったまま改札を通る／店の前を通過する",
+      "60|家に着いたら、キッチンではなく洗面所へ入る"
+    ]
+  },
+  oneope: {
+    icon:"👶", name:"ワンオペの夜", limit:900,
+    note:"Routine_Master の Night_Work_oneope は18:50始まりです。8/13の崩れはその前でした。",
+    steps:[
+      "60|マウスウォッシュ",
+      "300|温かい飲み物を1杯、洗面所・脱衣所で飲み切る",
+      "300|終わらないと思っているタスクを分解 → 今日やる分だけ決める",
+      "240|残りは明日に回すと決めて、画面を閉じる"
+    ]
+  },
+  overtime: {
+    icon:"🌙", name:"残業日の夜", limit:600,
+    note:"17:45の行は既に機能しています（8/12はここだけチェックが付き、間食も最少でした）。",
+    steps:[
+      "60|飲み物を用意して一度席を立つ",
+      "60|PCを閉じてカバンに入れる",
+      "300|乗車15分、明日やることを書き切る",
+      "180|書き切ったらゲームか音声に切り替える"
+    ]
+  },
+  rescue: {
+    icon:"🛟", name:"崩れたあとの復帰（1手だけ）", limit:180, rescue:true,
+    note:"やり直しではありません。今日をここで終わらせて、次の合図まで戻るためのものです。",
+    steps:[
+      "60|口をゆすぐ（または歯を磨く）＝今日の食事はここで終わり",
+      "120|座って、水か炭酸水を1杯飲み切る"
+    ]
+  }
+};
+
+var ORDER = ["home","commute","oneope","overtime"];
+
+var DB = { sets:null, chime:true, scName:"ルーティンタイマー" };
+try{ var r = localStorage.getItem(KEY); if(r){ var p = JSON.parse(r); if(p.sets) DB.sets = p.sets; if(typeof p.chime==="boolean") DB.chime = p.chime; if(p.scName) DB.scName = p.scName; } }catch(e){}
+if(!DB.sets) DB.sets = JSON.parse(JSON.stringify(DEFAULTS));
+/* 既定に後から足したセットを取り込む（既存の編集は壊さない） */
+for(var k in DEFAULTS){ if(!DB.sets[k]) DB.sets[k] = JSON.parse(JSON.stringify(DEFAULTS[k])); }
+
+function save(){ try{ localStorage.setItem(KEY, JSON.stringify(DB)); }catch(e){} }
+
+/* --- 状態 --- */
+var view = "home";
+var curKey = null;      // 実行中のセット
+var startAt = 0;        // 開始時刻
+var doneSet = {};       // 完了したステップの index
+var curStep = 0;
+var tick = null;
+
+/* --- 音 --- */
+var ac = null;
+function beep(f,d){
+  if(!DB.chime) return;
+  try{
+    if(!ac) ac = new (window.AudioContext||window.webkitAudioContext)();
+    var o = ac.createOscillator(), g = ac.createGain();
+    o.connect(g); g.connect(ac.destination);
+    o.frequency.value = f; o.type = "sine";
+    g.gain.setValueAtTime(.0001, ac.currentTime);
+    g.gain.exponentialRampToValueAtTime(.28, ac.currentTime+.02);
+    g.gain.exponentialRampToValueAtTime(.0001, ac.currentTime+d);
+    o.start(); o.stop(ac.currentTime+d+.02);
+  }catch(e){}
+}
+function chimeStep(){ beep(660,.18); }
+function chimeDone(){ beep(587,.22); setTimeout(function(){beep(880,.45);},200); }
+
+/* --- 補助 --- */
+function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function mmss(s){ var m=Math.floor(Math.abs(s)/60), x=Math.abs(s)%60; return (s<0?"+":"")+m+":"+String(x).padStart(2,"0"); }
+function parseStep(line){
+  var i = line.indexOf("|");
+  if(i<0) return { sec:60, text:line.trim() };
+  return { sec: parseInt(line.slice(0,i),10)||60, text: line.slice(i+1).trim() };
+}
+function stepsOf(key){ return DB.sets[key].steps.map(parseStep); }
+function limitOf(key){
+  var s = DB.sets[key];
+  if(s.limit) return s.limit;
+  return stepsOf(key).reduce(function(a,b){return a+b.sec;},0);
+}
+function elapsed(){ return startAt ? Math.floor((Date.now()-startAt)/1000) : 0; }
+function left(){ return limitOf(curKey) - elapsed(); }
+function allDone(){ var n = DB.sets[curKey].steps.length; for(var i=0;i<n;i++){ if(!doneSet[i]) return false; } return true; }
+
+function go(v){ view = v; render(); }
+
+/* --- 実行 --- */
+function start(key, fromIndex){
+  curKey = key; doneSet = {}; curStep = fromIndex||0;
+  for(var i=0;i<curStep;i++) doneSet[i] = "skip";
+  startAt = Date.now();
+  if(tick) clearInterval(tick);
+  tick = setInterval(render, 250);
+  view = "run"; render();
+}
+function stop(){ if(tick) clearInterval(tick); tick=null; startAt=0; curKey=null; doneSet={}; curStep=0; }
+function toggleStep(i){
+  if(doneSet[i]){ delete doneSet[i]; render(); return; }
+  doneSet[i] = "done";
+  var n = DB.sets[curKey].steps.length;
+  var next = -1;
+  for(var j=0;j<n;j++){ if(!doneSet[j]){ next=j; break; } }
+  curStep = next<0 ? n : next;
+  if(allDone()){ chimeDone(); view="done"; }
+  else chimeStep();
+  render();
+}
+function finishNow(){ if(tick) clearInterval(tick); tick=null; view="done"; render(); }
+
+/* --- iPhone標準タイマーの起動 --------------------------------
+   このページはバックグラウンドでは止まります（iOSの仕様）。
+   残り時間を画面上部（ダイナミックアイランド／ロック画面）に出せるのは
+   iOS標準のタイマーだけなので、ショートカット経由でそれを起動します。
+   ショートカットの作り方は 行動計画_2026-08-14 §10 を参照。 */
+function nativeTimer(){
+  var sec = Math.max(1, left());
+  location.href = "shortcuts://run-shortcut?name=" + encodeURIComponent(DB.scName)
+                + "&input=text&text=" + sec;
+}
+
+/* ============================ 画面 ============================ */
+function render(){
+  var h = "";
+  if(view==="home") h = viewHome();
+  else if(view==="run") h = viewRun();
+  else if(view==="done") h = viewDone();
+  else if(view==="edit") h = viewEdit();
+  else if(view==="about") h = viewAbout();
+  document.getElementById("app").innerHTML = h;
+}
+
+function viewHome(){
+  var h = '<h1>切り替えルーティン</h1>'
+    + '<p class="sub">押した瞬間が合図です。タイマーの中でやり切れたら完了。<br>途中から始めても、飛ばしても構いません。</p>';
+  ORDER.forEach(function(k){
+    var s = DB.sets[k];
+    h += '<button class="setb" onclick="start(\''+k+'\')">'+s.icon+' '+esc(s.name)
+       + '<small>'+Math.round(limitOf(k)/60)+'分 ・ '+s.steps.length+'ステップ<br>'+esc(s.note)+'</small></button>';
+  });
+  h += '<div class="sec">崩れてしまったとき</div>';
+  h += '<button class="setb rescue" onclick="start(\'rescue\')">'+DB.sets.rescue.icon+' '+esc(DB.sets.rescue.name)
+     + '<small>'+esc(DB.sets.rescue.note)+'</small></button>';
+  h += '<div class="sec">設定</div>';
+  h += '<div class="card"><div class="toggle"><b>終了音を鳴らす</b>'
+     + '<button class="sw'+(DB.chime?' on':'')+'" onclick="DB.chime=!DB.chime;save();render()"><i></i></button></div></div>';
+  h += '<div class="card"><label>ショートカットの名前（iPhone標準タイマーを起動するもの）</label>'
+     + '<input type="text" id="scn" value="'+esc(DB.scName)+'" onchange="DB.scName=this.value;save()" '
+     + 'style="width:100%;background:#12151c;border:1px solid #303a4a;color:#e8ecf2;border-radius:10px;padding:12px;font-size:15px;font-family:inherit;-webkit-user-select:text;user-select:text">'
+     + '<p class="note">作り方は <b>行動計画_2026-08-14 §10</b> にあります。未作成でも、このアプリ自体は使えます。</p></div>';
+  h += '<button class="btn ghost" onclick="go(\'edit\')">文言・秒数を編集</button>';
+  h += '<button class="btn link" onclick="go(\'about\')">このアプリが持たないもの</button>';
+  return h;
+}
+
+function viewRun(){
+  var s = DB.sets[curKey], st = stepsOf(curKey), lim = limitOf(curKey), l = left();
+  var pct = Math.max(0, Math.min(100, (elapsed()/lim)*100));
+  var h = '<h1>'+s.icon+' '+esc(s.name)+'</h1><p class="sub">'+esc(s.note)+'</p>';
+  h += '<div class="card">';
+  h += '<div class="big'+(l<0?' over':'')+'">'+mmss(l)+'</div>';
+  h += '<div class="bigsub">'+(l<0 ? '時間は超えました。続けて大丈夫です' : '残り時間')+'</div>';
+  h += '<div class="bar"><i style="width:'+pct+'%"></i></div>';
+  h += '</div>';
+  st.forEach(function(x,i){
+    var cls = doneSet[i] ? "step done" : (i===curStep ? "step cur" : "step");
+    var mark = doneSet[i]==="done" ? "✓" : (doneSet[i]==="skip" ? "–" : (i+1));
+    h += '<div class="'+cls+'" onclick="toggleStep('+i+')"><div class="n">'+mark+'</div>'
+       + '<div class="t">'+(doneSet[i]==="skip"?'<s>'+esc(x.text)+'</s>':esc(x.text))
+       + '<em>目安 '+(x.sec>=60 ? Math.round(x.sec/60)+'分' : x.sec+'秒')+'</em></div></div>';
+  });
+  h += '<p class="note">タップで完了。もう一度タップで戻せます。<br>下の行から始めても構いません（上は「–」になるだけで、失敗にはなりません）。</p>';
+  h += '<button class="btn ghost" onclick="nativeTimer()">⏱ iPhoneのタイマーにも残り'+Math.max(1,Math.round(left()/60))+'分を渡す</button>';
+  h += '<p class="note">この画面は他のアプリを開くと止まります（戻れば時刻から計算し直すのでズレません）。<br><b>画面の上に残り時間を出したいときは、上のボタンでiPhone標準のタイマーへ渡してください。</b></p>';
+  h += '<button class="btn" onclick="finishNow()">ここまでで終える</button>';
+  if(!s.rescue) h += '<button class="btn ghost" onclick="start(\'rescue\')">🛟 崩れた — 復帰の1手へ</button>';
+  h += '<button class="btn link" onclick="stop();go(\'home\')">やめて最初に戻る</button>';
+  return h;
+}
+
+function viewDone(){
+  var s = DB.sets[curKey], n = DB.sets[curKey].steps.length, d = 0;
+  for(var i=0;i<n;i++){ if(doneSet[i]==="done") d++; }
+  var within = left() >= 0;
+  var h = '<h1>'+(d===n ? '完了' : 'ここまで')+'</h1>';
+  h += '<div class="card">';
+  h += '<div class="big ok">'+d+' / '+n+'</div>';
+  h += '<div class="bigsub">'+esc(s.name)+' ・ '+mmss(Math.abs(elapsed()))+'</div>';
+  h += '</div>';
+  if(d===n && within) h += '<div class="hint">タイマーの中でやり切れました。</div>';
+  else if(d===n) h += '<div class="hint">全部やれました。時間は超えましたが、見ているのは順番ではなく「やったかどうか」です。</div>';
+  else if(d>0) h += '<div class="hint">'+d+'つやれました。<b>0か1かではありません。</b>次の合図でまた押せます。</div>';
+  else h += '<div class="hint">今日はここまで。押したこと自体は残っています。次の合図でまた押してください。</div>';
+  h += '<p class="note">この結果はどこにも記録していません。連続日数も数えていません。</p>';
+  if(!s.rescue && d<n) h += '<button class="btn ghost" onclick="go(\'run\');tick=setInterval(render,250)">続きに戻る</button>';
+  h += '<button class="btn" onclick="stop();go(\'home\')">最初に戻る</button>';
+  return h;
+}
+
+function viewEdit(){
+  var h = '<h1>文言・秒数を編集</h1><p class="sub">1行に1ステップ。<b>秒数|文言</b> の形です。<br>行を減らしても増やしても構いません（Obsidian側の完遂ボーナスとは無関係です）。</p>';
+  ORDER.concat(["rescue"]).forEach(function(k){
+    var s = DB.sets[k];
+    h += '<div class="sec">'+s.icon+' '+esc(s.name)+'</div>';
+    h += '<div class="card"><label>全体の制限時間（秒）</label>'
+       + '<input type="number" id="lim_'+k+'" value="'+limitOf(k)+'" style="width:100%;background:#12151c;border:1px solid #303a4a;color:#e8ecf2;border-radius:10px;padding:12px;font-size:15px;font-family:inherit">'
+       + '<label>ステップ</label><textarea id="tx_'+k+'">'+esc(s.steps.join("\n"))+'</textarea></div>';
+  });
+  h += '<button class="btn save" onclick="saveEdit()">保存する</button>';
+  h += '<button class="btn link" onclick="resetAll()">既定の内容に戻す</button>';
+  h += '<button class="btn ghost" onclick="go(\'home\')">戻る</button>';
+  return h;
+}
+function saveEdit(){
+  ORDER.concat(["rescue"]).forEach(function(k){
+    var tx = document.getElementById("tx_"+k).value.split("\n").filter(function(x){return x.trim()!==""});
+    if(tx.length) DB.sets[k].steps = tx;
+    var lv = parseInt(document.getElementById("lim_"+k).value,10);
+    if(lv>0) DB.sets[k].limit = lv;
+  });
+  save(); go("home");
+}
+function resetAll(){
+  DB.sets = JSON.parse(JSON.stringify(DEFAULTS));
+  save(); go("home");
+}
+
+function viewAbout(){
+  var h = '<h1>このアプリが持たないもの</h1>';
+  h += '<div class="card"><p class="sub" style="margin:0">'
+    + '・<b>連続日数・達成率・できなかった日の記録</b><br>'
+    + '　「崩れた日が画面に残る」形を作らないためです。<br><br>'
+    + '・<b>Obsidianへの書き込み</b><br>'
+    + '　日次ノート・Points Tracker には一切触れません。記録の正はObsidianのままです。<br><br>'
+    + '・<b>順番どおりにしか進めない作り</b><br>'
+    + '　途中から始められ、飛ばせて、崩れたあとに復帰できます。<br>'
+    + '　1ステップ飛ばすと残りが全部崩れる形式が、「総くずれして戻れない」の正体だからです。<br><br>'
+    + '・<b>バックグラウンドでの動作</b><br>'
+    + '　他のアプリを開くとこの画面は止まります（iOSの仕様で、Webページには変えられません）。<br>'
+    + '　ただし戻ったときは時刻から計算し直すので、<b>残り時間はズレません</b>。ズレるのは音だけです。<br><br>'
+    + '・<b>画面上部（ダイナミックアイランド）への表示</b><br>'
+    + '　Webページからは出せません。iOS標準のタイマーだけができることです。<br>'
+    + '　実行中の「⏱ iPhoneのタイマーにも渡す」から標準タイマーを起動してください。'
+    + '</p></div>';
+  h += '<div class="hint">中身の設計（何を並べるか）は B.M.C. の担当です。合わなければ「文言・秒数を編集」で直接変えてください。<b>直したことを私に伝える義務はありません。</b></div>';
+  h += '<button class="btn ghost" onclick="go(\'home\')">戻る</button>';
+  return h;
+}
+
+render();
+</script>
+</body>
+</html>
