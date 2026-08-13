@@ -73,6 +73,14 @@ textarea{
   line-height:1.8;-webkit-user-select:text;user-select:text;
 }
 label{display:block;font-size:12.5px;color:#8a94a6;margin:12px 0 5px}
+.inp{
+  width:100%;background:#12151c;border:1px solid #303a4a;color:#e8ecf2;
+  border-radius:10px;padding:12px;font-size:15px;font-family:inherit;
+  -webkit-user-select:text;user-select:text;
+}
+.inp.icon{width:74px;text-align:center;font-size:21px;padding:10px}
+.iconrow{display:flex;gap:9px;align-items:center}
+.iconrow .inp:last-child{flex:1}
 .toggle{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:4px 0}
 .toggle b{font-weight:600;font-size:14px}
 .sw{width:52px;height:31px;border-radius:999px;background:#303a4a;border:none;position:relative;cursor:pointer;flex:none}
@@ -260,11 +268,12 @@ function viewHome(){
   ORDER.forEach(function(k){
     var s = DB.sets[k];
     h += '<button class="setb" onclick="start(\''+k+'\')">'+s.icon+' '+esc(s.name)
-       + '<small>'+Math.round(limitOf(k)/60)+'分 ・ '+s.steps.length+'ステップ<br>'+esc(s.note)+'</small></button>';
+       + '<small>'+Math.round(limitOf(k)/60)+'分 ・ '+s.steps.length+'ステップ'
+       + (s.note ? '<br>'+esc(s.note) : '')+'</small></button>';
   });
   h += '<div class="sec">崩れてしまったとき</div>';
   h += '<button class="setb rescue" onclick="start(\'rescue\')">'+DB.sets.rescue.icon+' '+esc(DB.sets.rescue.name)
-     + '<small>'+esc(DB.sets.rescue.note)+'</small></button>';
+     + (DB.sets.rescue.note ? '<small>'+esc(DB.sets.rescue.note)+'</small>' : '')+'</button>';
   h += '<div class="sec">設定</div>';
   h += '<div class="card"><div class="toggle"><b>終了音を鳴らす</b>'
      + '<button class="sw'+(DB.chime?' on':'')+'" onclick="DB.chime=!DB.chime;save();render()"><i></i></button></div></div>';
@@ -280,7 +289,7 @@ function viewHome(){
 function viewRun(){
   var s = DB.sets[curKey], st = stepsOf(curKey), lim = limitOf(curKey), l = left();
   var pct = Math.max(0, Math.min(100, (elapsed()/lim)*100));
-  var h = '<h1>'+s.icon+' '+esc(s.name)+'</h1><p class="sub">'+esc(s.note)+'</p>';
+  var h = '<h1>'+s.icon+' '+esc(s.name)+'</h1>'+(s.note ? '<p class="sub">'+esc(s.note)+'</p>' : '');
   h += '<div class="card">';
   h += '<div class="big'+(l<0?' over':'')+'">'+mmss(l)+'</div>';
   h += '<div class="bigsub">'+(l<0 ? '時間は超えました。続けて大丈夫です' : '残り時間')+'</div>';
@@ -322,21 +331,37 @@ function viewDone(){
 }
 
 function viewEdit(){
-  var h = '<h1>文言・秒数を編集</h1><p class="sub">1行に1ステップ。<b>秒数|文言</b> の形です。<br>行を減らしても増やしても構いません（Obsidian側の完遂ボーナスとは無関係です）。</p>';
+  var h = '<h1>中身を編集</h1><p class="sub">タイトル・説明文・ステップ・時間、すべて変えられます。<br>ステップは1行に1つ、<b>秒数|文言</b> の形です。<br>行を減らしても増やしても構いません（Obsidian側の完遂ボーナスとは無関係です）。</p>';
   ORDER.concat(["rescue"]).forEach(function(k){
     var s = DB.sets[k];
     h += '<div class="sec">'+s.icon+' '+esc(s.name)+'</div>';
-    h += '<div class="card"><label>全体の制限時間（秒）</label>'
-       + '<input type="number" id="lim_'+k+'" value="'+limitOf(k)+'" style="width:100%;background:#12151c;border:1px solid #303a4a;color:#e8ecf2;border-radius:10px;padding:12px;font-size:15px;font-family:inherit">'
-       + '<label>ステップ</label><textarea id="tx_'+k+'">'+esc(s.steps.join("\n"))+'</textarea></div>';
+    h += '<div class="card">'
+       + '<label>アイコンとタイトル</label>'
+       + '<div class="iconrow">'
+       + '<input class="inp icon" type="text" id="ic_'+k+'" value="'+esc(s.icon)+'" maxlength="4">'
+       + '<input class="inp" type="text" id="nm_'+k+'" value="'+esc(s.name)+'">'
+       + '</div>'
+       + '<label>説明文（一覧と実行中の画面に出ます）</label>'
+       + '<textarea class="inp" id="nt_'+k+'" style="min-height:76px;font-family:inherit;font-size:14px">'+esc(s.note)+'</textarea>'
+       + '<label>全体の制限時間（秒）</label>'
+       + '<input class="inp" type="number" id="lim_'+k+'" value="'+limitOf(k)+'">'
+       + '<label>ステップ</label>'
+       + '<textarea id="tx_'+k+'">'+esc(s.steps.join("\n"))+'</textarea>'
+       + '</div>';
   });
   h += '<button class="btn save" onclick="saveEdit()">保存する</button>';
+  h += '<p class="note">空にした欄は、変更なしとして扱います（うっかり消えないようにするためです）。</p>';
   h += '<button class="btn link" onclick="resetAll()">既定の内容に戻す</button>';
   h += '<button class="btn ghost" onclick="go(\'home\')">戻る</button>';
   return h;
 }
 function saveEdit(){
   ORDER.concat(["rescue"]).forEach(function(k){
+    var ic = document.getElementById("ic_"+k).value.trim();
+    if(ic) DB.sets[k].icon = ic;
+    var nm = document.getElementById("nm_"+k).value.trim();
+    if(nm) DB.sets[k].name = nm;
+    DB.sets[k].note = document.getElementById("nt_"+k).value.trim();
     var tx = document.getElementById("tx_"+k).value.split("\n").filter(function(x){return x.trim()!==""});
     if(tx.length) DB.sets[k].steps = tx;
     var lv = parseInt(document.getElementById("lim_"+k).value,10);
