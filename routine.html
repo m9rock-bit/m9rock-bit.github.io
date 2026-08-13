@@ -22,6 +22,7 @@ body{
 h1{font-size:19px;margin:4px 0 2px;letter-spacing:.02em}
 .sub{color:#8a94a6;font-size:12.5px;margin:0 0 16px;line-height:1.65}
 .card{background:#1a1f29;border:1px solid #262d3a;border-radius:14px;padding:15px 16px;margin-bottom:11px}
+.card.del{border-color:#5c3138;background:#1f1618}
 .sec{font-size:12px;color:#6f7a8c;margin:24px 0 9px;letter-spacing:.06em}
 .btn{
   display:block;width:100%;padding:17px;border-radius:12px;border:none;
@@ -31,11 +32,14 @@ h1{font-size:19px;margin:4px 0 2px;letter-spacing:.02em}
 .btn.ghost{background:#232b38;color:#cbd5e3;font-weight:600;font-size:14px;padding:12px}
 .btn.link{background:none;color:#8a94a6;font-size:13px;padding:9px;font-weight:500;text-decoration:underline}
 .btn.save{background:#2a3a2c;color:#cfe6d2}
+.btn.danger{background:#3a2427;color:#e8b3b8}
+.btn.danger.armed{background:#7d2c35;color:#fff}
 .row{display:flex;gap:9px}
 .row>*{flex:1}
 
 .big{font-size:64px;font-weight:200;text-align:center;font-variant-numeric:tabular-nums;margin:6px 0 2px;letter-spacing:-.03em;line-height:1.1}
 .big.over{color:#8a94a6;font-size:52px}
+.big.ok{color:#9ec8a4}
 .bigsub{text-align:center;color:#8a94a6;font-size:13px;margin-bottom:6px}
 .bar{height:5px;background:#232b38;border-radius:3px;overflow:hidden;margin:10px 0 2px}
 .bar>i{display:block;height:100%;background:#e0a86a}
@@ -65,10 +69,10 @@ h1{font-size:19px;margin:4px 0 2px;letter-spacing:.02em}
 .step .t s{color:#6f7a8c}
 
 .hint{color:#cbd5e3;font-size:12.5px;line-height:1.7;background:#1f1c19;border:1px solid #2f2a24;border-radius:10px;padding:11px 13px;margin-top:11px}
+.warn{color:#e8b3b8;font-size:12.5px;line-height:1.7;background:#1f1618;border:1px solid #4a2a2f;border-radius:10px;padding:11px 13px;margin-top:11px}
 .note{color:#6f7a8c;font-size:12px;line-height:1.75;margin:10px 0 0}
-.ok{color:#9ec8a4}
 textarea{
-  width:100%;min-height:190px;background:#12151c;border:1px solid #303a4a;color:#e8ecf2;
+  width:100%;min-height:170px;background:#12151c;border:1px solid #303a4a;color:#e8ecf2;
   border-radius:10px;padding:12px;font-size:14px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
   line-height:1.8;-webkit-user-select:text;user-select:text;
 }
@@ -78,9 +82,17 @@ label{display:block;font-size:12.5px;color:#8a94a6;margin:12px 0 5px}
   border-radius:10px;padding:12px;font-size:15px;font-family:inherit;
   -webkit-user-select:text;user-select:text;
 }
-.inp.icon{width:74px;text-align:center;font-size:21px;padding:10px}
+.inp.icon{width:74px;text-align:center;font-size:21px;padding:10px;flex:none}
 .iconrow{display:flex;gap:9px;align-items:center}
-.iconrow .inp:last-child{flex:1}
+.tools{display:flex;gap:7px;margin-top:12px}
+.tools button{
+  flex:1;background:#232b38;border:1px solid #303a4a;color:#cbd5e3;border-radius:10px;
+  padding:11px 4px;font-size:13px;font-family:inherit;cursor:pointer;font-weight:600;
+}
+.tools button:disabled{opacity:.32}
+.tools button.rm{background:#3a2427;border-color:#5c3138;color:#e8b3b8}
+.tools button.rm.armed{background:#7d2c35;border-color:#9c3a45;color:#fff}
+.tag{display:inline-block;background:#232b38;border:1px solid #303a4a;border-radius:999px;padding:2px 9px;font-size:11px;color:#8a94a6;margin-left:6px;vertical-align:middle}
 .toggle{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:4px 0}
 .toggle b{font-weight:600;font-size:14px}
 .sw{width:52px;height:31px;border-radius:999px;background:#303a4a;border:none;position:relative;cursor:pointer;flex:none}
@@ -94,7 +106,7 @@ label{display:block;font-size:12.5px;color:#8a94a6;margin:12px 0 5px}
 <script>
 /* ============================================================
    B.M.C. 切り替えルーティン (routine.html)
-   作成: B.M.C.(Claude) / 2026-08-14
+   作成: B.M.C.(Claude) / 2026-08-14（v2: セットの追加・削除・並べ替えに対応）
    設計の前提（変えないでください）:
    - このアプリは「その場の道具」です。記録の正は Obsidian のままで、
      ここから日次ノート・Points Tracker へは一切書きません。
@@ -102,82 +114,86 @@ label{display:block;font-size:12.5px;color:#8a94a6;margin:12px 0 5px}
      「崩れた日が画面に残る」形を作らないためです。
    - 途中参加・飛ばし・崩れたあとの再開を、いつでもできるようにしてあります
      （順番どおりにしか進めない作りが「総くずれして戻れない」の正体のため）。
+   - セットは配列です。追加・削除・並べ替えは自由。ただし🛟（rescue:true）は
+     「崩れた」ボタンの飛び先なので、必ず1つ残る作りにしてあります。
    ============================================================ */
 
 var KEY = "bmc_routine_v1";
 
 /* --- 既定のルーティン ---------------------------------------
    すべて既存の記録から採っています（新しく思いついた行動は入れていません）。
-   出どころは各セットの note に書いています。
-   秒|文言 の形式。アプリ内の「文言を編集」からいつでも変えられます。 */
-var DEFAULTS = {
-  home: {
-    icon:"🏠", name:"在宅勤務・夕方の切り替え", limit:900,
+   steps は「秒|文言」の形式。すべてアプリ内で編集できます。 */
+function defaults(){ return [
+  { id:"home", icon:"🏠", name:"在宅勤務・夕方の切り替え", limit:900,
     note:"仕事を終える瞬間に押します。在宅は「帰る」動作がないので、これが唯一の切れ目です。",
     steps:[
       "60|PCを閉じて、視界の外へ置く（別室・引き出し・カバンの中）",
       "60|洗面所へ行ってマウスウォッシュ",
       "300|温かい飲み物を1杯いれて、キッチンの外で飲み切る",
       "480|両手がふさがることを1つ始める（子どもとゲーム／お風呂の準備）"
-    ]
-  },
-  commute: {
-    icon:"🚃", name:"帰路（職場を出たら）", limit:600,
+    ]},
+  { id:"commute", icon:"🚃", name:"帰路（職場を出たら）", limit:600,
     note:"駅の店より手前で押します。8/13はスーパーが電車より先でした。",
     steps:[
       "30|イヤホンを付ける",
       "30|ゲームを起動する（両手がふさがるもの。音声だけにしない）",
       "480|夢中になったまま改札を通る／店の前を通過する",
       "60|家に着いたら、キッチンではなく洗面所へ入る"
-    ]
-  },
-  oneope: {
-    icon:"👶", name:"ワンオペの夜", limit:900,
+    ]},
+  { id:"oneope", icon:"👶", name:"ワンオペの夜", limit:900,
     note:"Routine_Master の Night_Work_oneope は18:50始まりです。8/13の崩れはその前でした。",
     steps:[
       "60|マウスウォッシュ",
       "300|温かい飲み物を1杯、洗面所・脱衣所で飲み切る",
       "300|終わらないと思っているタスクを分解 → 今日やる分だけ決める",
       "240|残りは明日に回すと決めて、画面を閉じる"
-    ]
-  },
-  overtime: {
-    icon:"🌙", name:"残業日の夜", limit:600,
+    ]},
+  { id:"overtime", icon:"🌙", name:"残業日の夜", limit:600,
     note:"17:45の行は既に機能しています（8/12はここだけチェックが付き、間食も最少でした）。",
     steps:[
       "60|飲み物を用意して一度席を立つ",
       "60|PCを閉じてカバンに入れる",
       "300|乗車15分、明日やることを書き切る",
       "180|書き切ったらゲームか音声に切り替える"
-    ]
-  },
-  rescue: {
-    icon:"🛟", name:"崩れたあとの復帰（1手だけ）", limit:180, rescue:true,
+    ]},
+  { id:"rescue", icon:"🛟", name:"崩れたあとの復帰（1手だけ）", limit:180, rescue:true,
     note:"やり直しではありません。今日をここで終わらせて、次の合図まで戻るためのものです。",
     steps:[
       "60|口をゆすぐ（または歯を磨く）＝今日の食事はここで終わり",
       "120|座って、水か炭酸水を1杯飲み切る"
-    ]
+    ]}
+]; }
+
+var DB = { v:2, sets:null, chime:true, scName:"ルーティンタイマー" };
+try{
+  var raw = localStorage.getItem(KEY);
+  if(raw){
+    var p = JSON.parse(raw);
+    if(typeof p.chime==="boolean") DB.chime = p.chime;
+    if(p.scName) DB.scName = p.scName;
+    if(Array.isArray(p.sets)) DB.sets = p.sets;
+    else if(p.sets && typeof p.sets==="object"){
+      /* v1（キー付きオブジェクト）からの移行。編集済みの内容は保持する。 */
+      var order = ["home","commute","oneope","overtime","rescue"], out = [];
+      order.forEach(function(k){ if(p.sets[k]){ var s = p.sets[k]; s.id = k; out.push(s); } });
+      for(var k2 in p.sets){ if(order.indexOf(k2)<0){ p.sets[k2].id = k2; out.push(p.sets[k2]); } }
+      DB.sets = out;
+    }
   }
-};
-
-var ORDER = ["home","commute","oneope","overtime"];
-
-var DB = { sets:null, chime:true, scName:"ルーティンタイマー" };
-try{ var r = localStorage.getItem(KEY); if(r){ var p = JSON.parse(r); if(p.sets) DB.sets = p.sets; if(typeof p.chime==="boolean") DB.chime = p.chime; if(p.scName) DB.scName = p.scName; } }catch(e){}
-if(!DB.sets) DB.sets = JSON.parse(JSON.stringify(DEFAULTS));
-/* 既定に後から足したセットを取り込む（既存の編集は壊さない） */
-for(var k in DEFAULTS){ if(!DB.sets[k]) DB.sets[k] = JSON.parse(JSON.stringify(DEFAULTS[k])); }
+}catch(e){}
+if(!DB.sets || !DB.sets.length) DB.sets = defaults();
+if(!DB.sets.some(function(s){return s.rescue})) DB.sets.push(defaults().filter(function(s){return s.rescue})[0]);
 
 function save(){ try{ localStorage.setItem(KEY, JSON.stringify(DB)); }catch(e){} }
 
 /* --- 状態 --- */
 var view = "home";
-var curKey = null;      // 実行中のセット
-var startAt = 0;        // 開始時刻
-var doneSet = {};       // 完了したステップの index
+var curId = null;
+var startAt = 0;
+var doneSet = {};
 var curStep = 0;
 var tick = null;
+var armed = null;   /* 削除の1回目を押したセットid（2回押しで削除） */
 
 /* --- 音 --- */
 var ac = null;
@@ -198,44 +214,43 @@ function chimeStep(){ beep(660,.18); }
 function chimeDone(){ beep(587,.22); setTimeout(function(){beep(880,.45);},200); }
 
 /* --- 補助 --- */
-function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function esc(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 function mmss(s){ var m=Math.floor(Math.abs(s)/60), x=Math.abs(s)%60; return (s<0?"+":"")+m+":"+String(x).padStart(2,"0"); }
 function parseStep(line){
-  var i = line.indexOf("|");
-  if(i<0) return { sec:60, text:line.trim() };
+  var i = String(line).indexOf("|");
+  if(i<0) return { sec:60, text:String(line).trim() };
   return { sec: parseInt(line.slice(0,i),10)||60, text: line.slice(i+1).trim() };
 }
-function stepsOf(key){ return DB.sets[key].steps.map(parseStep); }
-function limitOf(key){
-  var s = DB.sets[key];
-  if(s.limit) return s.limit;
-  return stepsOf(key).reduce(function(a,b){return a+b.sec;},0);
-}
+function setOf(id){ for(var i=0;i<DB.sets.length;i++){ if(DB.sets[i].id===id) return DB.sets[i]; } return null; }
+function idxOf(id){ for(var i=0;i<DB.sets.length;i++){ if(DB.sets[i].id===id) return i; } return -1; }
+function normals(){ return DB.sets.filter(function(s){return !s.rescue}); }
+function rescues(){ return DB.sets.filter(function(s){return s.rescue}); }
+function stepsOf(s){ return s.steps.map(parseStep); }
+function limitOf(s){ return s.limit ? s.limit : stepsOf(s).reduce(function(a,b){return a+b.sec;},0); }
 function elapsed(){ return startAt ? Math.floor((Date.now()-startAt)/1000) : 0; }
-function left(){ return limitOf(curKey) - elapsed(); }
-function allDone(){ var n = DB.sets[curKey].steps.length; for(var i=0;i<n;i++){ if(!doneSet[i]) return false; } return true; }
+function left(){ var s = setOf(curId); return s ? limitOf(s) - elapsed() : 0; }
+function allDone(){ var s=setOf(curId); for(var i=0;i<s.steps.length;i++){ if(!doneSet[i]) return false; } return true; }
+function newId(){ return "s" + Date.now().toString(36) + Math.floor(Math.random()*900+100); }
 
-function go(v){ view = v; render(); }
+function go(v){ armed = null; view = v; render(); }
 
 /* --- 実行 --- */
-function start(key, fromIndex){
-  curKey = key; doneSet = {}; curStep = fromIndex||0;
+function start(id, fromIndex){
+  curId = id; doneSet = {}; curStep = fromIndex||0;
   for(var i=0;i<curStep;i++) doneSet[i] = "skip";
   startAt = Date.now();
   if(tick) clearInterval(tick);
   tick = setInterval(render, 250);
   view = "run"; render();
 }
-function stop(){ if(tick) clearInterval(tick); tick=null; startAt=0; curKey=null; doneSet={}; curStep=0; }
+function stop(){ if(tick) clearInterval(tick); tick=null; startAt=0; curId=null; doneSet={}; curStep=0; }
 function toggleStep(i){
   if(doneSet[i]){ delete doneSet[i]; render(); return; }
   doneSet[i] = "done";
-  var n = DB.sets[curKey].steps.length;
-  var next = -1;
-  for(var j=0;j<n;j++){ if(!doneSet[j]){ next=j; break; } }
-  curStep = next<0 ? n : next;
-  if(allDone()){ chimeDone(); view="done"; }
-  else chimeStep();
+  var s = setOf(curId), next = -1;
+  for(var j=0;j<s.steps.length;j++){ if(!doneSet[j]){ next=j; break; } }
+  curStep = next<0 ? s.steps.length : next;
+  if(allDone()){ chimeDone(); view="done"; } else chimeStep();
   render();
 }
 function finishNow(){ if(tick) clearInterval(tick); tick=null; view="done"; render(); }
@@ -265,31 +280,31 @@ function render(){
 function viewHome(){
   var h = '<h1>切り替えルーティン</h1>'
     + '<p class="sub">押した瞬間が合図です。タイマーの中でやり切れたら完了。<br>途中から始めても、飛ばしても構いません。</p>';
-  ORDER.forEach(function(k){
-    var s = DB.sets[k];
-    h += '<button class="setb" onclick="start(\''+k+'\')">'+s.icon+' '+esc(s.name)
-       + '<small>'+Math.round(limitOf(k)/60)+'分 ・ '+s.steps.length+'ステップ'
+  normals().forEach(function(s){
+    h += '<button class="setb" onclick="start(\''+s.id+'\')">'+esc(s.icon)+' '+esc(s.name)
+       + '<small>'+Math.round(limitOf(s)/60)+'分 ・ '+s.steps.length+'ステップ'
        + (s.note ? '<br>'+esc(s.note) : '')+'</small></button>';
   });
   h += '<div class="sec">崩れてしまったとき</div>';
-  h += '<button class="setb rescue" onclick="start(\'rescue\')">'+DB.sets.rescue.icon+' '+esc(DB.sets.rescue.name)
-     + (DB.sets.rescue.note ? '<small>'+esc(DB.sets.rescue.note)+'</small>' : '')+'</button>';
+  rescues().forEach(function(s){
+    h += '<button class="setb rescue" onclick="start(\''+s.id+'\')">'+esc(s.icon)+' '+esc(s.name)
+       + (s.note ? '<small>'+esc(s.note)+'</small>' : '')+'</button>';
+  });
   h += '<div class="sec">設定</div>';
   h += '<div class="card"><div class="toggle"><b>終了音を鳴らす</b>'
      + '<button class="sw'+(DB.chime?' on':'')+'" onclick="DB.chime=!DB.chime;save();render()"><i></i></button></div></div>';
   h += '<div class="card"><label>ショートカットの名前（iPhone標準タイマーを起動するもの）</label>'
-     + '<input type="text" id="scn" value="'+esc(DB.scName)+'" onchange="DB.scName=this.value;save()" '
-     + 'style="width:100%;background:#12151c;border:1px solid #303a4a;color:#e8ecf2;border-radius:10px;padding:12px;font-size:15px;font-family:inherit;-webkit-user-select:text;user-select:text">'
+     + '<input class="inp" type="text" id="scn" value="'+esc(DB.scName)+'" onchange="DB.scName=this.value;save()">'
      + '<p class="note">作り方は <b>行動計画_2026-08-14 §10</b> にあります。未作成でも、このアプリ自体は使えます。</p></div>';
-  h += '<button class="btn ghost" onclick="go(\'edit\')">文言・秒数を編集</button>';
+  h += '<button class="btn ghost" onclick="go(\'edit\')">セットを編集・追加・削除</button>';
   h += '<button class="btn link" onclick="go(\'about\')">このアプリが持たないもの</button>';
   return h;
 }
 
 function viewRun(){
-  var s = DB.sets[curKey], st = stepsOf(curKey), lim = limitOf(curKey), l = left();
+  var s = setOf(curId), st = stepsOf(s), lim = limitOf(s), l = left();
   var pct = Math.max(0, Math.min(100, (elapsed()/lim)*100));
-  var h = '<h1>'+s.icon+' '+esc(s.name)+'</h1>'+(s.note ? '<p class="sub">'+esc(s.note)+'</p>' : '');
+  var h = '<h1>'+esc(s.icon)+' '+esc(s.name)+'</h1>'+(s.note ? '<p class="sub">'+esc(s.note)+'</p>' : '');
   h += '<div class="card">';
   h += '<div class="big'+(l<0?' over':'')+'">'+mmss(l)+'</div>';
   h += '<div class="bigsub">'+(l<0 ? '時間は超えました。続けて大丈夫です' : '残り時間')+'</div>';
@@ -306,20 +321,18 @@ function viewRun(){
   h += '<button class="btn ghost" onclick="nativeTimer()">⏱ iPhoneのタイマーにも残り'+Math.max(1,Math.round(left()/60))+'分を渡す</button>';
   h += '<p class="note">この画面は他のアプリを開くと止まります（戻れば時刻から計算し直すのでズレません）。<br><b>画面の上に残り時間を出したいときは、上のボタンでiPhone標準のタイマーへ渡してください。</b></p>';
   h += '<button class="btn" onclick="finishNow()">ここまでで終える</button>';
-  if(!s.rescue) h += '<button class="btn ghost" onclick="start(\'rescue\')">🛟 崩れた — 復帰の1手へ</button>';
+  if(!s.rescue && rescues().length) h += '<button class="btn ghost" onclick="start(\''+rescues()[0].id+'\')">🛟 崩れた — 復帰の1手へ</button>';
   h += '<button class="btn link" onclick="stop();go(\'home\')">やめて最初に戻る</button>';
   return h;
 }
 
 function viewDone(){
-  var s = DB.sets[curKey], n = DB.sets[curKey].steps.length, d = 0;
+  var s = setOf(curId), n = s.steps.length, d = 0;
   for(var i=0;i<n;i++){ if(doneSet[i]==="done") d++; }
   var within = left() >= 0;
   var h = '<h1>'+(d===n ? '完了' : 'ここまで')+'</h1>';
-  h += '<div class="card">';
-  h += '<div class="big ok">'+d+' / '+n+'</div>';
-  h += '<div class="bigsub">'+esc(s.name)+' ・ '+mmss(Math.abs(elapsed()))+'</div>';
-  h += '</div>';
+  h += '<div class="card"><div class="big ok">'+d+' / '+n+'</div>';
+  h += '<div class="bigsub">'+esc(s.name)+' ・ '+mmss(Math.abs(elapsed()))+'</div></div>';
   if(d===n && within) h += '<div class="hint">タイマーの中でやり切れました。</div>';
   else if(d===n) h += '<div class="hint">全部やれました。時間は超えましたが、見ているのは順番ではなく「やったかどうか」です。</div>';
   else if(d>0) h += '<div class="hint">'+d+'つやれました。<b>0か1かではありません。</b>次の合図でまた押せます。</div>';
@@ -330,49 +343,92 @@ function viewDone(){
   return h;
 }
 
+/* --------- 編集（追加・削除・並べ替え） --------- */
+function collect(){
+  /* 画面に入力されている内容をDBへ取り込む。移動・削除・追加の前に必ず呼ぶ。 */
+  DB.sets.forEach(function(s){
+    var ic = document.getElementById("ic_"+s.id); if(ic && ic.value.trim()) s.icon = ic.value.trim();
+    var nm = document.getElementById("nm_"+s.id); if(nm && nm.value.trim()) s.name = nm.value.trim();
+    var nt = document.getElementById("nt_"+s.id); if(nt) s.note = nt.value.trim();
+    var lm = document.getElementById("lim_"+s.id);
+    if(lm){ var lv = parseInt(lm.value,10); if(lv>0) s.limit = lv; }
+    var tx = document.getElementById("tx_"+s.id);
+    if(tx){ var arr = tx.value.split("\n").filter(function(x){return x.trim()!==""}); if(arr.length) s.steps = arr; }
+  });
+}
 function viewEdit(){
-  var h = '<h1>中身を編集</h1><p class="sub">タイトル・説明文・ステップ・時間、すべて変えられます。<br>ステップは1行に1つ、<b>秒数|文言</b> の形です。<br>行を減らしても増やしても構いません（Obsidian側の完遂ボーナスとは無関係です）。</p>';
-  ORDER.concat(["rescue"]).forEach(function(k){
-    var s = DB.sets[k];
-    h += '<div class="sec">'+s.icon+' '+esc(s.name)+'</div>';
-    h += '<div class="card">'
+  var h = '<h1>セットを編集・追加・削除</h1><p class="sub">タイトル・説明文・時間・ステップ、すべて変えられます。<br>ステップは1行に1つ、<b>秒数|文言</b> の形です。</p>';
+  DB.sets.forEach(function(s,i){
+    var isArmed = (armed===s.id);
+    h += '<div class="sec">'+esc(s.icon)+' '+esc(s.name)+(s.rescue?'<span class="tag">崩れたとき用</span>':'')+'</div>';
+    h += '<div class="card'+(isArmed?' del':'')+'">'
        + '<label>アイコンとタイトル</label>'
        + '<div class="iconrow">'
-       + '<input class="inp icon" type="text" id="ic_'+k+'" value="'+esc(s.icon)+'" maxlength="4">'
-       + '<input class="inp" type="text" id="nm_'+k+'" value="'+esc(s.name)+'">'
+       + '<input class="inp icon" type="text" id="ic_'+s.id+'" value="'+esc(s.icon)+'" maxlength="4">'
+       + '<input class="inp" type="text" id="nm_'+s.id+'" value="'+esc(s.name)+'">'
        + '</div>'
        + '<label>説明文（一覧と実行中の画面に出ます）</label>'
-       + '<textarea class="inp" id="nt_'+k+'" style="min-height:76px;font-family:inherit;font-size:14px">'+esc(s.note)+'</textarea>'
+       + '<textarea class="inp" id="nt_'+s.id+'" style="min-height:76px;font-family:inherit;font-size:14px">'+esc(s.note)+'</textarea>'
        + '<label>全体の制限時間（秒）</label>'
-       + '<input class="inp" type="number" id="lim_'+k+'" value="'+limitOf(k)+'">'
+       + '<input class="inp" type="number" id="lim_'+s.id+'" value="'+limitOf(s)+'">'
        + '<label>ステップ</label>'
-       + '<textarea id="tx_'+k+'">'+esc(s.steps.join("\n"))+'</textarea>'
+       + '<textarea id="tx_'+s.id+'">'+esc(s.steps.join("\n"))+'</textarea>'
+       + '<div class="tools">'
+       + '<button onclick="move(\''+s.id+'\',-1)"'+(i===0?' disabled':'')+'>↑ 上へ</button>'
+       + '<button onclick="move(\''+s.id+'\',1)"'+(i===DB.sets.length-1?' disabled':'')+'>↓ 下へ</button>'
+       + '<button class="rm'+(isArmed?' armed':'')+'" onclick="del(\''+s.id+'\')">'
+       + (isArmed?'もう一度押すと削除':'削除')+'</button>'
+       + '</div>'
+       + (isArmed ? '<div class="warn">このセットを削除します。<b>元に戻せません。</b>やめるときは、上へ・下へか「保存する」を押してください。</div>' : '')
        + '</div>';
   });
-  h += '<button class="btn save" onclick="saveEdit()">保存する</button>';
-  h += '<p class="note">空にした欄は、変更なしとして扱います（うっかり消えないようにするためです）。</p>';
-  h += '<button class="btn link" onclick="resetAll()">既定の内容に戻す</button>';
-  h += '<button class="btn ghost" onclick="go(\'home\')">戻る</button>';
+  h += '<button class="btn ghost" onclick="addSet()">＋ セットを追加する</button>';
+  h += '<button class="btn save" onclick="collect();save();go(\'home\')">保存する</button>';
+  h += '<p class="note">空にした欄は、変更なしとして扱います（うっかり消えないようにするためです）。説明文だけは空にできます。<br>並べ替え・削除・追加は、押した時点でその場で保存されます。</p>';
+  h += '<button class="btn link" onclick="resetAll()">既定の5セットに戻す</button>';
+  h += '<button class="btn ghost" onclick="collect();save();go(\'home\')">戻る</button>';
   return h;
 }
-function saveEdit(){
-  ORDER.concat(["rescue"]).forEach(function(k){
-    var ic = document.getElementById("ic_"+k).value.trim();
-    if(ic) DB.sets[k].icon = ic;
-    var nm = document.getElementById("nm_"+k).value.trim();
-    if(nm) DB.sets[k].name = nm;
-    DB.sets[k].note = document.getElementById("nt_"+k).value.trim();
-    var tx = document.getElementById("tx_"+k).value.split("\n").filter(function(x){return x.trim()!==""});
-    if(tx.length) DB.sets[k].steps = tx;
-    var lv = parseInt(document.getElementById("lim_"+k).value,10);
-    if(lv>0) DB.sets[k].limit = lv;
-  });
-  save(); go("home");
+function move(id,d){
+  collect();
+  var i = idxOf(id), j = i+d;
+  if(i<0 || j<0 || j>=DB.sets.length) return;
+  var t = DB.sets[i]; DB.sets[i] = DB.sets[j]; DB.sets[j] = t;
+  armed = null; save(); render();
 }
-function resetAll(){
-  DB.sets = JSON.parse(JSON.stringify(DEFAULTS));
-  save(); go("home");
+function del(id){
+  if(armed!==id){ collect(); armed = id; render(); return; }
+  collect();
+  var s = setOf(id);
+  if(s && s.rescue && rescues().length<=1){
+    /* 🛟は「崩れた」ボタンの飛び先なので、最後の1つは消さない */
+    armed = null; render();
+    alertLess("崩れたとき用のセットは、最後の1つは削除できません。中身は自由に書き換えられます。");
+    return;
+  }
+  DB.sets.splice(idxOf(id),1);
+  armed = null; save(); render();
 }
+function alertLess(msg){
+  /* ダイアログを出さずにメッセージを見せる（iOSでダイアログが画面を塞ぐのを避ける） */
+  var d = document.createElement("div");
+  d.className = "warn"; d.style.position = "fixed"; d.style.left = "12px"; d.style.right = "12px";
+  d.style.bottom = "20px"; d.style.zIndex = "9"; d.style.maxWidth = "536px"; d.style.margin = "0 auto";
+  d.textContent = msg;
+  document.body.appendChild(d);
+  setTimeout(function(){ if(d.parentNode) d.parentNode.removeChild(d); }, 4000);
+}
+function addSet(){
+  collect();
+  var s = { id:newId(), icon:"⏱", name:"新しいセット", note:"", limit:600,
+            steps:["60|やること1","300|やること2"] };
+  var last = -1;
+  DB.sets.forEach(function(x,i){ if(!x.rescue) last = i; });
+  DB.sets.splice(last+1, 0, s);   /* 🛟より前に入れる */
+  armed = null; save(); render();
+  setTimeout(function(){ var el = document.getElementById("nm_"+s.id); if(el){ el.focus(); el.select(); } }, 30);
+}
+function resetAll(){ DB.sets = defaults(); armed = null; save(); go("home"); }
 
 function viewAbout(){
   var h = '<h1>このアプリが持たないもの</h1>';
@@ -391,7 +447,8 @@ function viewAbout(){
     + '　Webページからは出せません。iOS標準のタイマーだけができることです。<br>'
     + '　実行中の「⏱ iPhoneのタイマーにも渡す」から標準タイマーを起動してください。'
     + '</p></div>';
-  h += '<div class="hint">中身の設計（何を並べるか）は B.M.C. の担当です。合わなければ「文言・秒数を編集」で直接変えてください。<b>直したことを私に伝える義務はありません。</b></div>';
+  h += '<div class="hint">中身の設計（何を並べるか）は B.M.C. の担当ですが、<b>合わなければ全部書き換えて構いません。</b>セットの追加・削除・並べ替えもできます。<b>直したことを私に伝える義務はありません。</b></div>';
+  h += '<div class="warn">中身は<b>この端末のブラウザの中だけ</b>に保存されます。履歴やサイトデータを消すと既定に戻ります。Obsidianには入りません。</div>';
   h += '<button class="btn ghost" onclick="go(\'home\')">戻る</button>';
   return h;
 }
