@@ -74,8 +74,41 @@ textarea{width:100%;height:120px;background:#12151c;border:1px solid #303a4a;col
 
 <script>
 /* =========================================================================
-   B.M.C. 食事の間隔メモ（fast.html） v3 — 2026-08-14
-   （v1: 2026-08-08 ／ v2: 2026-08-09）
+   B.M.C. 食事の間隔メモ（fast.html） v4 — 2026-08-15
+   （v1: 2026-08-08 ／ v2: 2026-08-09 ／ v3: 2026-08-14）
+
+   ■ v4 での変更（2026-08-15 Manamiさんのご依頼「時間ごとに体調を入力できるように」）
+
+     1. 体調を、気分と同じく「押した時刻つきで何度でも」残せるようにした。
+        v3までの体調（DB.active.c1）は記録全体に1セットだけで時刻を持たず、
+        「何時間目に頭痛が来たか」が残せなかった。ここが今回の依頼の中身。
+
+     2. 体調と気分の欄を1つに統合した（Manamiさんのご指定）。押す場所は1か所・一列。
+
+        ⚠️ 統合したのは【画面だけ】で、【データは分けたまま】です。理由：
+        気分の6語は Template_Daily_Review.md 338行と同一にしてあり（v3の指定）、
+        日次ノート側の「気分」と突き合わせるための語彙です。ここに体調の語を
+        混ぜて1つの配列に落とすと、その突き合わせが二度と成立しなくなります。
+        そこで各メモに種別 k を持たせました（k:"m"＝気分／k:"c"＝体調）。
+        → 画面は1か所、集計と書き出しでは今までどおり2種類として分けられる。
+        【この設計を崩さないでください。】k を落として1種類にすると、
+        画面の見た目は同じままデータだけが不可逆に混ざります。
+
+     3. 保存の形（KEY は v1 のまま変えない）
+        DB.active.marks = [{t:押した絶対時刻, v:"頭痛", k:"c"}, ...]
+        ・v3までの moods は起動時に marks へ写す（1回だけ・冪等）。moods 配列は
+          消さずに残すが、以後どこからも読まない（読むと二重に数える）。
+        ・v3以前の c1（記録全体に1セットの体調）は過去の記録にだけ残る。時刻が
+          無いので marks には写せない。記録一覧では今までどおり表示する。
+        ・経過時間は保存せず、表示・集計のたびに「押した時刻 − 開始時刻」で
+          計算し直す（v3と同じ理由：開始時刻はあとから直せるため）。
+
+     4. 体調チップから「なし」を外した。統合後は気分側の「🤐 特になし」と意味が
+        重なり、同じ列に2つ並ぶため。何も無い時刻は押さなければ済む。
+        （過去の記録に残っている「なし」の文字は消していない。）
+
+     5. 「気分の振り返り」を「経過時間の振り返り」に改め、体調・気分の2ブロックにした。
+        帯の作り方・並べ方・禁止事項は v3 のまま一切変えていない。
 
    ■ v3 での変更（依頼 指示_2026-08-14_1 §② Manamiさんのご記入）
        「断食経過時間帯で、その時の気分のメモが残したい。また過去にどの経過時間帯に
@@ -150,6 +183,18 @@ if(!Array.isArray(DB.conds)) DB.conds=[];   /* 自分で書いた体調（次回
 DB.records.forEach(function(r){ if(!Array.isArray(r.moods)) r.moods=[]; });
 if(DB.active && !Array.isArray(DB.active.moods)) DB.active.moods=[];
 
+/* v4: 時刻つきメモを marks に一本化する（体調 k:"c" ／ 気分 k:"m"）。
+   ⚠️ 冪等にすること。marks が既にあれば何もしない。ここを毎回作り直すと、
+      消したメモが起動のたびに moods から復活する。                         */
+function migrateMarks(rec){
+  if(!rec) return;
+  if(Array.isArray(rec.marks)) return;
+  rec.marks=(rec.moods||[]).map(function(o){ return {t:o.t, v:o.m, k:"m"}; });
+}
+DB.records.forEach(migrateMarks);
+migrateMarks(DB.active);
+try{ localStorage.setItem(KEY,JSON.stringify(DB)); }catch(e){}   /* 写した結果をその場で確定させる */
+
 function save(){
   try{ localStorage.setItem(KEY,JSON.stringify(DB)); }
   catch(e){ alert("端末に保存できませんでした。下の書き出し欄からコピーして保管してください。"); }
@@ -187,8 +232,10 @@ const REAP_H=36;   /* v2で24→36。理由は冒頭コメント4を参照 */
 function reap(){
   if(!DB.active) return false;
   if(Date.now()-DB.active.start <= REAP_H*MS_H) return false;
-  /* v3: 気分メモも一緒に閉じる。静かに閉じるだけで、残した気分は消さない。 */
-  DB.records.push({start:DB.active.start,end:null,ms:null,c1:DB.active.c1||[],c2:[],moods:DB.active.moods||[]});
+  /* v3: 気分メモも一緒に閉じる。静かに閉じるだけで、残したメモは消さない。
+     v4: marks（時刻つきの体調・気分）も同様にそのまま持って閉じる。 */
+  DB.records.push({start:DB.active.start,end:null,ms:null,c1:DB.active.c1||[],c2:[],
+                   moods:DB.active.moods||[],marks:DB.active.marks||[]});
   DB.active=null; save(); return true;
 }
 
@@ -200,27 +247,43 @@ function avg7(){
   return {ms: v.reduce((a,r)=>a+r.ms,0)/v.length, n:v.length};
 }
 
-/* ---------- 体調（1タップ・自由入力あり） ----------
-   v2: 固定4つに加えて「＋ 自分で書く」で入力でき、書いたものは次回から並ぶ。
+/* ---------- 体調・気分の語（v4で1つの列に統合） ----------
+   ⚠️ 2つのグループを【1つの配列に混ぜないでください。】
+      MOODS は Template_Daily_Review.md 338行の6つと同一で、日次ノートの「気分」と
+      突き合わせるための語彙です（v3の指定）。CONDS は体調で、こちらは自由に増やせます。
+      画面では一列に並べますが、保存時に k:"m" / k:"c" で分けています。
+
+   v2: 固定の体調に加えて「＋ 自分で書く」で入力でき、書いたものは次回から並ぶ。
    ・並びは入力順のみ。使った回数・件数・よく使う順といった集計は一切出さない
      （蓄積そのものを成果に見せないため。依頼 指示_2026-08-09_1 §設計上の条件）。
-   ・書き間違えたものは「整理」から消せる。過去の記録に残った文字は消さない。 */
-const CONDS_BASE=["なし","強い空腹感","頭痛","ふらつき"];
+   ・書き間違えたものは「整理」から消せる。過去の記録に残った文字は消さない。
+   v4: 「なし」を外した（気分側の「🤐 特になし」と重複するため。冒頭コメント4）。 */
+const CONDS_BASE=["強い空腹感","頭痛","ふらつき"];
 const CONDS_MAX=14;                       /* 選択肢が増えすぎて探す画面にならないための上限 */
 function allConds(){ return CONDS_BASE.concat(DB.conds); }
 function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 
+/* 選択肢は Template_Daily_Review.md 338行の6つと同一。ここで語を増やさない。
+   （増やすと日次ノートの「気分」と突き合わせられなくなる、というのが依頼の指定） */
+const MOODS=["😪 疲れた","😤 イライラ","😌 穏やか","🎉 うまくいった","🤐 特になし","😴 寝不足"];
+
 let manageConds=false;
 function toggleManage(){ manageConds=!manageConds; render(); }
 
-function chipRow(sel,fn){
-  const list=allConds();
-  let h='<div class="chips">'+list.map(function(c,i){
-    const on=sel.indexOf(c)>=0?' on':'';
-    const del=(manageConds && i>=CONDS_BASE.length)
-      ? '<button class="chip del" onclick="delCond('+(i-CONDS_BASE.length)+')">'+esc(c)+' ✕</button>'
-      : '<button class="chip'+on+'" onclick="'+fn+'('+i+')">'+esc(c)+'</button>';
-    return del;
+/* 一列のチップ。体調を先に置く（断食中に効いてくるのは頭痛・ふらつき・空腹感のため）。
+   押すと「その時刻の1件」として積まれる。選択状態（on）は持たない。 */
+function chipRow(){
+  if(!DB.active) return "";
+  const cs=allConds();
+  let h='<div class="chips">';
+  h+=cs.map(function(c,i){
+    if(manageConds && i>=CONDS_BASE.length){
+      return '<button class="chip del" onclick="delCond('+(i-CONDS_BASE.length)+')">'+esc(c)+' ✕</button>';
+    }
+    return '<button class="chip" onclick="tapCond('+i+')">'+esc(c)+'</button>';
+  }).join("");
+  h+=MOODS.map(function(m,i){
+    return '<button class="chip" onclick="tapMood('+i+')">'+esc(m)+'</button>';
   }).join("");
   if(!manageConds && DB.conds.length<CONDS_MAX){
     h+='<button class="chip add" onclick="addCond()">＋ 自分で書く</button>';
@@ -232,12 +295,9 @@ function chipRow(sel,fn){
   }
   return h;
 }
-function toggle(arr,c){
-  if(c==="なし") return arr.indexOf("なし")>=0 ? [] : ["なし"];
-  const a=arr.filter(x=>x!=="なし");
-  return a.indexOf(c)>=0 ? a.filter(x=>x!==c) : a.concat([c]);
-}
-/* 自由入力。書いた時点で選択肢に加わり、そのまま今回の記録にも選ばれる。 */
+
+/* 自由入力。書いた時点で選択肢に加わり、そのままいまの時刻の1件として積まれる。
+   自由入力は必ず体調（k:"c"）側に入れる。気分の6語を増やさないため。 */
 function addCond(){
   const v=prompt("いまの体調を書いてください。\n次回からタップの選択肢に並びます。");
   if(v===null) return;
@@ -247,22 +307,13 @@ function addCond(){
     if(DB.conds.length>=CONDS_MAX){ alert("選択肢がいっぱいです。「書いた選択肢を整理する」から使わないものを消してください。"); return; }
     DB.conds.push(t); save();
   }
-  tapStartCond(allConds().indexOf(t));
+  tapCond(allConds().indexOf(t));
 }
 function delCond(j){
   const t=DB.conds[j];
   if(!confirm("選択肢「"+t+"」を消しますか？\n（すでに残した記録の文字はそのままです）")) return;
   DB.conds.splice(j,1); save(); render();
 }
-function tapStartCond(i){
-  const c=allConds()[i]; if(c===undefined || !DB.active) return;
-  DB.active.c1=toggle(DB.active.c1||[],c); save(); render();
-}
-
-/* ---------- 気分メモ（v3・依頼 指示_2026-08-14_1 §②） ----------
-   選択肢は Template_Daily_Review.md 338行の6つと同一。ここで語を増やさない。
-   （増やすと日次ノートの「気分」と突き合わせられなくなる、というのが依頼の指定） */
-const MOODS=["😪 疲れた","😤 イライラ","😌 穏やか","🎉 うまくいった","🤐 特になし","😴 寝不足"];
 
 /* 経過時間帯。2時間きざみ、18時間以降はひとまとめ。
    ⚠️ これは「長さの段階」ではなく「いつ頃か」を束ねるための入れ物です。
@@ -279,49 +330,54 @@ function bandLabel(b){
 /* 経過は「押した絶対時刻 − 開始時刻」で毎回計算する。開始を直せば自動で追随する。 */
 function elapsedH(rec,t){ return (t-rec.start)/MS_H; }
 
-function moodRow(){
-  if(!DB.active) return "";
-  return '<div class="chips">'+MOODS.map(function(m,i){
-    return '<button class="chip" onclick="tapMood('+i+')">'+esc(m)+'</button>';
-  }).join("")+'</div>';
-}
-function tapMood(i){
-  const m=MOODS[i]; if(m===undefined||!DB.active) return;
-  if(!Array.isArray(DB.active.moods)) DB.active.moods=[];
-  DB.active.moods.push({t:Date.now(),m:m});
+/* 押した瞬間の時刻で1件積む。k で体調（"c"）と気分（"m"）を分ける。
+   ⚠️ k を落として1種類にしないでください（冒頭コメント2）。 */
+function addMark(v,k){
+  if(!DB.active) return;
+  if(!Array.isArray(DB.active.marks)) DB.active.marks=[];
+  DB.active.marks.push({t:Date.now(), v:v, k:k});
   save(); render();
 }
-function delMood(j){
-  if(!DB.active||!DB.active.moods) return;
-  DB.active.moods.splice(j,1); save(); render();
+function tapCond(i){ const c=allConds()[i]; if(c!==undefined) addMark(c,"c"); }
+function tapMood(i){ const m=MOODS[i];     if(m!==undefined) addMark(m,"m"); }
+function delMark(j){
+  if(!DB.active||!DB.active.marks) return;
+  DB.active.marks.splice(j,1); save(); render();
 }
-/* 進行中に残した分の一覧。押し間違いをその場で消せるようにする（あとから直す画面は作らない）。 */
-function moodListActive(){
-  const ms=(DB.active&&DB.active.moods)||[];
+/* 進行中に残した分の一覧。押し間違いをその場で消せるようにする（あとから直す画面は作らない）。
+   新しいものを上に出す（断食中は直前に押した分を消したい場面がいちばん多いため）。 */
+function markListActive(){
+  const ms=(DB.active&&DB.active.marks)||[];
   if(!ms.length) return '<p class="note">まだ残していません。何度でも残せますし、残さなくても記録は成立します。</p>';
-  return ms.map(function(o,j){
-    return '<div class="rec"><div class="l">'+esc(o.m)
-      +'<small>'+dur(Math.max(0,o.t-DB.active.start))+'ごろ（'+hhmm(o.t)+'）</small></div>'
-      +'<button class="editb" onclick="delMood('+j+')">消す</button></div>';
+  return ms.map(function(o,j){ return {o:o,j:j}; }).reverse().map(function(x){
+    return '<div class="rec"><div class="l">'+esc(x.o.v)
+      +'<small>'+dur(Math.max(0,x.o.t-DB.active.start))+'ごろ（'+hhmm(x.o.t)+'）</small></div>'
+      +'<button class="editb" onclick="delMark('+x.j+')">消す</button></div>';
   }).join("");
 }
 
-/* 振り返り：経過時間帯 × 気分 の件数だけを出す。
+/* 振り返り：経過時間帯 × 語 の件数だけを出す。kind で体調・気分を出し分ける。
    ・帯は「データがある帯」だけを経過順に並べる（空の帯を並べると穴埋めを促す形になる）
    ・帯どうしを比べる数字（到達率・最長・達成）は出さない
-   ・気分に良い/悪いの色を付けない                                             */
-function moodStats(){
+   ・良い/悪いの色を付けない                                                   */
+function markStats(kind){
   const all=DB.records.concat(DB.active?[DB.active]:[]);
   const map={}, total={n:0};
   all.forEach(function(r){
-    (r.moods||[]).forEach(function(o){
+    (r.marks||[]).forEach(function(o){
+      if(o.k!==kind) return;
       const b=bandOf(elapsedH(r,o.t));
       if(!map[b]) map[b]={};
-      map[b][o.m]=(map[b][o.m]||0)+1;
+      map[b][o.v]=(map[b][o.v]||0)+1;
       total.n++;
     });
   });
   return {map:map, n:total.n};
+}
+/* 記録1件に残っているメモの件数（体調・気分の内訳つき）。記録一覧の表示用。 */
+function markCount(r){
+  const ms=r.marks||[];
+  return {c:ms.filter(o=>o.k==="c").length, m:ms.filter(o=>o.k==="m").length, n:ms.length};
 }
 
 const CARE='<div class="care">頭痛・ふらつき・強い空腹感が続くときは、無理をせず切り上げてください。'
@@ -441,7 +497,7 @@ function viewIdle(){
   </div>` : ""}
 
   <button class="btn ghost" onclick="go('log')">記録を見る・直す（${DB.records.length}件）</button>
-  <button class="btn ghost" onclick="go('moods')">気分の振り返り</button>
+  <button class="btn ghost" onclick="go('moods')">経過時間の振り返り</button>
   <button class="btn ghost" onclick="bkGo()">💾 バックアップ（書き出し・読み込み）</button>
   ${CARE}`;
 }
@@ -460,24 +516,18 @@ function viewRunning(){
     <button class="btn link" onclick="go('fixstart')">開始の日時を直す</button>
   </div>
 
-  <div class="sec">いまの体調（任意・1タップ）</div>
+  <div class="sec">いまの体調・気分（任意・1タップ・何度でも）</div>
   <div class="card">
-    ${chipRow(DB.active.c1||[],"tapStartCond")}
-    <p class="note">選ばなくても記録は残ります。あとで見返すためのメモです。<br>
-    当てはまるものがなければ<strong>「＋ 自分で書く」</strong>から書けます。書いたものは次回から選択肢に並びます。</p>
-  </div>
-
-  <div class="sec">いまの気分（任意・1タップ・何度でも）</div>
-  <div class="card">
-    ${moodRow()}
-    <p class="note">押した時点の経過時間といっしょに残ります。<strong>1回の記録の中で何度でも押せます</strong>
-    （空腹感が来たとき、落ち着いたとき、など）。<br>
-    上の体調（頭痛・ふらつき等）とは別に、気持ちのほうを残す欄です。</p>
-    ${moodListActive()}
+    ${chipRow()}
+    ${markListActive()}
+    <p class="note">押した時点の<strong>経過時間といっしょに残ります</strong>。
+    <strong>1回の記録の中で何度でも押せます</strong>（空腹感が来たとき、頭痛が出たとき、落ち着いたとき、など）。<br>
+    選ばなくても記録は残ります。何もないときは押さなくて構いません。<br>
+    当てはまる体調がなければ<strong>「＋ 自分で書く」</strong>から書けます。書いたものは次回から選択肢に並びます。</p>
   </div>
 
   <button class="btn ghost" onclick="go('log')">記録を見る・直す</button>
-  <button class="btn ghost" onclick="go('moods')">気分の振り返り</button>
+  <button class="btn ghost" onclick="go('moods')">経過時間の振り返り</button>
   <button class="btn ghost" onclick="bkGo()">💾 バックアップ（書き出し・読み込み）</button>
   <button class="btn link" onclick="cancelActive()">この記録をやめる（残さない）</button>
   ${CARE}`;
@@ -507,10 +557,15 @@ function viewLog(){
   <div class="card">
     ${rs.length ? rs.map(function(o){
       const r=o.r;
+      /* c1/c2 は v3以前の「記録全体に1セット」の体調。時刻が無いので marks には
+         写せない（v4冒頭コメント3）。過去の記録でだけ表示に残す。 */
       const cond=[].concat(r.c1||[],r.c2||[]).filter(c=>c&&c!=="なし");
-      const mn=(r.moods||[]).length;
-      const meta=[cond.length?"体調メモ: "+[...new Set(cond)].join("・"):"", mn?"気分メモ "+mn+"件":""]
-                 .filter(Boolean).join(" / ");
+      const k=markCount(r);
+      const meta=[
+        cond.length?"体調（時刻なし）: "+[...new Set(cond)].join("・"):"",
+        k.c?"体調メモ "+k.c+"件":"",
+        k.m?"気分メモ "+k.m+"件":""
+      ].filter(Boolean).join(" / ");
       return `<div class="rec">
         <div class="l">${mdw(r.start)} ${hhmm(r.start)} → ${r.end?hhmm(r.end):"—"}
           <small>${meta?esc(meta):"&nbsp;"}</small></div>
@@ -528,13 +583,13 @@ function viewLog(){
   <p class="note">記録はこの端末のブラウザ内にだけ保存されています。ときどき書き出して、控えを取っておいてください。</p>`;
 }
 
-/* --- 気分の振り返り（v3で新設） ---
-   出すのは「経過時間帯 × 気分 の件数」だけ。
+/* --- 経過時間の振り返り（v3で新設・v4で体調ブロックを追加） ---
+   出すのは「経過時間帯 × 語 の件数」だけ。
    帯どうしの比較・最長の強調・到達率・達成の語は出さない（依頼 §②の指定）。 */
-function viewMoods(){
-  const st=moodStats();
+function bandBlock(st,empty){
   const bands=Object.keys(st.map).map(Number).sort((a,b)=>a-b);
-  const body = bands.length ? bands.map(function(b){
+  if(!bands.length) return '<p class="note">'+empty+'</p>';
+  return bands.map(function(b){
     const row=st.map[b];
     const items=Object.keys(row).sort((x,y)=>row[y]-row[x]);
     const n=items.reduce((a,k)=>a+row[k],0);
@@ -544,21 +599,31 @@ function viewMoods(){
         `<span class="chip" style="cursor:default">${esc(k)} <strong>${row[k]}</strong></span>`
       ).join("")}</div>
     </div>`;
-  }).join("") : '<p class="note">まだ気分メモがありません。記録中の画面から1タップで残せます。</p>';
-
+  }).join("");
+}
+function viewMoods(){
+  const sc=markStats("c"), sm=markStats("m");
+  const total=sc.n+sm.n;
   return `
-  <h1>気分の振り返り</h1>
-  <p class="sub">気分メモを、押したときの<strong>経過時間帯</strong>ごとにまとめたものです。<br>
+  <h1>経過時間の振り返り</h1>
+  <p class="sub">残したメモを、押したときの<strong>経過時間帯</strong>ごとにまとめたものです。<br>
   <strong>並んでいる帯に上下はありません。</strong>長く続いた帯が良い、短い帯が悪い、というものではなく、
-  「そのくらい経った頃にどんな気持ちだったか」を見るためだけの表です。</p>
+  「そのくらい経った頃にどうだったか」を見るためだけの表です。</p>
 
+  <div class="sec">体調</div>
   <div class="card">
-    ${body}
+    ${bandBlock(sc,'まだ体調メモがありません。記録中の画面から1タップで残せます。')}
   </div>
 
-  ${st.n>0 && st.n<12 ? `<p class="note">いまの合計は ${st.n}件です。<strong>この件数では、偏りはたまたまです。</strong>
+  <div class="sec">気分</div>
+  <div class="card">
+    ${bandBlock(sm,'まだ気分メモがありません。記録中の画面から1タップで残せます。')}
+  </div>
+
+  ${total>0 && total<12 ? `<p class="note">いまの合計は ${total}件です。<strong>この件数では、偏りはたまたまです。</strong>
   傾向として読むのは、もう少し溜まってからにしてください。</p>` : ""}
-  <p class="note">気分に良い・悪いの区別は付けていません。件数の多い順に並べているだけです。</p>
+  <p class="note">良い・悪いの区別は付けていません。件数の多い順に並べているだけです。<br>
+  v3以前に残した「記録全体の体調」は時刻を持たないため、この表には入りません（記録一覧では見られます）。</p>
 
   <button class="btn ghost" onclick="go('home')">戻る</button>`;
 }
@@ -585,7 +650,7 @@ function viewEdit(){
 /* ===================== 操作 ===================== */
 function start(){
   if(DB.active) return render();
-  DB.active={start:Date.now(),c1:[],moods:[]};
+  DB.active={start:Date.now(),c1:[],moods:[],marks:[]};
   save(); render();
 }
 
@@ -601,7 +666,8 @@ function saveFixStart(){
 function stop(){
   const r=DB.active, now=Date.now();
   if(now<=r.start){ alert("終了が開始より前になっています。「開始を直す」から開始の日時を直してください。"); return; }
-  DB.records.push({start:r.start,end:now,ms:now-r.start,c1:r.c1||[],c2:[],moods:r.moods||[]});
+  DB.records.push({start:r.start,end:now,ms:now-r.start,c1:r.c1||[],c2:[],
+                   moods:r.moods||[],marks:r.marks||[]});
   DB.active=null; manageConds=false; save();
   DB.records.sort((a,b)=>a.start-b.start);
   view="log"; render();
@@ -614,7 +680,7 @@ function cancelActive(){
 
 function addPast(){
   const now=Date.now();
-  DB.records.push({start:now-12*MS_H,end:now,ms:12*MS_H,c1:[],c2:[],moods:[]});
+  DB.records.push({start:now-12*MS_H,end:now,ms:12*MS_H,c1:[],c2:[],moods:[],marks:[]});
   editIdx=DB.records.length-1; save(); go("edit");
 }
 
