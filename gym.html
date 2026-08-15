@@ -341,8 +341,83 @@ function dropHint(id){
 let view="home", curId=null, tmpW=null, tmpR=null;
 function go(v){ view=v; render(); }
 
+/* ===== バックアップ（書き出し・読み込み）　2026-08-15追加 =====================
+   記録はこの端末のブラウザの中だけにあります。ここのテキストを控えておけば、
+   機種変更・データ削除のあとでも、貼り戻すだけで元に戻ります。
+   ★保存の引き出しの名前（KEY）は絶対に変えないでください。変えると過去が見えなくなります。
+   ★読み込みは localStorage に直接書いてから再読み込みするだけ。
+     アプリ側の既定データと混ぜないこと（混ぜると編集済みの内容が上書きされます）。 */
+var bkArmed=false, bkMsg="", bkIn="";
+function bkEsc(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+function bkGrab(){ var e=document.getElementById("bk_in"); if(e) bkIn=e.value; }
+function bkGo(){ bkArmed=false; bkMsg=""; bkIn=""; go("backup"); }
+function bkDump(){
+  var d=null;
+  try{ d=localStorage.getItem(KEY); }catch(e){}
+  if(!d){ try{ d=JSON.stringify(DB); }catch(e2){ d=""; } }
+  return d||"";
+}
+function bkCopy(){
+  bkGrab();
+  var t=document.getElementById("bk_out"); if(!t) return;
+  var ok=false;
+  try{ t.focus(); t.select(); t.setSelectionRange(0,999999); ok=document.execCommand("copy"); }catch(e){}
+  var yes="コピーしました。Obsidianなどに貼って、控えを残しておいてください。";
+  var no ="コピーできませんでした。枠の中を長押し →「すべてを選択」→「コピー」でも同じことができます。";
+  if(!ok && navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(t.value).then(
+      function(){ bkArmed=false; bkMsg=yes; render(); },
+      function(){ bkArmed=false; bkMsg=no;  render(); });
+    return;
+  }
+  bkArmed=false; bkMsg = ok?yes:no; render();
+}
+function bkRestore(){
+  bkGrab();
+  var o=null;
+  try{ o=JSON.parse(bkIn); }catch(e){}
+  if(!bkValid(o)){
+    bkArmed=false;
+    bkMsg="読み取れませんでした。書き出したテキストを、途中で切らずにそのまま貼り付けてください。（いまの記録は何も変わっていません）";
+    render(); return;
+  }
+  if(!bkArmed){ bkArmed=true; bkMsg=""; render(); return; }
+  try{ localStorage.setItem(KEY, JSON.stringify(o)); }
+  catch(e){ bkArmed=false; bkMsg="保存できませんでした。ブラウザの空き容量をご確認ください。"; render(); return; }
+  location.reload();
+}
+function viewBackup(){
+  var mono='height:120px;min-height:120px;font-size:11px;line-height:1.5;color:#8a94a6;font-family:ui-monospace,SFMono-Regular,Menlo,monospace';
+  var h='<h1>バックアップ</h1>'
+   + '<p class="sub">記録は<b>この端末のブラウザの中だけ</b>にあります。'
+   + 'ときどき下のテキストをコピーして、Obsidianなどに貼って控えておいてください。<br>'
+   + '機種変更やデータ削除のあとは、その控えを貼り戻せば元に戻ります。</p>';
+  if(bkMsg) h += '<div class="card"><p class="note">'+bkEsc(bkMsg)+'</p></div>';
+  h += '<div class="sec">1. 書き出す（控えを取る）</div>'
+     + '<div class="card"><textarea id="bk_out" readonly onclick="this.select()" style="'+mono+'">'
+     + bkEsc(bkDump())+'</textarea>'
+     + '<p class="note">いまの中身：'+bkEsc(bkSummary())+'</p></div>'
+     + '<button class="btn" onclick="bkCopy()">コピーする</button>';
+  h += '<div class="sec">2. 読み込む（控えから戻す）</div>'
+     + '<div class="card"><textarea id="bk_in" placeholder="控えておいたテキストを、ここに貼り付けてください" style="'+mono+';color:#e8ecf2">'
+     + bkEsc(bkIn)+'</textarea></div>'
+     + '<button class="btn ghost" style="'+(bkArmed?'border-color:#7a4a4a;color:#ffb4b4':'')+'" onclick="bkRestore()">'
+     + (bkArmed?'もう一度押すと入れ替えます':'この内容で戻す')+'</button>';
+  if(bkArmed) h += '<div class="card" style="border-color:#7a4a4a"><p class="note">'
+     + '<b>いまの記録は、貼り付けた内容にすべて入れ替わります。元には戻せません。</b><br>'
+     + 'やめるときは、下の「戻る」を押してください。</p></div>';
+  h += '<p class="note">先に <b>1</b> をコピーしておけば、間違えても戻せます。<br>'
+     + 'この画面は、いまの記録を勝手に消したり足したりしません。押したときだけ動きます。</p>';
+  h += '<button class="btn ghost" onclick="go(\'home\')">戻る</button>';
+  return h;
+}
+function bkValid(o){ return o && typeof o==="object" && Array.isArray(o.sessions); }
+function bkSummary(){ try{ return "記録 "+(DB.sessions?DB.sessions.length:0)+"回"; }catch(e){ return "—"; } }
+
+
 function render(){
   const A=document.getElementById("app");
+  if(view==="backup") return void(A.innerHTML=viewBackup());
   if(view==="log")  return void(A.innerHTML=viewLog());
   if(view==="work" && DB.active) return void(A.innerHTML=viewWork());
   if(view==="ex" && DB.active && curId) return void(A.innerHTML=viewEx());
@@ -386,6 +461,7 @@ function viewHome(){
   </div>
 
   <button class="btn ghost" onclick="go('log')">これまでの記録（${d.length}回）</button>
+  <button class="btn ghost" onclick="bkGo()">💾 バックアップ（書き出し・読み込み）</button>
   ${showProgress() ? "" : `<p class="note">重さを上げるルール（3セットとも上限回数を2回続けたら1段上げる）は、<strong>9/1から</strong>案内します。それまでは記録だけ残ります。</p>`}`;
 }
 
@@ -511,9 +587,8 @@ function viewLog(){
   <button class="btn ghost" onclick="go('home')">戻る</button>
 
   <div class="hr"></div>
-  <div class="sec">データ書き出し</div>
-  <textarea readonly onclick="this.select()">${JSON.stringify(DB)}</textarea>
-  <p class="note">記録はこの端末のブラウザ内にだけ保存されています。ときどきコピーして保管してください。</p>`;
+  <button class="btn ghost" onclick="bkGo()">💾 バックアップ（書き出し・読み込み）</button>
+  <p class="note">記録はこの端末のブラウザ内にだけ保存されています。ときどき書き出して、控えを取っておいてください。</p>`;
 }
 
 /* ===================== 操作 ===================== */

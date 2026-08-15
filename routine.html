@@ -99,6 +99,17 @@ label{display:block;font-size:12.5px;color:#8a94a6;margin:12px 0 5px}
 .sw.on{background:#e0a86a}
 .sw i{position:absolute;top:3px;left:3px;width:25px;height:25px;border-radius:50%;background:#e8ecf2;transition:left .15s}
 .sw.on i{left:24px}
+
+.past{
+  background:#1a1f29;border:1px solid #262d3a;border-radius:12px;padding:11px 14px;
+  margin:0 0 14px;color:#8a94a6;font-size:13px;line-height:1.7;text-align:center;
+}
+.past b{color:#e0a86a;font-size:19px;font-weight:700;font-variant-numeric:tabular-nums}
+.lrow{display:flex;gap:10px;align-items:baseline;padding:9px 0;border-bottom:1px solid #222833;font-size:14px}
+.lrow:last-child{border-bottom:none}
+.lt{flex:none;width:44px;color:#6f7a8c;font-size:12.5px;font-variant-numeric:tabular-nums}
+.ln{flex:1;line-height:1.5}
+.ld{flex:none;color:#8a94a6;font-size:12.5px;font-variant-numeric:tabular-nums}
 </style>
 </head>
 <body>
@@ -106,12 +117,25 @@ label{display:block;font-size:12.5px;color:#8a94a6;margin:12px 0 5px}
 <script>
 /* ============================================================
    B.M.C. 切り替えルーティン (routine.html)
-   作成: B.M.C.(Claude) / 2026-08-14（v2: セットの追加・削除・並べ替えに対応）
+   作成: B.M.C.(Claude) / 2026-08-14
+   v2: セットの追加・削除・並べ替えに対応
+   v3: 2026-08-15 実行の記録（履歴）を追加
+
+   === v3で置いた線引き（fast.html・gym.html にも同じものが効きます） ===
+   出す  : 起きた事実だけ。   実行の累計回数／実行した日と時刻／前回やったセット
+   出さない: 起きなかった事実から計算した数。
+           連続日数（途切れると0に戻る）／達成率（分母に「やらなかった日」が入る）
+           ／最長記録／目標値／バッジ／平均
+   理由: 前者は崩れても減りません。後者は必ず「できなかった日」を画面に出します。
+
    設計の前提（変えないでください）:
    - このアプリは「その場の道具」です。記録の正は Obsidian のままで、
      ここから日次ノート・Points Tracker へは一切書きません。
+     履歴もこの端末の localStorage の中だけに置きます。
    - 連続日数・達成率・できなかった日の記録は持ちません。
      「崩れた日が画面に残る」形を作らないためです。
+   - 0ステップで終えた回も「押した」事実としては残しますが、
+     画面には 0/4 のような数字ではなく「押しました」とだけ出します。
    - 途中参加・飛ばし・崩れたあとの再開を、いつでもできるようにしてあります
      （順番どおりにしか進めない作りが「総くずれして戻れない」の正体のため）。
    - セットは配列です。追加・削除・並べ替えは自由。ただし🛟（rescue:true）は
@@ -156,6 +180,15 @@ function defaults(){ return [
       "300|乗車15分、明日やることを書き切る",
       "180|書き切ったらゲームか音声に切り替える"
     ]},
+  { id:"dinner", icon:"🍽", name:"夕食の準備前（盛り付けの手順）", limit:180,
+    note:"手ばかり｜主食＝こぶし1個 ／ 主菜＝手のひら1枚（厚みも同じ） ／ 野菜・海藻・きのこ＝両手に山盛り1杯（加熱なら片手山盛り）。※これは確認作業ではなく、盛り付けの手順そのものです。読みながら手を動かしてください。食後は「パンパンになったか」の1問だけで、ここでは何も記録しません。",
+    steps:[
+      "20|お皿を1枚出す。今日はこの中で完成",
+      "40|先に汁物を1杯（野菜・わかめ・きのこ）",
+      "40|皿の半分に、野菜・きのこ・海藻",
+      "40|残り半分に、手のひら1枚の主菜 と こぶし1個のごはん",
+      "40|タレ・ドレッシングは小皿へ。今日は焼く・蒸す・煮る・レンジ"
+    ]},
   { id:"rescue", icon:"🛟", name:"崩れたあとの復帰（1手だけ）", limit:180, rescue:true,
     note:"やり直しではありません。今日をここで終わらせて、次の合図まで戻るためのものです。",
     steps:[
@@ -164,17 +197,21 @@ function defaults(){ return [
     ]}
 ]; }
 
-var DB = { v:2, sets:null, chime:true, scName:"ルーティンタイマー" };
+var DB = { v:3, sets:null, chime:true, scName:"ルーティンタイマー", log:[], count:0 };
 try{
   var raw = localStorage.getItem(KEY);
   if(raw){
     var p = JSON.parse(raw);
     if(typeof p.chime==="boolean") DB.chime = p.chime;
     if(p.scName) DB.scName = p.scName;
+    if(Array.isArray(p.log)) DB.log = p.log;
+    if(typeof p.count==="number" && p.count>=0) DB.count = p.count;
+    if(p.mig_dinner===true) DB.mig_dinner = true;
+    if(DB.count < DB.log.length) DB.count = DB.log.length;
     if(Array.isArray(p.sets)) DB.sets = p.sets;
     else if(p.sets && typeof p.sets==="object"){
       /* v1（キー付きオブジェクト）からの移行。編集済みの内容は保持する。 */
-      var order = ["home","commute","oneope","overtime","rescue"], out = [];
+      var order = ["home","commute","oneope","overtime","dinner","rescue"], out = [];
       order.forEach(function(k){ if(p.sets[k]){ var s = p.sets[k]; s.id = k; out.push(s); } });
       for(var k2 in p.sets){ if(order.indexOf(k2)<0){ p.sets[k2].id = k2; out.push(p.sets[k2]); } }
       DB.sets = out;
@@ -183,6 +220,19 @@ try{
 }catch(e){}
 if(!DB.sets || !DB.sets.length) DB.sets = defaults();
 if(!DB.sets.some(function(s){return s.rescue})) DB.sets.push(defaults().filter(function(s){return s.rescue})[0]);
+/* 2026-08-15追加：🍽 夕食の準備前。★一度だけ入れる。
+   mig_dinner を立てるので、削除されたら二度と戻らない（毎回マージしない）。
+   packing.html の SEED と同じ原則＝正本はご本人が編集したデータの側。 */
+if(!DB.mig_dinner){
+  DB.mig_dinner = true;
+  if(!DB.sets.some(function(s){return s.id==="dinner"})){
+    var dn = defaults().filter(function(s){return s.id==="dinner"})[0];
+    var at = DB.sets.length;
+    DB.sets.forEach(function(s,i){ if(s.rescue && i<at) at = i; });
+    DB.sets.splice(at, 0, dn);
+  }
+  save();
+}
 
 function save(){ try{ localStorage.setItem(KEY, JSON.stringify(DB)); }catch(e){} }
 
@@ -194,6 +244,43 @@ var doneSet = {};
 var curStep = 0;
 var tick = null;
 var armed = null;   /* 削除の1回目を押したセットid（2回押しで削除） */
+var runIdx = null;  /* この回の履歴の位置。1回の実行で1件しか増やさないための目印 */
+var clearArmed = false; /* 履歴の消去も2回押し */
+
+/* --- 実行の記録 --------------------------------------------
+   1回の実行につき1件。押した時刻・セット・やれたステップ数だけを持ちます。
+   「やらなかった日」は行を作りません（無い日は履歴に出てきません）。 */
+var LOGMAX = 400;
+function logRun(){
+  var s = setOf(curId); if(!s) return;
+  var n = s.steps.length, d = 0;
+  for(var i=0;i<n;i++){ if(doneSet[i]==="done") d++; }
+  var rec = { t:Date.now(), id:s.id, icon:s.icon, name:s.name, d:d, n:n, sec:Math.abs(elapsed()) };
+  if(runIdx===null){
+    DB.log.push(rec);
+    DB.count++;
+    if(DB.log.length > LOGMAX) DB.log = DB.log.slice(DB.log.length - LOGMAX);
+    runIdx = DB.log.length - 1;
+  }else{
+    /* 「続きに戻る」で続けた場合は、同じ回を上書きする（2件に増やさない） */
+    rec.t = DB.log[runIdx].t;
+    DB.log[runIdx] = rec;
+  }
+  save();
+}
+function doneCount(){
+  var s = setOf(curId); if(!s) return 0;
+  var d = 0; for(var i=0;i<s.steps.length;i++){ if(doneSet[i]==="done") d++; }
+  return d;
+}
+function dayKey(t){
+  var d = new Date(t);
+  return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+}
+var WD = ["日","月","火","水","木","金","土"];
+function dayLabel(t){ var d = new Date(t); return (d.getMonth()+1)+"/"+d.getDate()+"（"+WD[d.getDay()]+"）"; }
+function hhmm(t){ var d = new Date(t); return d.getHours()+":"+String(d.getMinutes()).padStart(2,"0"); }
+function lastRun(){ return DB.log.length ? DB.log[DB.log.length-1] : null; }
 
 /* --- 音 --- */
 var ac = null;
@@ -232,28 +319,113 @@ function left(){ var s = setOf(curId); return s ? limitOf(s) - elapsed() : 0; }
 function allDone(){ var s=setOf(curId); for(var i=0;i<s.steps.length;i++){ if(!doneSet[i]) return false; } return true; }
 function newId(){ return "s" + Date.now().toString(36) + Math.floor(Math.random()*900+100); }
 
-function go(v){ armed = null; view = v; render(); }
+function go(v){ armed = null; clearArmed = false; view = v; render(); }
+
+/* ===== バックアップ（書き出し・読み込み）　2026-08-15追加 =====================
+   記録はこの端末のブラウザの中だけにあります。ここのテキストを控えておけば、
+   機種変更・データ削除のあとでも、貼り戻すだけで元に戻ります。
+   ★保存の引き出しの名前（KEY）は絶対に変えないでください。変えると過去が見えなくなります。
+   ★読み込みは localStorage に直接書いてから再読み込みするだけ。
+     アプリ側の既定データと混ぜないこと（混ぜると編集済みの内容が上書きされます）。 */
+var bkArmed=false, bkMsg="", bkIn="";
+function bkEsc(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+function bkGrab(){ var e=document.getElementById("bk_in"); if(e) bkIn=e.value; }
+function bkGo(){ bkArmed=false; bkMsg=""; bkIn=""; go("backup"); }
+function bkDump(){
+  var d=null;
+  try{ d=localStorage.getItem(KEY); }catch(e){}
+  if(!d){ try{ d=JSON.stringify(DB); }catch(e2){ d=""; } }
+  return d||"";
+}
+function bkCopy(){
+  bkGrab();
+  var t=document.getElementById("bk_out"); if(!t) return;
+  var ok=false;
+  try{ t.focus(); t.select(); t.setSelectionRange(0,999999); ok=document.execCommand("copy"); }catch(e){}
+  var yes="コピーしました。Obsidianなどに貼って、控えを残しておいてください。";
+  var no ="コピーできませんでした。枠の中を長押し →「すべてを選択」→「コピー」でも同じことができます。";
+  if(!ok && navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(t.value).then(
+      function(){ bkArmed=false; bkMsg=yes; render(); },
+      function(){ bkArmed=false; bkMsg=no;  render(); });
+    return;
+  }
+  bkArmed=false; bkMsg = ok?yes:no; render();
+}
+function bkRestore(){
+  bkGrab();
+  var o=null;
+  try{ o=JSON.parse(bkIn); }catch(e){}
+  if(!bkValid(o)){
+    bkArmed=false;
+    bkMsg="読み取れませんでした。書き出したテキストを、途中で切らずにそのまま貼り付けてください。（いまの記録は何も変わっていません）";
+    render(); return;
+  }
+  if(!bkArmed){ bkArmed=true; bkMsg=""; render(); return; }
+  try{ localStorage.setItem(KEY, JSON.stringify(o)); }
+  catch(e){ bkArmed=false; bkMsg="保存できませんでした。ブラウザの空き容量をご確認ください。"; render(); return; }
+  location.reload();
+}
+function viewBackup(){
+  var mono='height:120px;min-height:120px;font-size:11px;line-height:1.5;color:#8a94a6;font-family:ui-monospace,SFMono-Regular,Menlo,monospace';
+  var h='<h1>バックアップ</h1>'
+   + '<p class="sub">記録は<b>この端末のブラウザの中だけ</b>にあります。'
+   + 'ときどき下のテキストをコピーして、Obsidianなどに貼って控えておいてください。<br>'
+   + '機種変更やデータ削除のあとは、その控えを貼り戻せば元に戻ります。</p>';
+  if(bkMsg) h += '<div class="card"><p class="note">'+bkEsc(bkMsg)+'</p></div>';
+  h += '<div class="sec">1. 書き出す（控えを取る）</div>'
+     + '<div class="card"><textarea id="bk_out" readonly onclick="this.select()" style="'+mono+'">'
+     + bkEsc(bkDump())+'</textarea>'
+     + '<p class="note">いまの中身：'+bkEsc(bkSummary())+'</p></div>'
+     + '<button class="btn" onclick="bkCopy()">コピーする</button>';
+  h += '<div class="sec">2. 読み込む（控えから戻す）</div>'
+     + '<div class="card"><textarea id="bk_in" placeholder="控えておいたテキストを、ここに貼り付けてください" style="'+mono+';color:#e8ecf2">'
+     + bkEsc(bkIn)+'</textarea></div>'
+     + '<button class="btn ghost" style="'+(bkArmed?'border-color:#7a4a4a;color:#ffb4b4':'')+'" onclick="bkRestore()">'
+     + (bkArmed?'もう一度押すと入れ替えます':'この内容で戻す')+'</button>';
+  if(bkArmed) h += '<div class="card" style="border-color:#7a4a4a"><p class="note">'
+     + '<b>いまの記録は、貼り付けた内容にすべて入れ替わります。元には戻せません。</b><br>'
+     + 'やめるときは、下の「戻る」を押してください。</p></div>';
+  h += '<p class="note">先に <b>1</b> をコピーしておけば、間違えても戻せます。<br>'
+     + 'この画面は、いまの記録を勝手に消したり足したりしません。押したときだけ動きます。</p>';
+  h += '<button class="btn ghost" onclick="go(\'home\')">戻る</button>';
+  return h;
+}
+function bkValid(o){ return o && typeof o==="object" && (Array.isArray(o.sets)||Array.isArray(o.log)); }
+function bkSummary(){ try{ return "セット "+(DB.sets?DB.sets.length:0)+"個 ／ 記録 "+(DB.log?DB.log.length:0)+"件"; }catch(e){ return "—"; } }
+
 
 /* --- 実行 --- */
 function start(id, fromIndex){
   curId = id; doneSet = {}; curStep = fromIndex||0;
   for(var i=0;i<curStep;i++) doneSet[i] = "skip";
   startAt = Date.now();
+  runIdx = null;
   if(tick) clearInterval(tick);
   tick = setInterval(render, 250);
   view = "run"; render();
 }
-function stop(){ if(tick) clearInterval(tick); tick=null; startAt=0; curId=null; doneSet={}; curStep=0; }
+function stop(){ if(tick) clearInterval(tick); tick=null; startAt=0; curId=null; doneSet={}; curStep=0; runIdx=null; }
 function toggleStep(i){
   if(doneSet[i]){ delete doneSet[i]; render(); return; }
   doneSet[i] = "done";
   var s = setOf(curId), next = -1;
   for(var j=0;j<s.steps.length;j++){ if(!doneSet[j]){ next=j; break; } }
   curStep = next<0 ? s.steps.length : next;
-  if(allDone()){ chimeDone(); view="done"; } else chimeStep();
-  render();
+  if(allDone()){ chimeDone(); enterDone(); } else { chimeStep(); render(); }
 }
-function finishNow(){ if(tick) clearInterval(tick); tick=null; view="done"; render(); }
+function enterDone(){
+  if(tick) clearInterval(tick); tick=null;
+  logRun();          /* 終わりまで来た回は、0ステップでも「押した」事実として残す */
+  view="done"; render();
+}
+function finishNow(){ enterDone(); }
+function leaveRun(){
+  /* 途中でやめた回。1つでもやれていれば残し、0のままなら残さない
+     （画面を開いただけ・押し間違いを履歴に増やさないため） */
+  if(runIdx===null && doneCount()>0) logRun();
+  stop(); go("home");
+}
 
 /* --- iPhone標準タイマーの起動 --------------------------------
    このページはバックグラウンドでは止まります（iOSの仕様）。
@@ -273,13 +445,22 @@ function render(){
   else if(view==="run") h = viewRun();
   else if(view==="done") h = viewDone();
   else if(view==="edit") h = viewEdit();
+  else if(view==="log") h = viewLog();
   else if(view==="about") h = viewAbout();
+  else if(view==="scale") h = viewScale();
+  else if(view==="backup") h = viewBackup();
   document.getElementById("app").innerHTML = h;
 }
 
 function viewHome(){
   var h = '<h1>切り替えルーティン</h1>'
     + '<p class="sub">押した瞬間が合図です。タイマーの中でやり切れたら完了。<br>途中から始めても、飛ばしても構いません。</p>';
+  var lr = lastRun();
+  if(DB.count>0){
+    h += '<div class="past">これまで <b>'+DB.count+'</b> 回押しました'
+       + (lr ? '<br>前回は '+dayLabel(lr.t)+' '+esc(lr.icon)+' '+esc(lr.name) : '')
+       + '</div>';
+  }
   normals().forEach(function(s){
     h += '<button class="setb" onclick="start(\''+s.id+'\')">'+esc(s.icon)+' '+esc(s.name)
        + '<small>'+Math.round(limitOf(s)/60)+'分 ・ '+s.steps.length+'ステップ'
@@ -296,9 +477,119 @@ function viewHome(){
   h += '<div class="card"><label>ショートカットの名前（iPhone標準タイマーを起動するもの）</label>'
      + '<input class="inp" type="text" id="scn" value="'+esc(DB.scName)+'" onchange="DB.scName=this.value;save()">'
      + '<p class="note">作り方は <b>行動計画_2026-08-14 §10</b> にあります。未作成でも、このアプリ自体は使えます。</p></div>';
+  h += '<button class="btn ghost" onclick="go(\'scale\')">📏 満腹度のものさし（食後に見る）</button>';
+  h += '<button class="btn ghost" onclick="go(\'log\')">📖 これまでの記録</button>';
   h += '<button class="btn ghost" onclick="go(\'edit\')">セットを編集・追加・削除</button>';
+  h += '<button class="btn ghost" onclick="bkGo()">💾 バックアップ（書き出し・読み込み）</button>';
   h += '<button class="btn link" onclick="go(\'about\')">このアプリが持たないもの</button>';
   return h;
+}
+
+/* --------- 満腹度のものさし（2026-08-15追加） ------------------
+   ★この画面は「見るだけ」です。選ばせない・保存しない・数えない。
+     理由: ご本人が「記録をしない運用」と決めており、選んだ値を保存した時点で
+     記録が1つ増え、平均・推移・連続日数を出したくなる圧力が生まれるため。
+     記録の正は Obsidian の 夕食区分（clear / over）のまま、1つだけです。
+   ★5に近いほど良い、という並びにしないでください。目標帯は 7-8 です。
+     10 を上、5 を下に置き、7-8 の帯だけを強調しています。
+     5・6 を「達成」「最高」として表示しないこと。
+   ★アンカーの言葉は、すべてManamiさんご本人の記録から採っています。
+     見つからなかった段階は空欄のままです。推測で埋めないでください。 */
+var SCALE = [
+  {n:10, band:"over",   w:"「お腹がパンパンになるまで食べ続けてしまった」", src:"8/13（8/6にも同じ言葉）"},
+  {n:9,  band:"over",   w:"「ちょっと食べすぎたな」", src:"過去の振り返り"},
+  {n:8,  band:"target", w:"「体が温まるので満足感あった」", src:"スープストックの晩ごはんの日"},
+  {n:7,  band:"target", w:"", src:""},
+  {n:6,  band:"under",  w:"", src:""},
+  {n:5,  band:"under",  w:"", src:""}
+];
+function viewScale(){
+  var h = '<h1>満腹度のものさし</h1>'
+    + '<p class="sub">食べ終わったあとに、10〜5でどれかなと思うだけの表です。<br>'
+    + '<b>選ぶボタンはありません。このアプリは何も保存しません。</b></p>';
+  h += '<div class="card"><p class="note">'
+     + '<b>目標の帯は 7〜8 です。</b>5に近いほど良い、ではありません。'
+     + '6以下は「物足りなかった」側で、良い印ではありません。<br>'
+     + '厳密に当てにいかなくて構いません。8.5でも9でも「だいたいそのへん」で十分です。'
+     + '</p></div>';
+  SCALE.forEach(function(r){
+    var label = r.band==="over" ? "苦しい側" : (r.band==="target" ? "◎ 目標の帯" : "物足りない側");
+    h += '<div class="card"'+(r.band==="target"?' style="border-color:#3a5a44"':'')+'>'
+       + '<div class="toggle"><b>'+r.n+'</b><span class="tag">'+label+'</span></div>'
+       + (r.w ? '<p class="note">'+esc(r.w)+'<br><small>— '+esc(r.src)+'</small></p>'
+              : '<p class="note">（まだ言葉がありません。使いながら、思いついたときに書き足してください）</p>')
+       + '</div>';
+  });
+  h += '<div class="sec">Obsidianのボタンとの対応</div>';
+  h += '<div class="card"><p class="note">'
+     + '<b>9〜10 → 🔴</b><br><b>7〜8 → 🟢</b><br>'
+     + '<b>5〜6 →</b> 🟢のまま。実際に抜いた・調整した日だけ 🟡。<br><br>'
+     + '押すボタンは今までの3つのままです。<b>新しい記入欄はありません。</b>'
+     + '</p></div>';
+  h += '<div class="card"><p class="note">'
+     + '夕食の量の目安（昼と夕の配分）は、まだ決まっていない部分があります。'
+     + '<b>いまは「超過だったかどうか」の判定を、この表からは出しません。</b>'
+     + '</p></div>';
+  h += '<button class="btn ghost" onclick="go(\'home\')">戻る</button>';
+  return h;
+}
+
+/* --------- これまでの記録 --------- */
+function viewLog(){
+  var h = '<h1>これまでの記録</h1>';
+  if(!DB.log.length){
+    h += '<p class="sub">まだ1件もありません。ひとつ押すと、ここに残ります。</p>';
+    h += '<button class="btn ghost" onclick="go(\'home\')">戻る</button>';
+    return h;
+  }
+  h += '<div class="card"><div class="big ok">'+DB.count+'</div>'
+     + '<div class="bigsub">これまでに押した回数</div></div>';
+  h += '<p class="note">この数は減りません。空いた日は行が出ないだけで、'
+     + '×も赤字も付きません。<b>連続日数と達成率は数えていません。</b></p>';
+
+  /* 新しい順に、日ごとにまとめる */
+  var byDay = {}, order = [];
+  for(var i=DB.log.length-1;i>=0;i--){
+    var r = DB.log[i], k = dayKey(r.t);
+    if(!byDay[k]){ byDay[k] = []; order.push(k); }
+    byDay[k].push(r);
+  }
+  var wk = dayKey(Date.now() - 6*86400000);
+  var recent = order.filter(function(k){ return k >= wk; });
+  var older  = order.filter(function(k){ return k <  wk; });
+
+  function block(keys){
+    var s = "";
+    keys.forEach(function(k){
+      var rs = byDay[k];
+      s += '<div class="sec">'+dayLabel(rs[0].t)+'　<span class="tag">'+rs.length+'回</span></div>';
+      s += '<div class="card" style="padding:6px 14px">';
+      rs.forEach(function(r){
+        /* 0ステップの回は数字を出さない（「押した」という事実だけを残す） */
+        var what = r.d>0 ? (r.d+' / '+r.n) : '押しました';
+        s += '<div class="lrow"><span class="lt">'+hhmm(r.t)+'</span>'
+           + '<span class="ln">'+esc(r.icon)+' '+esc(r.name)+'</span>'
+           + '<span class="ld">'+what+'</span></div>';
+      });
+      s += '</div>';
+    });
+    return s;
+  }
+  h += '<div class="sec" style="color:#e0a86a">この7日間</div>';
+  h += recent.length ? block(recent)
+     : '<div class="card"><p class="note" style="margin:0">この7日間の記録はまだありません。次に押したぶんから、ここに並びます。</p></div>';
+  if(older.length){
+    h += '<div class="sec" style="color:#e0a86a">それより前</div>' + block(older);
+  }
+  h += '<button class="btn ghost" onclick="go(\'home\')">戻る</button>';
+  h += '<button class="btn danger'+(clearArmed?' armed':'')+'" onclick="clearLog()">'
+     + (clearArmed ? 'もう一度押すと記録をすべて消します' : '記録をすべて消す')+'</button>';
+  if(clearArmed) h += '<div class="warn">回数も履歴も0に戻ります。<b>元に戻せません。</b>やめるときは「戻る」を押してください。</div>';
+  return h;
+}
+function clearLog(){
+  if(!clearArmed){ clearArmed = true; render(); return; }
+  DB.log = []; DB.count = 0; clearArmed = false; save(); render();
 }
 
 function viewRun(){
@@ -322,7 +613,7 @@ function viewRun(){
   h += '<p class="note">この画面は他のアプリを開くと止まります（戻れば時刻から計算し直すのでズレません）。<br><b>画面の上に残り時間を出したいときは、上のボタンでiPhone標準のタイマーへ渡してください。</b></p>';
   h += '<button class="btn" onclick="finishNow()">ここまでで終える</button>';
   if(!s.rescue && rescues().length) h += '<button class="btn ghost" onclick="start(\''+rescues()[0].id+'\')">🛟 崩れた — 復帰の1手へ</button>';
-  h += '<button class="btn link" onclick="stop();go(\'home\')">やめて最初に戻る</button>';
+  h += '<button class="btn link" onclick="leaveRun()">やめて最初に戻る</button>';
   return h;
 }
 
@@ -337,9 +628,11 @@ function viewDone(){
   else if(d===n) h += '<div class="hint">全部やれました。時間は超えましたが、見ているのは順番ではなく「やったかどうか」です。</div>';
   else if(d>0) h += '<div class="hint">'+d+'つやれました。<b>0か1かではありません。</b>次の合図でまた押せます。</div>';
   else h += '<div class="hint">今日はここまで。押したこと自体は残っています。次の合図でまた押してください。</div>';
-  h += '<p class="note">この結果はどこにも記録していません。連続日数も数えていません。</p>';
+  h += '<div class="past">これで <b>'+DB.count+'</b> 回目です</div>';
+  h += '<p class="note">この記録はこの端末の中だけに残ります。Obsidian・Points Tracker には入りません。<br>連続日数と達成率は数えていません。</p>';
   if(!s.rescue && d<n) h += '<button class="btn ghost" onclick="go(\'run\');tick=setInterval(render,250)">続きに戻る</button>';
   h += '<button class="btn" onclick="stop();go(\'home\')">最初に戻る</button>';
+  h += '<button class="btn link" onclick="stop();go(\'log\')">📖 これまでの記録を見る</button>';
   return h;
 }
 
@@ -431,10 +724,20 @@ function addSet(){
 function resetAll(){ DB.sets = defaults(); armed = null; save(); go("home"); }
 
 function viewAbout(){
-  var h = '<h1>このアプリが持たないもの</h1>';
+  var h = '<h1>このアプリが持つもの・持たないもの</h1>';
   h += '<div class="card"><p class="sub" style="margin:0">'
-    + '・<b>連続日数・達成率・できなかった日の記録</b><br>'
-    + '　「崩れた日が画面に残る」形を作らないためです。<br><br>'
+    + '<b style="color:#e0a86a">持つもの（2026-08-15に足しました）</b><br>'
+    + '・押した回数の累計<br>'
+    + '・押した日時と、どのセットを、いくつやれたか<br>'
+    + '　いずれも<b>起きた事実だけ</b>です。<b>崩れても減りません。</b><br>'
+    + '　記録はこの端末の中だけに置きます。'
+    + '</p></div>';
+  h += '<div class="card"><p class="sub" style="margin:0">'
+    + '<b>持たないもの</b><br><br>'
+    + '・<b>連続日数・達成率・最長記録・目標値・バッジ</b><br>'
+    + '　これらは<b>「やらなかった日」から計算する数</b>です。<br>'
+    + '　連続日数は途切れると0に戻り、達成率は空いた日を分母に入れます。<br>'
+    + '　どちらも「崩れた日が画面に残る」形そのものなので入れていません。<br><br>'
     + '・<b>Obsidianへの書き込み</b><br>'
     + '　日次ノート・Points Tracker には一切触れません。記録の正はObsidianのままです。<br><br>'
     + '・<b>順番どおりにしか進めない作り</b><br>'
