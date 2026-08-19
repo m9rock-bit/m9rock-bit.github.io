@@ -100,6 +100,10 @@ label{display:block;font-size:12.5px;color:#8a94a6;margin:12px 0 5px}
 .sw i{position:absolute;top:3px;left:3px;width:25px;height:25px;border-radius:50%;background:#e8ecf2;transition:left .15s}
 .sw.on i{left:24px}
 
+/* v11: 区切りの合図で画面全体を2回光らせる */
+.flash{position:fixed;top:0;left:0;right:0;bottom:0;z-index:20;pointer-events:none;background:#e0a86a;opacity:0;animation:fl 1.5s ease-out}
+@keyframes fl{0%{opacity:0}6%{opacity:.8}22%{opacity:.08}40%{opacity:.75}60%{opacity:.06}80%{opacity:.5}100%{opacity:0}}
+
 .past{
   background:#1a1f29;border:1px solid #262d3a;border-radius:12px;padding:11px 14px;
   margin:0 0 14px;color:#8a94a6;font-size:13px;line-height:1.7;text-align:center;
@@ -198,6 +202,30 @@ label{display:block;font-size:12.5px;color:#8a94a6;margin:12px 0 5px}
      【自動進行セットの全体時間】ステップの合計から毎回計算します（制限
      時間の欄は出しません）。ステップを増減したときに総時間だけ古いまま
      残る事故を防ぐためです。
+
+   v11: 2026-08-19（チャットでのご相談）
+     「途中の区切りが経過しても、音声をオンにしても気づきにくい」
+     ------------------------------------------------------------
+     【まずバグ】iOSは、指で押した操作の中で作られ・再開されたAudioContext
+     しか鳴らさない。これまで最初のチャイムはタイマー（＝操作ではない）から
+     鳴らしていたため、そこで作られたAudioContextは suspended のままになり、
+     **iPhoneでは集中の区切りも🫁呼吸法のチャイムも鳴っていなかった**。
+     → unlockAudio() を新設し、start() と focusBegin() の先頭で必ず通す。
+       beep() 側でも毎回 resume() を試みる。
+
+     【気づきやすさ】
+     - 区切りのチャイムを「ポン」1回から**上がっていく3音を2回**に。
+     - 区切りで**画面全体を2回光らせる**（.flash。#appの中に入れると
+       再描画で消えるので body 直下に置いて時間で片づける）。
+     - **PCのデスクトップ通知**（DB.focus.notify、既定オン）。requireInteraction
+       で気づくまで消さない。許可は focusBegin（＝押した操作の中）で聞く。
+       iPhoneのSafariには Notification が無いので静かに何もしない。
+     - **タブの見出しに残り時間**を出す（focusTitle）。裏タブでも見える。
+     - visibilitychange で、戻ってきた瞬間に時刻から計算し直す。
+
+     【正直に書いた制約】裏タブはブラウザがタイマーを間引くため、区切りの
+     通知が最大1分ほど遅れることがある（経過そのものは時刻から計算し直す
+     のでズレない）。iPhoneでは通知を出せず、前面にいないと音も画面も出ない。
 
    v10: 2026-08-19（チャットでの追加ご依頼）
      「各セットもUIで入れ替えができるようにしてほしい。今だとテキスト入力で
@@ -362,8 +390,8 @@ function defaults(){ return [
    seg  … ブロックの中の区切りの並び（分）。最後の値が以降ずっと続く。
           「まず短時間から、乗ってきたら伸ばす」を素直に形にしたもの。
    すべて集中の設定画面から変えられます。 */
-var FOCUS_DEF = { len:{am:120,pm:90,ev:50}, from:{pm:12,ev:16}, seg:[15,25,40], sound:false, native:true };
-var DB = { v:9, sets:null, chime:true, voice:true, spotifyUrl:"", scName:"ルーティンタイマー", log:[], count:0, focus:null };
+var FOCUS_DEF = { len:{am:120,pm:90,ev:50}, from:{pm:12,ev:16}, seg:[15,25,40], sound:false, native:true, notify:true };
+var DB = { v:10, sets:null, chime:true, voice:true, spotifyUrl:"", scName:"ルーティンタイマー", log:[], count:0, focus:null };
 try{
   var raw = localStorage.getItem(KEY);
   if(raw){
@@ -400,6 +428,7 @@ try{
   f.seg = f.seg.map(function(x){ return Math.max(1, parseInt(x,10)||1); });
   if(typeof f.sound !== "boolean") f.sound = FOCUS_DEF.sound;
   if(typeof f.native !== "boolean") f.native = FOCUS_DEF.native;
+  if(typeof f.notify !== "boolean") f.notify = FOCUS_DEF.notify;
   DB.focus = f;
 })();
 if(!DB.sets || !DB.sets.length) DB.sets = defaults();
@@ -485,12 +514,30 @@ function lastRun(){ return DB.log.length ? DB.log[DB.log.length-1] : null; }
 
 /* --- 音 --- */
 var ac = null;
+/* --- v11: 音の「開通」（2026-08-19のご指摘への対応・重要） -------
+   iOSは、指で押した操作の中で作られ・再開されたAudioContextしか鳴らさない。
+   これまで最初のチャイムはタイマー（＝操作ではない）から鳴っていたため、
+   その瞬間に作られたAudioContextは suspended のままになり、以後ずっと無音
+   だった。集中ブロックの区切りも、🫁呼吸法の吸う・止める・吐くも同じ。
+   → 開始ボタンを押した瞬間に、ここを必ず通す。 */
+function unlockAudio(){
+  try{
+    if(!ac) ac = new (window.AudioContext||window.webkitAudioContext)();
+    if(ac.state === "suspended" && ac.resume) ac.resume();
+    /* ほぼ無音の1音を「操作の中で」鳴らして、再生を許可させる */
+    var o = ac.createOscillator(), g = ac.createGain();
+    o.connect(g); g.connect(ac.destination);
+    g.gain.setValueAtTime(.0001, ac.currentTime);
+    o.start(); o.stop(ac.currentTime + .03);
+  }catch(e){}
+}
 function beep(f,d,force){
   /* force=true は集中ブロック用。集中の音は DB.focus.sound で別に持っており、
      セットの「終了音を鳴らす」（DB.chime）とは独立させる。 */
   if(!DB.chime && !force) return;
   try{
     if(!ac) ac = new (window.AudioContext||window.webkitAudioContext)();
+    if(ac.state === "suspended" && ac.resume) ac.resume();
     var o = ac.createOscillator(), g = ac.createGain();
     o.connect(g); g.connect(ac.destination);
     o.frequency.value = f; o.type = "sine";
@@ -725,6 +772,7 @@ function bkSummary(){ try{ return "セット "+(DB.sets?DB.sets.length:0)+"個 �
 
 /* --- 実行 --- */
 function start(id, fromIndex){
+  unlockAudio();   /* v11: 押した操作の中で音を開通させる（自動進行のチャイム対策） */
   curId = id; doneSet = {}; curStep = fromIndex||0;
   for(var i=0;i<curStep;i++) doneSet[i] = "skip";
   startAt = Date.now();
@@ -795,6 +843,7 @@ function render(){
   else if(view==="focusStart") h = viewFocusStart();
   else if(view==="focus"){
     focusTick();                       /* 完了すると内部で view="focusDone" に変わることがある */
+    if(view==="focus") focusTitle();
     h = (view==="focus") ? viewFocus() : viewFocusDone();
   }
   else if(view==="focusDone") h = viewFocusDone();
@@ -1171,11 +1220,69 @@ function fElapsed(){ return fStart ? Math.floor(((fPaused?fPauseAt:Date.now())-f
 function fTotal(){ return fSegs.reduce(function(a,b){return a+b;},0); }
 function fSegEnd(i){ var e=0; for(var k=0;k<=i && k<fSegs.length;k++) e+=fSegs[k]; return e; }
 function fSlotNow(){ return fSlot || slotAt(Date.now()); }
-/* 集中の音。DB.focus.sound だけで決める（既定オフ）。 */
+/* v11: 集中の合図。DB.focus.sound だけで決める（既定オフ）。
+   「ポン」1回では没頭しているときに埋もれるため、上がっていく3音を2回。 */
 function fChime(end){
   if(!DB.focus.sound) return;
-  if(end){ beep(587,.22,true); setTimeout(function(){ beep(880,.45,true); },200); }
-  else beep(660,.18,true);
+  var tones = end ? [523,659,784,1047] : [660,880,1175];
+  function play(off){
+    tones.forEach(function(f,i){
+      var d = off + i*170;
+      if(d<=0) beep(f, .26, true);                                  /* 1音目はその場で */
+      else setTimeout(function(){ beep(f, .26, true); }, d);
+    });
+  }
+  play(0);
+  play(end ? 900 : 750);
+}
+/* v11: 画面全体を2回光らせる。#app の中に入れるとタイマーの再描画で
+   消えてしまうので、body直下に置いて時間で片づける（alertLessと同じ手）。 */
+function flashScreen(){
+  try{
+    var d = document.createElement("div");
+    d.className = "flash";
+    document.body.appendChild(d);
+    setTimeout(function(){ if(d.parentNode) d.parentNode.removeChild(d); }, 1600);
+  }catch(e){}
+}
+/* --- v11: PCのデスクトップ通知 ---------------------------------
+   仕事中はPCの前にいるので、裏タブでも出せる通知がいちばん届く。
+   iPhoneのSafariには Notification が無い（あっても許可されない）ので、
+   その場合はこの関数は静かに何もしない＝従来どおりの動きになる。
+   ※裏タブはブラウザがタイマーを間引くため、区切りの通知が最大1分ほど
+     遅れることがある。経過は時刻から計算し直しているので、遅れても
+     「何分たったか」はズレない。 */
+function notifyOK(){
+  try{ return (typeof Notification !== "undefined") && Notification.permission === "granted"; }
+  catch(e){ return false; }
+}
+function notifyState(){
+  try{
+    if(typeof Notification === "undefined") return "none";
+    return Notification.permission;   /* granted / denied / default */
+  }catch(e){ return "none"; }
+}
+function askNotify(){
+  try{
+    if(typeof Notification === "undefined"){
+      alertLess("このブラウザでは通知を出せません（iPhoneのSafariなど）。PCのChromeでお試しください。");
+      return;
+    }
+    var r = Notification.requestPermission(function(){ render(); });
+    if(r && r.then) r.then(function(){ render(); });
+  }catch(e){}
+}
+function notifyNow(title, body){
+  if(!DB.focus.notify || !notifyOK()) return;
+  try{
+    var n = new Notification(title, {
+      body: body || "",
+      tag: "bmc-focus",
+      renotify: true,
+      requireInteraction: true   /* 気づくまで消さない（没頭対策の要） */
+    });
+    n.onclick = function(){ try{ window.focus(); n.close(); }catch(e){} };
+  }catch(e){}
 }
 function fItem(i){ return fList.length ? fList[i % fList.length] : ""; }
 
@@ -1190,16 +1297,19 @@ function focusGrab(){
 }
 function focusBegin(mode){
   focusGrab();
+  /* v11: 音の開通と通知の許可は「押した操作の中」でしかできない。必ずここで。 */
+  unlockAudio();
+  if(DB.focus.notify && notifyState()==="default") askNotify();
   fMode = mode;
   fSlot = fSlotNow();
   fSegs = segsFor(fSlot);
   fStart = Date.now(); fSeg = 0; fPaused = false; fPauseAt = 0;
   fDone = false; fIdx = null; fMemo = ""; fFlash = Date.now();
   fromFocus = false; fShift = 0;
-  if(DB.focus.native) nativeTimer(fTotal());   /* 休憩までの1本だけ渡す */
   if(tick) clearInterval(tick);
   tick = setInterval(render, 250);
   view = "focus"; render();
+  if(DB.focus.native) nativeTimer(fTotal());   /* 休憩までの1本だけ渡す（画面遷移を伴うので最後） */
 }
 /* 自動セットと同じ考え方：経過秒から、いま何番目の区切りにいるべきかを毎回逆算する。
    setTimeoutの連鎖にすると、iOSでバックグラウンドに回った瞬間に止まって戻らない。 */
@@ -1211,6 +1321,10 @@ function focusTick(){
     fSeg = fSegs.length; fDone = true;
     if(tick){ clearInterval(tick); tick = null; }
     fChime(true);
+    flashScreen();
+    notifyNow("休憩です（" + SLOTN[fSlotNow()] + "）",
+              durLabel(fTotal()) + "たちました。ここで一度離れてください。");
+    setTitle("");
     logFocus();
     view = "focusDone";
     return;
@@ -1218,7 +1332,21 @@ function focusTick(){
   if(idx !== fSeg){
     fSeg = idx; fFlash = Date.now();
     fChime(false);
+    flashScreen();
+    notifyNow("▶ 切り替えの合図",
+      (fMode==="rotate" && fList.length)
+        ? "次は「" + fItem(idx) + "」へ"
+        : durLabel(fSegEnd(idx-1)) + "たちました。続けるか移るか、ここで一度決めてください。");
   }
+}
+/* v11: PCではタブの見出しがいちばん目に入る場所なので、そこに残り時間を出す。
+   区切りの直後だけ「▶ 切り替え！」に変える。裏タブでも見出しは更新される。 */
+var TITLE0 = "B.M.C. 切り替えルーティン";
+function setTitle(t){ try{ document.title = t ? t : TITLE0; }catch(e){} }
+function focusTitle(){
+  if(!fStart || fDone){ setTitle(""); return; }
+  if((Date.now() - fFlash) < 8000){ setTitle("▶ 切り替え！ — 集中"); return; }
+  setTitle(mmss(fLeftAll()) + (fPaused ? " ⏸" : "") + " — 休憩まで");
 }
 /* 止めていた分だけ開始時刻を後ろへずらす＝経過秒はそのまま、終わりが遅くなる。
    ずらした合計（fShift）を持っておき、画面に出す。 */
@@ -1282,6 +1410,7 @@ function focusLeave(){
 }
 function focusReset(){
   if(tick){ clearInterval(tick); tick = null; }
+  setTitle("");
   fStart=0; fSegs=[]; fSeg=0; fPaused=false; fPauseAt=0; fDone=false; fIdx=null; fList=[]; fMemo="";
   fromFocus=false; fShift=0;
 }
@@ -1328,6 +1457,11 @@ function viewFocusStart(){
   h += '<p class="note">区切りのたびに、書いた行き先を上から順に案内します。没頭して他が止まるのを防ぎたいとき。</p>';
   h += '<button class="btn ghost" onclick="focusBegin(\'one\')">1つに集中して始める</button>';
   h += '<p class="note">区切りは「いま何分経ったか」を知らせるだけ。続けるか移るかは、その場で決めます。</p>';
+  if(notifyState()==="granted" && DB.focus.notify){
+    h += '<div class="hint">このブラウザでは<b>区切りと休憩のたびにPCの通知</b>が出ます。タブを裏にしていても届きます（裏タブだと最大1分ほど遅れることがあります）。</div>';
+  }else if(notifyState()==="default" && DB.focus.notify){
+    h += '<div class="hint">PCのブラウザなら、区切りごとに<b>デスクトップ通知</b>を出せます。始めるときに1度だけ許可を聞きます。</div>';
+  }
   if(DB.focus.native){
     h += '<div class="hint">開始と同時に、iPhone標準のタイマーへ<b>休憩までの'+durLabel(DB.focus.len[sl]*60)+'</b>を渡します（ショートカット「'+esc(DB.scName)+'」）。ロック画面に残り時間が出て、アプリを閉じていても鳴ります。<br>'
        + '<b>音を消してバイブだけにしたいときは、iPhoneの時計アプリ →「タイマー終了時」→ 一覧のいちばん下の「停止」</b>を選んでください。振動するかどうかは端末の設定によります（Webページ側からは振動を出せません）。</div>';
@@ -1429,6 +1563,13 @@ function focusSave(){
   }
   save();
 }
+function notifyNote(){
+  var st = notifyState();
+  if(st==="granted") return '<b style="color:#9ec8a4">許可されています。</b>区切りと休憩のたびに、PCの通知が出ます（気づくまで消えません）。';
+  if(st==="denied")  return '<b style="color:#e8b3b8">ブラウザ側で拒否されています。</b>アドレスバーの鍵アイコン →「通知」から許可に変えてください。';
+  if(st==="none")    return 'このブラウザでは通知を出せません（iPhoneのSafariなど）。PCのChromeで開くと出せます。';
+  return 'まだ許可されていません。下のボタンか、集中を始めるときに許可を聞きます。';
+}
 function viewFocusSet(){
   var f = DB.focus;
   var h = '<h1>集中の設定</h1><p class="sub">数字はいつでも変えられます。ここで決めた長さが、押したときの時間帯に応じて使われます。</p>';
@@ -1453,7 +1594,23 @@ function viewFocusSet(){
      + '<div class="toggle" style="margin-top:8px"><b>開始時にiPhoneのタイマーへ渡す</b>'
      + '<button class="sw'+(f.native?' on':'')+'" onclick="focusSave();DB.focus.native=!DB.focus.native;save();render()"><i></i></button></div>'
      + '<p class="note">ショートカット「'+esc(DB.scName)+'」を使います（名前はホーム画面の設定で変えられます）。<br>'
-     + '<b>閉じていても鳴らせるのは、これだけです。</b>Webページからは通知を出せません。</p></div>';
+     + '<b>iPhoneを閉じていても鳴らせるのは、これだけです。</b></p>'
+     /* v11: PCのデスクトップ通知 */
+     + '<div class="toggle" style="margin-top:10px"><b>PCのデスクトップ通知を出す</b>'
+     + '<button class="sw'+(f.notify?' on':'')+'" onclick="focusSave();DB.focus.notify=!DB.focus.notify;save();render()"><i></i></button></div>'
+     + '<p class="note">'+notifyNote()+'</p>'
+     + (f.notify && notifyState()!=="granted"
+        ? '<button class="btn ghost" style="margin-top:4px" onclick="askNotify()">通知を許可する</button>' : '')
+     + '</div>';
+  h += '<div class="hint"><b>いちばん届くのは、PCのブラウザで開いておくことです。</b>'
+     + '仕事中はPCの前にいるので、タブを裏にしていても区切りごとに通知が出ます。'
+     + 'タブの見出しにも残り時間を出しているので、'
+     + 'ブラウザのタブを見れば「休憩まで何分か」がいつでも分かります。<br><br>'
+     + '<b>正直に書いておきます。</b>裏タブにするとブラウザがタイマーを間引くので、'
+     + '区切りの通知が<b>最大1分ほど遅れる</b>ことがあります（経過は時刻から計算し直すので、何分たったかはズレません）。'
+     + 'ぴったりに出したいときは、このタブを見える場所に置いておいてください。<br><br>'
+     + '<b>iPhoneでは通知を出せません。</b>他のアプリを開くかロックすると、このページは止まります。'
+     + 'iPhoneで確実に鳴らすには、上の「iPhoneのタイマーへ渡す」しかありません。</div>';
   h += '<div class="warn"><b>音を消したときの弱点も書いておきます。</b>没頭を切るのが目的の道具なので、無音にすると、いちばん気づきたいときに気づけません。'
      + 'オフィスでの事情と、どちらを取るかはご本人の判断です。</div>';
   h += '<button class="btn save" onclick="focusSave();go(\'focusStart\')">保存して戻る</button>';
@@ -1780,6 +1937,14 @@ function viewAbout(){
   h += '<button class="btn ghost" onclick="go(\'home\')">戻る</button>';
   return h;
 }
+
+/* v11: 画面に戻ってきた瞬間に、時刻から計算し直して追いつく
+   （裏に回っている間に間引かれていた分を、戻った瞬間に反映するため） */
+try{
+  document.addEventListener("visibilitychange", function(){
+    if(!document.hidden) render();
+  });
+}catch(e){}
 
 render();
 </script>
