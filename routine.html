@@ -203,6 +203,18 @@ label{display:block;font-size:12.5px;color:#8a94a6;margin:12px 0 5px}
      時間の欄は出しません）。ステップを増減したときに総時間だけ古いまま
      残る事故を防ぐためです。
 
+   v12: 2026-08-19（チャットでの追加ご依頼）
+     「集中時間が経過したあとに、休憩に移るルーティンをこのアプリ上にある
+       ルーティンから選択できるようにしてほしい」
+     - 休憩の画面（focusDone）に、このアプリのセット一覧を並べた。押すと
+       そのルーティンが始まる（breakStart）。🛟は「崩れた」ボタンの飛び先
+       なので並べない。
+     - **前回選んだものを覚えて、次回いちばん上に出す**（DB.focus.lastBreak）。
+       設定項目は増やしていない。既定を選ぶ画面を作るより、押した事実を
+       覚えるほうが手が少ないため。
+     - 休憩から始めたルーティンの完了画面には「🎯 次の集中ブロックへ」を
+       出す（fromBreak）。集中→休憩→次の集中、と戻り道を作るため。
+
    v11: 2026-08-19（チャットでのご相談）
      「途中の区切りが経過しても、音声をオンにしても気づきにくい」
      ------------------------------------------------------------
@@ -390,8 +402,8 @@ function defaults(){ return [
    seg  … ブロックの中の区切りの並び（分）。最後の値が以降ずっと続く。
           「まず短時間から、乗ってきたら伸ばす」を素直に形にしたもの。
    すべて集中の設定画面から変えられます。 */
-var FOCUS_DEF = { len:{am:120,pm:90,ev:50}, from:{pm:12,ev:16}, seg:[15,25,40], sound:false, native:true, notify:true };
-var DB = { v:10, sets:null, chime:true, voice:true, spotifyUrl:"", scName:"ルーティンタイマー", log:[], count:0, focus:null };
+var FOCUS_DEF = { len:{am:120,pm:90,ev:50}, from:{pm:12,ev:16}, seg:[15,25,40], sound:false, native:true, notify:true, lastBreak:"" };
+var DB = { v:11, sets:null, chime:true, voice:true, spotifyUrl:"", scName:"ルーティンタイマー", log:[], count:0, focus:null };
 try{
   var raw = localStorage.getItem(KEY);
   if(raw){
@@ -429,6 +441,7 @@ try{
   if(typeof f.sound !== "boolean") f.sound = FOCUS_DEF.sound;
   if(typeof f.native !== "boolean") f.native = FOCUS_DEF.native;
   if(typeof f.notify !== "boolean") f.notify = FOCUS_DEF.notify;
+  if(typeof f.lastBreak !== "string") f.lastBreak = "";
   DB.focus = f;
 })();
 if(!DB.sets || !DB.sets.length) DB.sets = defaults();
@@ -773,6 +786,7 @@ function bkSummary(){ try{ return "セット "+(DB.sets?DB.sets.length:0)+"個 �
 /* --- 実行 --- */
 function start(id, fromIndex){
   unlockAudio();   /* v11: 押した操作の中で音を開通させる（自動進行のチャイム対策） */
+  fromBreak = false;   /* v12: 休憩から始めた場合は breakStart() が押し直す */
   curId = id; doneSet = {}; curStep = fromIndex||0;
   for(var i=0;i<curStep;i++) doneSet[i] = "skip";
   startAt = Date.now();
@@ -1133,6 +1147,11 @@ function viewDone(){
     h += '<button class="btn" onclick="focusResume()">▶ 集中に戻る（休憩まで '+mmss(fLeftAll())+'）</button>';
     h += '<p class="note">呼吸のあいだ、集中の時計は止まっていました。押すとそこから続きます。</p>';
     h += '<button class="btn ghost" onclick="stop();go(\'home\')">最初に戻る</button>';
+  }else if(fromBreak){
+    /* v12: 休憩から始めたルーティンが終わったら、そのまま次の集中へ入れるようにする */
+    h += '<button class="btn" onclick="stop();fromBreak=false;focusGo()">🎯 次の集中ブロックへ</button>';
+    h += '<p class="note">時間帯は押した時刻から選び直します。行き先もそこで書けます。</p>';
+    h += '<button class="btn ghost" onclick="stop();fromBreak=false;go(\'home\')">最初に戻る</button>';
   }else{
     h += '<button class="btn" onclick="stop();go(\'home\')">最初に戻る</button>';
   }
@@ -1207,6 +1226,9 @@ var fPaused=false, fPauseAt=0, fFlash=0, fDone=false, fIdx=null, fMemo="";
    fShift    … 集中の時計を止めていた合計秒数。休憩の終わりが何秒うしろへずれたか。
                iPhone標準タイマーは止まらないので、このズレは画面に正直に出す。 */
 var fromFocus=false, fShift=0;
+/* v12: 休憩の画面から選んで始めたルーティンかどうか。
+   これが立っているセットの完了画面には「次の集中ブロックへ」を出す。 */
+var fromBreak=false;
 
 /* 呼吸法のセットを探す。idが残っていればそれを、無ければ最初の自動進行セット。
    どちらも無ければ null（ボタン自体を出さない）。 */
@@ -1427,6 +1449,16 @@ function logFocus(){
   }
   save();
 }
+/* v12: 休憩の画面から、選んだルーティンを始める。
+   集中ブロックはこの時点で終わって記録済みなので、片づけてから始める。 */
+function breakStart(id){
+  focusMemo();
+  DB.focus.lastBreak = id; save();
+  focusReset();
+  start(id);
+  fromBreak = true;   /* start() が落とすので、そのあとで立て直す */
+  render();
+}
 function focusMemo(){
   var el = document.getElementById("f_memo");
   if(!el) return;
@@ -1537,9 +1569,23 @@ function viewFocusDone(){
   h += '<label>このブロックで出せたもの（任意・1行）</label>'
      + '<input class="inp" type="text" id="f_memo" value="'+esc(fMemo)+'" placeholder="例）企画書の骨子まで" onchange="focusMemo()">'
      + '<p class="note">空のままで構いません。書いたものは記録の中にだけ残ります（Obsidianには入りません）。</p>';
-  var br = breathSet();
-  if(br) h += '<button class="btn ghost" onclick="focusMemo();focusReset();start(\''+br.id+'\')">'+esc(br.icon)+' '+esc(br.name)+' へ</button>';
-  h += '<button class="btn" onclick="focusMemo();focusReset();go(\'home\')">最初に戻る</button>';
+  /* v12: 休憩に移るルーティンを、このアプリの中のセットから選ぶ。
+     🛟（崩れたとき用）は「崩れた」ボタンの飛び先なので、ここには並べない。 */
+  var cands = normals();
+  if(cands.length){
+    h += '<div class="sec">休憩に移る</div>';
+    var lastId = DB.focus.lastBreak;
+    var ordered = cands.filter(function(x){ return x.id===lastId; })
+                       .concat(cands.filter(function(x){ return x.id!==lastId; }));
+    ordered.forEach(function(x, i){
+      var isLast = (x.id===lastId && i===0);
+      h += '<button class="setb"'+(isLast?' style="border-color:#e0a86a;background:#211d18"':'')
+         + ' onclick="breakStart(\''+x.id+'\')">'+esc(x.icon)+' '+esc(x.name)
+         + '<small>'+durLabel(limitOf(x))+' ・ '+countLabel(x)+(isLast?' ・ 前回選んだもの':'')+'</small></button>';
+    });
+    h += '<p class="note">押すとそのルーティンが始まります。終わったら、そこから次の集中ブロックへ進めます。<br>中身は「セットを編集」でいつでも変えられます。</p>';
+  }
+  h += '<button class="btn" onclick="focusMemo();focusReset();go(\'home\')">何もせず最初に戻る</button>';
   h += '<button class="btn link" onclick="focusMemo();focusReset();go(\'log\')">📖 これまでの記録を見る</button>';
   return h;
 }
