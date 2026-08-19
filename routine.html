@@ -185,6 +185,16 @@ label{display:block;font-size:12.5px;color:#8a94a6;margin:12px 0 5px}
      時間の欄は出しません）。ステップを増減したときに総時間だけ古いまま
      残る事故を防ぐためです。
 
+   v7: 2026-08-19（チャットでの追加ご依頼）
+     集中の途中で「集中力が切れた」と思ったとき、その場から4-7-8呼吸法へ
+     寄り道して、終わったら集中の続きへ戻れるようにした。
+     - 呼吸のあいだ、集中の時計は止める（ご選択）。呼吸は集中している
+       時間ではないため。止めた合計は fShift に持ち、「休憩の終わりが
+       何分うしろへずれたか」を画面に出す（隠さない）。
+     - iPhone標準タイマーはこちらからは止められないので、ずれた分だけ
+       早く鳴る。これも画面に書き、渡し直すボタンを出す。
+     - 呼吸のセットが削除されていたら、ボタン自体を出さない（breathSet）。
+
    v6: 2026-08-19（チャットでの追加ご依頼）
      🎯 仕事の集中ブロックを新設。詳しい設計意図は下の「v6: 仕事の集中
      ブロック」のコメントに書いてあります。要点だけ：
@@ -731,6 +741,11 @@ function countLabel(s){
 function viewHome(){
   var h = '<h1>切り替えルーティン</h1>'
     + '<p class="sub">押した瞬間が合図です。タイマーの中でやり切れたら完了。<br>途中から始めても、飛ばしても構いません。</p>';
+  /* v7: 集中が続いたままホームへ戻ってきたとき（呼吸のあと等）の戻り口 */
+  if(fStart && !fDone){
+    h += '<button class="setb" style="border-color:#e0a86a;background:#211d18" onclick="focusBack()">▶ 集中に戻る（'+SLOTN[fSlotNow()]+'）'
+       + '<small>休憩まで '+mmss(fLeftAll())+(fPaused?' ・ いまは止まっています':'')+'</small></button>';
+  }
   var lr = lastRun();
   if(DB.count>0){
     h += '<div class="past">これまで <b>'+DB.count+'</b> 回押しました'
@@ -910,8 +925,15 @@ function viewRun(){
   }
   h += '<button class="btn" onclick="finishNow()">ここまでで終える</button>';
   if(!s.rescue && rescues().length) h += '<button class="btn ghost" onclick="start(\''+rescues()[0].id+'\')">🛟 崩れた — 復帰の1手へ</button>';
+  h += backToFocus();
   h += '<button class="btn link" onclick="leaveRun()">やめて最初に戻る</button>';
   return h;
+}
+/* v7: 集中からの寄り道中だけ出る「集中に戻る」。それ以外では空文字。 */
+function backToFocus(){
+  if(!fromFocus || !fStart) return '';
+  return '<button class="btn ghost" style="border:1px solid #e0a86a;color:#e0a86a" onclick="focusResume()">'
+       + '▶ 集中に戻る（休憩まで '+mmss(fLeftAll())+'）</button>';
 }
 
 /* --- v5: 自動で進むセットの実行画面 ---------------------------
@@ -960,6 +982,7 @@ function viewRunAuto(s){
     if(!spUrl(s)) h += '<p class="note">このセットの編集画面か、ホーム画面の「設定」にプレイリストのURLを入れると、次回からここで開けます。</p>';
   }
   h += '<button class="btn" onclick="finishNow()">ここまでで終える</button>';
+  h += backToFocus();
   h += '<button class="btn link" onclick="leaveRun()">やめて最初に戻る</button>';
   return h;
 }
@@ -978,7 +1001,13 @@ function viewDone(){
   h += '<div class="past">これで <b>'+DB.count+'</b> 回目です</div>';
   h += '<p class="note">この記録はこの端末の中だけに残ります。Obsidian・Points Tracker には入りません。<br>連続日数と達成率は数えていません。</p>';
   if(!s.rescue && d<n) h += '<button class="btn ghost" onclick="go(\'run\');tick=setInterval(render,250)">続きに戻る</button>';
-  h += '<button class="btn" onclick="stop();go(\'home\')">最初に戻る</button>';
+  if(fromFocus && fStart){
+    h += '<button class="btn" onclick="focusResume()">▶ 集中に戻る（休憩まで '+mmss(fLeftAll())+'）</button>';
+    h += '<p class="note">呼吸のあいだ、集中の時計は止まっていました。押すとそこから続きます。</p>';
+    h += '<button class="btn ghost" onclick="stop();go(\'home\')">最初に戻る</button>';
+  }else{
+    h += '<button class="btn" onclick="stop();go(\'home\')">最初に戻る</button>';
+  }
   h += '<button class="btn link" onclick="stop();go(\'log\')">📖 これまでの記録を見る</button>';
   return h;
 }
@@ -1045,6 +1074,19 @@ function segLabel(slot){
 
 var fStart=0, fSlot=null, fSegs=[], fMode="one", fList=[], fSeg=0;
 var fPaused=false, fPauseAt=0, fFlash=0, fDone=false, fIdx=null, fMemo="";
+/* v7: 集中の途中から呼吸法へ寄り道したときの状態
+   fromFocus … いま動いているセットは「集中からの寄り道」か（＝終わったら集中へ戻す）
+   fShift    … 集中の時計を止めていた合計秒数。休憩の終わりが何秒うしろへずれたか。
+               iPhone標準タイマーは止まらないので、このズレは画面に正直に出す。 */
+var fromFocus=false, fShift=0;
+
+/* 呼吸法のセットを探す。idが残っていればそれを、無ければ最初の自動進行セット。
+   どちらも無ければ null（ボタン自体を出さない）。 */
+function breathSet(){
+  var b = setOf("breath478");
+  if(b && !b.rescue) return b;
+  return DB.sets.filter(function(s){ return s.auto && !s.rescue; })[0] || null;
+}
 
 function fElapsed(){ return fStart ? Math.floor(((fPaused?fPauseAt:Date.now())-fStart)/1000) : 0; }
 function fTotal(){ return fSegs.reduce(function(a,b){return a+b;},0); }
@@ -1074,6 +1116,7 @@ function focusBegin(mode){
   fSegs = segsFor(fSlot);
   fStart = Date.now(); fSeg = 0; fPaused = false; fPauseAt = 0;
   fDone = false; fIdx = null; fMemo = ""; fFlash = Date.now();
+  fromFocus = false; fShift = 0;
   if(DB.focus.native) nativeTimer(fTotal());   /* 休憩までの1本だけ渡す */
   if(tick) clearInterval(tick);
   tick = setInterval(render, 250);
@@ -1098,11 +1141,48 @@ function focusTick(){
     fChime(false);
   }
 }
+/* 止めていた分だけ開始時刻を後ろへずらす＝経過秒はそのまま、終わりが遅くなる。
+   ずらした合計（fShift）を持っておき、画面に出す。 */
+function fUnpause(){
+  if(!fPaused) return 0;
+  var d = Date.now() - fPauseAt;
+  fStart += d; fShift += Math.floor(d/1000);
+  fPaused = false; fPauseAt = 0;
+  return d;
+}
 function focusPause(){
-  if(fPaused){ fStart += (Date.now()-fPauseAt); fPaused = false; }
+  if(fPaused) fUnpause();
   else { fPauseAt = Date.now(); fPaused = true; }
   render();
 }
+/* --- v7: 集中の途中から呼吸法へ寄り道する -----------------------
+   集中の時計は止める（呼吸は集中している時間ではないため）。
+   終わりが3分うしろへずれることは画面に出す。iPhone標準タイマーは
+   こちらからは止められないので、渡し直すボタンも出す。 */
+function focusBreath(){
+  var b = breathSet(); if(!b) return;
+  if(!fPaused){ fPauseAt = Date.now(); fPaused = true; }
+  fromFocus = true;
+  start(b.id);
+}
+function focusResume(){
+  /* 呼吸を途中でやめた回も、1つでも進んでいれば残す（leaveRunと同じ扱い） */
+  if(curId && runIdx===null && doneCount()>0) logRun();
+  stop();
+  fromFocus = false;
+  fUnpause();
+  if(tick) clearInterval(tick);
+  tick = setInterval(render, 250);
+  view = "focus"; render();
+}
+/* ホームから、続いている集中へ戻る（一時停止したままなら止めたまま戻す） */
+function focusBack(){
+  fromFocus = false;
+  if(tick) clearInterval(tick);
+  tick = setInterval(render, 250);
+  view = "focus"; render();
+}
+function fLeftAll(){ return Math.max(0, fTotal() - fElapsed()); }
 function focusSkip(){
   var base = fPaused ? fPauseAt : Date.now();
   fStart = base - (fSegEnd(fSeg)+0.05)*1000;
@@ -1124,6 +1204,7 @@ function focusLeave(){
 function focusReset(){
   if(tick){ clearInterval(tick); tick = null; }
   fStart=0; fSegs=[]; fSeg=0; fPaused=false; fPauseAt=0; fDone=false; fIdx=null; fList=[]; fMemo="";
+  fromFocus=false; fShift=0;
 }
 function logFocus(){
   var rec = { t:fStart, id:"focus", icon:"🎯", name:"仕事に集中（"+SLOTN[fSlotNow()]+"）",
@@ -1212,7 +1293,20 @@ function viewFocus(){
   h += '<button class="btn ghost" onclick="focusPause()">'+(fPaused?'再開':'一時停止')+'</button>';
   h += '<button class="btn ghost" onclick="focusSkip()">次の区切りへ ▶</button>';
   h += '</div>';
+  var bs = breathSet();
+  if(bs){
+    h += '<button class="btn ghost" onclick="focusBreath()">'+esc(bs.icon)+' 集中が切れた — 呼吸を'+Math.max(1,Math.round(limitOf(bs)/60))+'分</button>';
+    h += '<p class="note">押すと<b>集中の時計は止まります</b>。呼吸が終わったら、続きから再開できます（休憩の終わりは、その分うしろへずれます）。</p>';
+  }
   h += '<button class="btn ghost" onclick="nativeTimer('+Math.max(1,segLeft)+')">⏱ この区切りの残り'+Math.max(1,Math.round(segLeft/60))+'分をiPhoneのタイマーに渡す</button>';
+  if(fShift > 0){
+    h += '<div class="warn">止めていた分だけ、休憩の終わりが <b>'+mmss(fShift)+'</b> うしろへずれています。'
+       + (DB.focus.native ? '<br><b>iPhoneのタイマーはこちらからは止められないので、その分だけ早く鳴ります。</b>合わせ直すなら下のボタンです。' : '')
+       + '</div>';
+    if(DB.focus.native){
+      h += '<button class="btn ghost" onclick="nativeTimer('+Math.max(1,leftAll)+')">⏱ 休憩までの残り'+Math.max(1,Math.round(leftAll/60))+'分をタイマーに渡し直す</button>';
+    }
+  }
   h += '<p class="note">この画面は他のアプリを開くと止まりますが、戻れば時刻から計算し直すので、残り時間はズレません。<br><b>途中の区切りの合図は、この画面を開いているときだけ出ます。</b>iPhoneのタイマーは1本しか持てないので、渡してあるのは「休憩まで」の1本です。</p>';
   h += '<button class="btn" onclick="focusFinish()">ここで終える</button>';
   h += '<button class="btn link" onclick="focusLeave()">やめて最初に戻る</button>';
@@ -1230,7 +1324,7 @@ function viewFocusDone(){
   h += '<label>このブロックで出せたもの（任意・1行）</label>'
      + '<input class="inp" type="text" id="f_memo" value="'+esc(fMemo)+'" placeholder="例）企画書の骨子まで" onchange="focusMemo()">'
      + '<p class="note">空のままで構いません。書いたものは記録の中にだけ残ります（Obsidianには入りません）。</p>';
-  var br = DB.sets.filter(function(s){ return s.auto && !s.rescue; })[0];
+  var br = breathSet();
   if(br) h += '<button class="btn ghost" onclick="focusMemo();focusReset();start(\''+br.id+'\')">'+esc(br.icon)+' '+esc(br.name)+' へ</button>';
   h += '<button class="btn" onclick="focusMemo();focusReset();go(\'home\')">最初に戻る</button>';
   h += '<button class="btn link" onclick="focusMemo();focusReset();go(\'log\')">📖 これまでの記録を見る</button>';
