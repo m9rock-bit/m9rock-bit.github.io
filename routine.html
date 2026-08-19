@@ -100,6 +100,17 @@ label{display:block;font-size:12.5px;color:#8a94a6;margin:12px 0 5px}
 .sw i{position:absolute;top:3px;left:3px;width:25px;height:25px;border-radius:50%;background:#e8ecf2;transition:left .15s}
 .sw.on i{left:24px}
 
+/* v13: 実行中にその場で開く入力欄 */
+.iobox{background:#12151c;border:1px solid #e0a86a;border-radius:11px;padding:11px 12px;margin:-4px 0 11px}
+.iobox label{margin-top:0}
+.dnrow{background:#1a1f29;border:1px solid #262d3a;border-radius:11px;padding:11px 12px;margin-bottom:9px}
+.dnrow .h{font-size:14.5px;line-height:1.5;margin-bottom:7px}
+.dnrow .h s{color:#6f7a8c}
+.nlist{margin:6px 0 0}
+.nline{display:flex;gap:8px;align-items:flex-start;font-size:12.5px;color:#cbd5e3;line-height:1.6;padding:4px 0}
+.nline .d{flex:none;color:#6f7a8c;font-size:11.5px;padding-top:1px}
+.nline .x{flex:none;background:none;border:none;color:#6f7a8c;font-size:15px;cursor:pointer;padding:0 2px;font-family:inherit}
+
 /* v11: 区切りの合図で画面全体を2回光らせる */
 .flash{position:fixed;top:0;left:0;right:0;bottom:0;z-index:20;pointer-events:none;background:#e0a86a;opacity:0;animation:fl 1.5s ease-out}
 @keyframes fl{0%{opacity:0}6%{opacity:.8}22%{opacity:.08}40%{opacity:.75}60%{opacity:.06}80%{opacity:.5}100%{opacity:0}}
@@ -202,6 +213,22 @@ label{display:block;font-size:12.5px;color:#8a94a6;margin:12px 0 5px}
      【自動進行セットの全体時間】ステップの合計から毎回計算します（制限
      時間の欄は出しません）。ステップを増減したときに総時間だけ古いまま
      残る事故を防ぐためです。
+
+   v13: 2026-08-19（チャットでの追加ご依頼）
+     「まだ自分に合うルーティンの形を試している最中。各項目をためした
+       ときにどう感じたかをメモしたい。やりながら項目をその場で足して、
+       作り上げられるようにしたい」
+     - **項目ごとのメモ**（DB.notes）。実行中は「いまの項目」にだけ出し、
+       終わったあとの画面では全項目を並べて落ち着いて書ける。編集画面の
+       各項目の下にも並ぶ＝構成を見直すときの材料になる。
+     - **やりながら項目を足せる**。タップ式は「この項目の次」と「いちばん
+       下」、自動進行は「いちばん下」だけ（途中に差し込むと、経過秒から
+       逆算しているいまの位置が巻き戻るため）。足したものはセットに残る。
+     - メモは**そのときの文言をキーに紐づける**。位置で紐づけると並べ替え
+       で別の項目に付いてしまうため。文言を書き換えると過去のメモは古い
+       文言のほうに残る（消えはしない）。
+     - 入力欄を開いている間だけ250msの自動再描画を止める（tickRender）。
+       止めないと打ち込んだ文字が消える。時計そのものは止まらない。
 
    v12: 2026-08-19（チャットでの追加ご依頼）
      「集中時間が経過したあとに、休憩に移るルーティンをこのアプリ上にある
@@ -403,7 +430,7 @@ function defaults(){ return [
           「まず短時間から、乗ってきたら伸ばす」を素直に形にしたもの。
    すべて集中の設定画面から変えられます。 */
 var FOCUS_DEF = { len:{am:120,pm:90,ev:50}, from:{pm:12,ev:16}, seg:[15,25,40], sound:false, native:true, notify:true, lastBreak:"" };
-var DB = { v:11, sets:null, chime:true, voice:true, spotifyUrl:"", scName:"ルーティンタイマー", log:[], count:0, focus:null };
+var DB = { v:12, sets:null, chime:true, voice:true, spotifyUrl:"", scName:"ルーティンタイマー", log:[], count:0, focus:null, notes:[] };
 try{
   var raw = localStorage.getItem(KEY);
   if(raw){
@@ -413,6 +440,7 @@ try{
     if(typeof p.spotifyUrl==="string") DB.spotifyUrl = p.spotifyUrl;
     if(p.scName) DB.scName = p.scName;
     if(Array.isArray(p.log)) DB.log = p.log;
+    if(Array.isArray(p.notes)) DB.notes = p.notes;
     if(typeof p.count==="number" && p.count>=0) DB.count = p.count;
     if(p.focus && typeof p.focus==="object") DB.focus = p.focus;
     if(p.mig_dinner===true) DB.mig_dinner = true;
@@ -494,6 +522,94 @@ var autoPaused = false, pauseAt = 0, autoFinished = false;
    1回の実行につき1件。押した時刻・セット・やれたステップ数だけを持ちます。
    「やらなかった日」は行を作りません（無い日は履歴に出てきません）。 */
 var LOGMAX = 400;
+
+/* ============================================================
+   v13: 項目ごとの「やってみてどう感じたか」メモ（2026-08-19 ご依頼）
+   ------------------------------------------------------------
+   まだ自分に合うルーティンの形を探している最中、というご事情への対応。
+   ステップ1つずつに、その場で気づいたことを短く残せるようにした。
+
+   置き場: DB.notes = [{t:書いた時刻, sid:セットid, step:そのときの文言, v:メモ}]
+   ステップには安定したIDが無い（並べ替え・書き換えで位置が変わる）ので、
+   **そのときの文言をキーにして紐づけている**。文言を書き換えると、過去の
+   メモはその古い文言のほうに残る（消えはしない。編集画面で見える）。
+   これは欠点だが、位置で紐づけて「並べ替えたらメモが別の項目に付く」
+   より安全なほうを取った。
+
+   出す場所は3つ:
+   - 実行中: いまの項目の下に「💬 メモ」。前に書いたものも1件だけ添える
+   - 終わったあと: 全項目を並べて、落ち着いて書ける（実行中より現実的）
+   - 編集画面: 各項目の下に過去のメモを並べる ← 構成を見直すときの主役
+   ============================================================ */
+var NOTEMAX = 400;
+function noteKey(x){ return String(x==null?"":x).trim(); }
+function notesFor(sid, stepText){
+  var k = noteKey(stepText), out = [];
+  for(var i=DB.notes.length-1;i>=0;i--){
+    var r = DB.notes[i];
+    if(r && r.sid===sid && noteKey(r.step)===k) out.push({ r:r, i:i });
+  }
+  return out;   /* 新しい順。i は DB.notes 上の位置（削除に使う） */
+}
+function addNote(sid, stepText, v){
+  v = String(v==null?"":v).trim();
+  if(!v) return false;
+  DB.notes.push({ t:Date.now(), sid:sid, step:noteKey(stepText), v:v });
+  if(DB.notes.length > NOTEMAX) DB.notes = DB.notes.slice(DB.notes.length - NOTEMAX);
+  save();
+  return true;
+}
+function delNote(i){
+  if(i>=0 && i<DB.notes.length){ DB.notes.splice(i,1); save(); }
+}
+/* 入力欄を開いている間は、実行画面の自動再描画を止める。
+   250msごとに描き直すと、打ち込んだ文字がそのたびに消えるため。
+   時計そのものは止まらない（経過は時刻から計算し直している）。 */
+var inputOpen = null;   /* "note:3" / "add:4" など */
+function openInput(k){ inputOpen = k; render(); setTimeout(function(){
+  var el = document.getElementById("io_text"); if(el){ el.focus(); }
+}, 30); }
+function closeInput(){ inputOpen = null; render(); }
+/* 250msごとの自動再描画。入力欄を開いている間だけ描き直しを止める
+   （render() 自体は止めない。ボタンから呼ぶ描き直しは通す）。 */
+function tickRender(){
+  if(inputOpen && view==="run") return;
+  render();
+}
+function ioVal(){ var el = document.getElementById("io_text"); return el ? el.value : ""; }
+function ioSec(){ var el = document.getElementById("io_sec"); var n = el ? parseInt(el.value,10) : 0; return n>0 ? n : 60; }
+
+/* 実行中に項目を足す。pos の位置へ差し込み、済み・未済の印もずらす。 */
+function runAdd(pos){
+  var s = setOf(curId); if(!s) return;
+  var txt = String(ioVal()||"").trim();
+  if(!txt){ closeInput(); return; }
+  var line = ioSec() + "|" + txt;
+  if(pos==null || pos<0 || pos>s.steps.length) pos = s.steps.length;
+  s.steps.splice(pos, 0, line);
+  var nd = {};
+  Object.keys(doneSet).forEach(function(k){
+    var i = parseInt(k,10);
+    nd[i<pos ? i : i+1] = doneSet[k];
+  });
+  doneSet = nd;
+  if(curStep >= pos) curStep++;
+  save();
+  inputOpen = null; render();
+}
+function runNote(i){
+  var s = setOf(curId); if(!s) return;
+  var st = stepsOf(s);
+  if(st[i]) addNote(s.id, st[i].text, ioVal());
+  inputOpen = null; render();
+}
+/* 終わったあとの画面から書くとき（こちらは自動再描画が無いので素直に書ける） */
+function doneNote(i){
+  var s = setOf(curId); if(!s) return;
+  var st = stepsOf(s), el = document.getElementById("dn_"+i);
+  if(!el || !st[i]) return;
+  if(addNote(s.id, st[i].text, el.value)) render();
+}
 function logRun(){
   var s = setOf(curId); if(!s) return;
   var n = s.steps.length, d = 0;
@@ -795,7 +911,7 @@ function start(id, fromIndex){
   var s = setOf(id);
   if(s && s.voice){ var st0 = stepsOf(s)[curStep]; if(st0) speak(sayOf(st0)); }
   if(tick) clearInterval(tick);
-  tick = setInterval(render, 250);
+  tick = setInterval(tickRender, 250);
   view = "run"; render();
   /* v8: 開始時の外向きの動作は1つだけ。
      iPhoneのタイマーへ渡す（location.href）とSpotifyを開く（window.open）は、
@@ -1055,8 +1171,57 @@ function viewRun(){
     h += '<div class="'+cls+'" onclick="toggleStep('+i+')"><div class="n">'+mark+'</div>'
        + '<div class="t">'+(doneSet[i]==="skip"?'<s>'+esc(x.text)+'</s>':esc(x.text))
        + '<em>目安 '+(x.sec>=60 ? Math.round(x.sec/60)+'分' : x.sec+'秒')+'</em></div></div>';
+    /* v13: いまの項目にだけ、メモと「次に足す」を出す。
+       全部の行に出すと、行そのもののタップ（＝完了）と取り合いになるため。 */
+    if(i===curStep && !doneSet[i]){
+      var prev = notesFor(s.id, x.text);
+      if(inputOpen === "note:"+i){
+        h += '<div class="iobox">'
+           + '<label style="margin-top:0">やってみて、どう感じましたか</label>'
+           + '<input class="inp" type="text" id="io_text" placeholder="例）これは要らない気がする／もっと短くていい">'
+           + '<div class="row" style="margin-top:8px">'
+           + '<button class="btn ghost" style="margin-top:0" onclick="closeInput()">やめる</button>'
+           + '<button class="btn save" style="margin-top:0" onclick="runNote('+i+')">残す</button>'
+           + '</div></div>';
+      }else if(inputOpen === "add:"+(i+1)){
+        h += '<div class="iobox">'
+           + '<label style="margin-top:0">ここに1つ足す（この項目の次）</label>'
+           + '<div class="stline"><input class="inp stsec" type="number" inputmode="numeric" id="io_sec" value="60">'
+           + '<span class="stunit">秒</span>'
+           + '<input class="inp" type="text" id="io_text" placeholder="やること"></div>'
+           + '<div class="row" style="margin-top:8px">'
+           + '<button class="btn ghost" style="margin-top:0" onclick="closeInput()">やめる</button>'
+           + '<button class="btn save" style="margin-top:0" onclick="runAdd('+(i+1)+')">足す</button>'
+           + '</div></div>';
+      }else{
+        h += '<div class="stbtns" style="margin:-4px 0 10px">'
+           + '<button onclick="openInput(\'note:'+i+'\')">💬 メモを残す</button>'
+           + '<button onclick="openInput(\'add:'+(i+1)+'\')">＋ 次に足す</button>'
+           + '</div>';
+      }
+      if(prev.length){
+        h += '<p class="note" style="margin:-4px 0 10px">前に書いたもの： '+esc(prev[0].r.v)
+           + ' <span style="opacity:.7">（'+dayLabel(prev[0].r.t)+'）</span>'
+           + (prev.length>1 ? ' ほか'+(prev.length-1)+'件' : '')+'</p>';
+      }
+    }
   });
-  h += '<p class="note">タップで完了。もう一度タップで戻せます。<br>下の行から始めても構いません（上は「–」になるだけで、失敗にはなりません）。</p>';
+  /* いちばん下に足す（いま思いついたことを、順番を気にせず置く） */
+  if(inputOpen === "add:end"){
+    h += '<div class="iobox">'
+       + '<label style="margin-top:0">いちばん下に1つ足す</label>'
+       + '<div class="stline"><input class="inp stsec" type="number" inputmode="numeric" id="io_sec" value="60">'
+       + '<span class="stunit">秒</span>'
+       + '<input class="inp" type="text" id="io_text" placeholder="やること"></div>'
+       + '<div class="row" style="margin-top:8px">'
+       + '<button class="btn ghost" style="margin-top:0" onclick="closeInput()">やめる</button>'
+       + '<button class="btn save" style="margin-top:0" onclick="runAdd(null)">足す</button>'
+       + '</div></div>';
+  }else{
+    h += '<button class="btn ghost" onclick="openInput(\'add:end\')">＋ いちばん下に1つ足す</button>';
+  }
+  h += '<p class="note">タップで完了。もう一度タップで戻せます。<br>下の行から始めても構いません（上は「–」になるだけで、失敗にはなりません）。<br>'
+     + '<b>足したものは、このセットにそのまま残ります。</b>やりながら形を作っていって構いません。</p>';
   h += '<button class="btn ghost" onclick="nativeTimer()">⏱ iPhoneのタイマーにも残り'+Math.max(1,Math.round(left()/60))+'分を渡す</button>';
   h += '<p class="note">この画面は他のアプリを開くと止まります（戻れば時刻から計算し直すのでズレません）。<br><b>画面の上に残り時間を出したいときは、上のボタンでiPhone標準のタイマーへ渡してください。</b></p>';
   if(s.spotify){
@@ -1116,6 +1281,21 @@ function viewRunAuto(s){
   h += '<button class="btn ghost" onclick="autoPauseToggle()">'+(autoPaused?'再開':'一時停止')+'</button>';
   h += '<button class="btn ghost" onclick="autoSkip()">次へ ▶</button>';
   h += '</div>';
+  /* v13: 自動で進むセットは、いちばん下にだけ足せる
+     （途中に差し込むと、経過秒から逆算しているいまの位置が巻き戻るため） */
+  if(inputOpen === "add:end"){
+    h += '<div class="iobox">'
+       + '<label style="margin-top:0">いちばん下に1つ足す</label>'
+       + '<div class="stline"><input class="inp stsec" type="number" inputmode="numeric" id="io_sec" value="60">'
+       + '<span class="stunit">秒</span>'
+       + '<input class="inp" type="text" id="io_text" placeholder="やること"></div>'
+       + '<div class="row" style="margin-top:8px">'
+       + '<button class="btn ghost" style="margin-top:0" onclick="closeInput()">やめる</button>'
+       + '<button class="btn save" style="margin-top:0" onclick="runAdd(null)">足す</button>'
+       + '</div></div>';
+  }else{
+    h += '<button class="btn ghost" onclick="openInput(\'add:end\')">＋ いちばん下に1つ足す</button>';
+  }
   /* v8: 自動で進むセットにも、iPhone標準タイマーへの手渡しを付けた（従来はタップ式だけだった） */
   var autoLeft = Math.max(1, limitOf(s) - e);
   h += '<button class="btn ghost" onclick="nativeTimer('+autoLeft+')">⏱ iPhoneのタイマーにも残り'+Math.max(1,Math.round(autoLeft/60))+'分を渡す</button>';
@@ -1141,8 +1321,29 @@ function viewDone(){
   else if(d>0) h += '<div class="hint">'+d+'つやれました。<b>0か1かではありません。</b>次の合図でまた押せます。</div>';
   else h += '<div class="hint">今日はここまで。押したこと自体は残っています。次の合図でまた押してください。</div>';
   h += '<div class="past">これで <b>'+DB.count+'</b> 回目です</div>';
+  /* v13: 落ち着いて振り返れるのはここ。項目ごとに感じたことを残せる。 */
+  h += '<div class="sec">やってみて、どう感じましたか（任意）</div>';
+  stepsOf(s).forEach(function(x,i){
+    var prev = notesFor(s.id, x.text);
+    h += '<div class="dnrow">'
+       + '<div class="h">'+(doneSet[i]==="done"?'✓ ':(doneSet[i]==="skip"?'– ':''))
+       + (doneSet[i]==="skip" ? '<s>'+esc(x.text)+'</s>' : esc(x.text))+'</div>'
+       + '<input class="inp" type="text" id="dn_'+i+'" placeholder="例）これは要らない気がする／もっと短くていい" onchange="doneNote('+i+')">';
+    if(prev.length){
+      h += '<div class="nlist">';
+      prev.slice(0,3).forEach(function(o){
+        h += '<div class="nline"><span class="d">'+dayLabel(o.r.t)+'</span>'
+           + '<span style="flex:1">'+esc(o.r.v)+'</span>'
+           + '<button class="x" onclick="delNote('+o.i+');render()">×</button></div>';
+      });
+      if(prev.length>3) h += '<p class="note" style="margin:2px 0 0">ほか'+(prev.length-3)+'件は「セットを編集」で見られます。</p>';
+      h += '</div>';
+    }
+    h += '</div>';
+  });
+  h += '<p class="note">書かなくて構いません。書いたものは<b>この端末の中だけ</b>に残り、次に同じ項目をやるときと、「セットを編集」の画面に出ます。<br>いま形を探している最中なら、ここのメモがそのまま材料になります。</p>';
   h += '<p class="note">この記録はこの端末の中だけに残ります。Obsidian・Points Tracker には入りません。<br>連続日数と達成率は数えていません。</p>';
-  if(!s.rescue && d<n) h += '<button class="btn ghost" onclick="go(\'run\');tick=setInterval(render,250)">続きに戻る</button>';
+  if(!s.rescue && d<n) h += '<button class="btn ghost" onclick="go(\'run\');tick=setInterval(tickRender,250)">続きに戻る</button>';
   if(fromFocus && fStart){
     h += '<button class="btn" onclick="focusResume()">▶ 集中に戻る（休憩まで '+mmss(fLeftAll())+'）</button>';
     h += '<p class="note">呼吸のあいだ、集中の時計は止まっていました。押すとそこから続きます。</p>';
@@ -1329,7 +1530,7 @@ function focusBegin(mode){
   fDone = false; fIdx = null; fMemo = ""; fFlash = Date.now();
   fromFocus = false; fShift = 0;
   if(tick) clearInterval(tick);
-  tick = setInterval(render, 250);
+  tick = setInterval(tickRender, 250);
   view = "focus"; render();
   if(DB.focus.native) nativeTimer(fTotal());   /* 休憩までの1本だけ渡す（画面遷移を伴うので最後） */
 }
@@ -1401,14 +1602,14 @@ function focusResume(){
   fromFocus = false;
   fUnpause();
   if(tick) clearInterval(tick);
-  tick = setInterval(render, 250);
+  tick = setInterval(tickRender, 250);
   view = "focus"; render();
 }
 /* ホームから、続いている集中へ戻る（一時停止したままなら止めたまま戻す） */
 function focusBack(){
   fromFocus = false;
   if(tick) clearInterval(tick);
-  tick = setInterval(render, 250);
+  tick = setInterval(tickRender, 250);
   view = "focus"; render();
 }
 function fLeftAll(){ return Math.max(0, fTotal() - fElapsed()); }
@@ -1781,6 +1982,20 @@ function stepAdd(id, at){
     if(el){ el.focus(); el.select(); }
   }, 30);
 }
+/* v13: その項目に付いたメモを並べる（構成を見直すときの材料）。
+   × で1件ずつ消せる。 */
+function noteList(sid, stepText){
+  var ns = notesFor(sid, stepText);
+  if(!ns.length) return '';
+  var h = '<div class="nlist" style="margin-top:8px;border-top:1px solid #262d3a;padding-top:7px">';
+  ns.forEach(function(o){
+    h += '<div class="nline"><span class="d">'+dayLabel(o.r.t)+'</span>'
+       + '<span style="flex:1">'+esc(o.r.v)+'</span>'
+       + '<button class="x" onclick="collect();delNote('+o.i+');render()">×</button></div>';
+  });
+  h += '</div>';
+  return h;
+}
 /* 1行ずつの編集欄を組み立てる */
 function stepRows(s){
   var st = stepsOf(s), h = '';
@@ -1798,6 +2013,7 @@ function stepRows(s){
             + '<input class="inp" type="text" id="sy_'+s.id+'_'+i+'" value="'+esc(x.say)+'" placeholder="空欄なら上の文言を読みます">'
             + '</div>'
           : '')
+       + noteList(s.id, x.text)
        + '<div class="stbtns">'
        + '<button onclick="stepMove(\''+s.id+'\','+i+',-1)"'+(i===0?' disabled':'')+'>↑</button>'
        + '<button onclick="stepMove(\''+s.id+'\','+i+',1)"'+(i===st.length-1?' disabled':'')+'>↓</button>'
