@@ -185,6 +185,18 @@ label{display:block;font-size:12.5px;color:#8a94a6;margin:12px 0 5px}
      時間の欄は出しません）。ステップを増減したときに総時間だけ古いまま
      残る事故を防ぐためです。
 
+   v8: 2026-08-19（チャットでの追加ご依頼）
+     「Routineで自分でセットしたものにもiPhoneのアラームを設定したい」
+     → セットごとの set.timer を新設。オンにすると、そのセットを押した
+        瞬間に「セットの長さ」をiPhone標準タイマーへ渡す（集中ブロックと
+        同じ形）。既定はオフで、既存のセットは何も変わらない。
+     - あわせて、自動で進むセットの実行画面にも手渡しボタンを付けた
+       （v4〜v7ではタップ式の画面にしか無かった）。
+     - 【同時にはできない】開始時に「タイマーへ渡す」と「Spotifyを開く」は
+       どちらも前面のアプリを切り替えるため、両方は動かない。両方オンの
+       ときはタイマーを優先し、その旨を編集画面に警告として出す。
+       プレイリストは実行中の画面のボタンから開ける。
+
    v7: 2026-08-19（チャットでの追加ご依頼）
      集中の途中で「集中力が切れた」と思ったとき、その場から4-7-8呼吸法へ
      寄り道して、終わったら集中の続きへ戻れるようにした。
@@ -306,7 +318,7 @@ function defaults(){ return [
           「まず短時間から、乗ってきたら伸ばす」を素直に形にしたもの。
    すべて集中の設定画面から変えられます。 */
 var FOCUS_DEF = { len:{am:120,pm:90,ev:50}, from:{pm:12,ev:16}, seg:[15,25,40], sound:false, native:true };
-var DB = { v:6, sets:null, chime:true, voice:true, spotifyUrl:"", scName:"ルーティンタイマー", log:[], count:0, focus:null };
+var DB = { v:7, sets:null, chime:true, voice:true, spotifyUrl:"", scName:"ルーティンタイマー", log:[], count:0, focus:null };
 try{
   var raw = localStorage.getItem(KEY);
   if(raw){
@@ -662,10 +674,16 @@ function start(id, fromIndex){
   autoPaused = false; pauseAt = 0; autoFinished = false;
   var s = setOf(id);
   if(s && s.voice){ var st0 = stepsOf(s)[curStep]; if(st0) speak(sayOf(st0)); }
-  openSpotify(s);   /* set.spotify が入っているセットだけ開く（中で判定） */
   if(tick) clearInterval(tick);
   tick = setInterval(render, 250);
   view = "run"; render();
+  /* v8: 開始時の外向きの動作は1つだけ。
+     iPhoneのタイマーへ渡す（location.href）とSpotifyを開く（window.open）は、
+     どちらも前面のアプリを切り替えるので、同時に両方はできない。
+     タイマーを優先し、プレイリストは実行中の画面のボタンから開く形にした
+     （どちらを優先するかは編集画面にも書いてある）。 */
+  if(s && s.timer && limitOf(s)>0) nativeTimer(limitOf(s));
+  else openSpotify(s);   /* set.spotify が入っているセットだけ開く（中で判定） */
 }
 function stop(){ if(tick) clearInterval(tick); tick=null; startAt=0; curId=null; doneSet={}; curStep=0; runIdx=null; autoPaused=false; pauseAt=0; autoFinished=false; }
 function toggleStep(i){
@@ -977,6 +995,9 @@ function viewRunAuto(s){
   h += '<button class="btn ghost" onclick="autoPauseToggle()">'+(autoPaused?'再開':'一時停止')+'</button>';
   h += '<button class="btn ghost" onclick="autoSkip()">次へ ▶</button>';
   h += '</div>';
+  /* v8: 自動で進むセットにも、iPhone標準タイマーへの手渡しを付けた（従来はタップ式だけだった） */
+  var autoLeft = Math.max(1, limitOf(s) - e);
+  h += '<button class="btn ghost" onclick="nativeTimer('+autoLeft+')">⏱ iPhoneのタイマーにも残り'+Math.max(1,Math.round(autoLeft/60))+'分を渡す</button>';
   if(s.spotify){
     h += '<button class="btn ghost" onclick="openSpotify()">🎵 プレイリストを開く'+(spUrl(s)?'':'（未設定）')+'</button>';
     if(!spUrl(s)) h += '<p class="note">このセットの編集画面か、ホーム画面の「設定」にプレイリストのURLを入れると、次回からここで開けます。</p>';
@@ -1430,11 +1451,13 @@ function viewEdit(){
      + '同じ並びの繰り返し（吸う・止める・吐く など）は実行画面が自動で「サイクル ○/○」に、'
      + 'ばらばらの内容なら「ステップ ○/○」になります。設定は要りません。<br><br>'
      + '<b>読み上げ</b>は、ホーム画面の「音声で切り替えを案内する」がオフだと、ここがオンでも鳴りません。<br>'
+     + '<b>iPhoneのタイマーへ渡す</b>と、アプリを閉じていても鳴ります。<b>ショートカット「'+esc(DB.scName)+'」が要ります</b>（未作成なら何も起きません）。<br>'
      + '呼吸法のセットを土台に別のルーティンを組みたいときは、<b>複製</b>から始めるのが早いです。</div>';
   DB.sets.forEach(function(s,i){
     var isArmed = (armed===s.id);
     h += '<div class="sec">'+esc(s.icon)+' '+esc(s.name)
        + (s.auto?'<span class="tag">自動で進む</span>':'')
+       + (s.timer?'<span class="tag">⏱ タイマー</span>':'')
        + (s.rescue?'<span class="tag">崩れたとき用</span>':'')+'</div>';
     h += '<div class="card'+(isArmed?' del':'')+'">'
        + '<label>アイコンとタイトル</label>'
@@ -1445,13 +1468,22 @@ function viewEdit(){
        + '<label>説明文（一覧と実行中の画面に出ます）</label>'
        + '<textarea class="inp" id="nt_'+s.id+'" style="min-height:76px;font-family:inherit;font-size:14px">'+esc(s.note)+'</textarea>'
        /* --- v5: このセットの進み方・音声・Spotify --- */
-       + '<label>このセットの進み方・音声・プレイリスト</label>'
+       + '<label>このセットの進み方・音声・タイマー・プレイリスト</label>'
        + '<div class="toggle"><b>'+(s.auto?'自動で進む':'タップして進む')+'</b>'
        + '<button class="sw'+(s.auto?' on':'')+'" onclick="setFlag(\''+s.id+'\',\'auto\')"><i></i></button></div>'
        + '<div class="toggle" style="margin-top:6px"><b>読み上げる</b>'
        + '<button class="sw'+(s.voice?' on':'')+'" onclick="setFlag(\''+s.id+'\',\'voice\')"><i></i></button></div>'
+       + '<div class="toggle" style="margin-top:6px"><b>開始時にiPhoneのタイマーへ渡す</b>'
+       + '<button class="sw'+(s.timer?' on':'')+'" onclick="setFlag(\''+s.id+'\',\'timer\')"><i></i></button></div>'
+       + (s.timer
+          ? '<p class="note" style="margin-top:4px">押した瞬間に、このセットの<b>'+mmss(limitOf(s))+'</b>をiPhone標準のタイマーへ渡します（ショートカット「'+esc(DB.scName)+'」）。ロック画面に残り時間が出て、アプリを閉じていても鳴ります。</p>'
+          : '')
        + '<div class="toggle" style="margin-top:6px"><b>開始時にプレイリストを開く</b>'
        + '<button class="sw'+(s.spotify?' on':'')+'" onclick="setFlag(\''+s.id+'\',\'spotify\')"><i></i></button></div>'
+       + (s.timer && s.spotify
+          ? '<div class="warn" style="margin-top:7px"><b>開始時に開けるのは、どちらか一方だけです。</b>タイマーとSpotifyはどちらも前面のアプリを切り替えるため、同時には動きません。'
+            + 'このセットは<b>タイマーを渡す側</b>で動きます。プレイリストは実行中の画面の「🎵 プレイリストを開く」から開いてください。</div>'
+          : '')
        + (s.spotify
           ? '<input class="inp" type="text" style="margin-top:7px" id="sp_'+s.id+'" placeholder="このセット専用のURL（空ならホーム画面の既定URL）" value="'+esc(s.spotifyUrl||"")+'">'
             + '<p class="note" style="margin-top:4px">'
