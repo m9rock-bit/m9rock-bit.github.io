@@ -100,6 +100,9 @@ label{display:block;font-size:12.5px;color:#8a94a6;margin:12px 0 5px}
 .sw i{position:absolute;top:3px;left:3px;width:25px;height:25px;border-radius:50%;background:#e8ecf2;transition:left .15s}
 .sw.on i{left:24px}
 
+/* v14: いまの項目を進める大きなボタン */
+.btn.big{padding:26px 17px;font-size:21px;letter-spacing:.02em}
+
 /* v13: 実行中にその場で開く入力欄 */
 .iobox{background:#12151c;border:1px solid #e0a86a;border-radius:11px;padding:11px 12px;margin:-4px 0 11px}
 .iobox label{margin-top:0}
@@ -213,6 +216,24 @@ label{display:block;font-size:12.5px;color:#8a94a6;margin:12px 0 5px}
      【自動進行セットの全体時間】ステップの合計から毎回計算します（制限
      時間の欄は出しません）。ステップを増減したときに総時間だけ古いまま
      残る事故を防ぐためです。
+
+   v14: 2026-08-19（チャットでの追加ご依頼・まとめて8点）
+     1. タップ式の数字を「その項目の残り時間」に（全体は下に小さく添える）
+     2. 項目ごとの**実績時間**を記録（DB.times。延長した分も含む実測）
+        ※順番どおりに進めた項目だけ。飛ばしてタップした回は、どこからどこ
+          までの時間か決められないので記録しない
+     3. 実行中に**項目の名前を直せる**（セットにそのまま反映）
+     4. **延長ボタン**（＋1分／＋5分）。**この回だけ**の延長で、セットの
+        秒数は変えない（セット側を直すのは編集画面と振り返りの役目）
+     5. **振り返り画面**（過去14日）。項目ごとの予定と実績の平均、その差、
+        「予定を平均に合わせる」ボタン、「全部を平均に合わせる」
+     6. 振り返りに**項目ごとのメモ**も並べる。消えた項目のメモ・実績も残す
+     7. 項目から **Gym / ストレッチ / 断食 / 持ち物** アプリへ移れる
+        （ステップ書式の4列目。新規タブで開く＝実行中の状態を消さないため）
+     8. 「次へ」を**大きなボタン**に（.btn.big）
+
+     ステップ書式は「秒|文言|読み上げ|開くアプリ」の4列になった（3列目・
+     4列目とも省略可）。
 
    v13: 2026-08-19（チャットでの追加ご依頼）
      「まだ自分に合うルーティンの形を試している最中。各項目をためした
@@ -430,7 +451,7 @@ function defaults(){ return [
           「まず短時間から、乗ってきたら伸ばす」を素直に形にしたもの。
    すべて集中の設定画面から変えられます。 */
 var FOCUS_DEF = { len:{am:120,pm:90,ev:50}, from:{pm:12,ev:16}, seg:[15,25,40], sound:false, native:true, notify:true, lastBreak:"" };
-var DB = { v:12, sets:null, chime:true, voice:true, spotifyUrl:"", scName:"ルーティンタイマー", log:[], count:0, focus:null, notes:[] };
+var DB = { v:13, sets:null, chime:true, voice:true, spotifyUrl:"", scName:"ルーティンタイマー", log:[], count:0, focus:null, notes:[], times:[] };
 try{
   var raw = localStorage.getItem(KEY);
   if(raw){
@@ -441,6 +462,7 @@ try{
     if(p.scName) DB.scName = p.scName;
     if(Array.isArray(p.log)) DB.log = p.log;
     if(Array.isArray(p.notes)) DB.notes = p.notes;
+    if(Array.isArray(p.times)) DB.times = p.times;
     if(typeof p.count==="number" && p.count>=0) DB.count = p.count;
     if(p.focus && typeof p.focus==="object") DB.focus = p.focus;
     if(p.mig_dinner===true) DB.mig_dinner = true;
@@ -511,6 +533,8 @@ var curStep = 0;
 var tick = null;
 var armed = null;   /* 削除の1回目を押したセットid（2回押しで削除） */
 var runIdx = null;  /* この回の履歴の位置。1回の実行で1件しか増やさないための目印 */
+/* v14: いまの項目を始めた時刻 / この回だけの延長（秒） / この回に足した実績の記録 */
+var stepAt = 0, stepExtra = {}, runTimes = {};
 var clearArmed = false; /* 履歴の消去も2回押し */
 
 /* --- v4: auto セット（4-7-8呼吸法）の状態 ---------------------
@@ -542,6 +566,68 @@ var LOGMAX = 400;
    - 編集画面: 各項目の下に過去のメモを並べる ← 構成を見直すときの主役
    ============================================================ */
 var NOTEMAX = 400;
+
+/* ============================================================
+   v14: 項目ごとの実績時間（2026-08-19 ご依頼）
+   ------------------------------------------------------------
+   タップ式は「時刻を過ぎても自分で次へ進む」作りなので、**予定の秒数では
+   なく、実際にかかった秒数**が分かる。延長した分もそのまま入れる。
+   DB.times = [{t:その項目を始めた時刻, sid, step:そのときの文言,
+                plan:予定の秒数, act:実際にかかった秒数}]
+   紐づけはメモと同じく「そのときの文言」をキーにする（理由はDB.notesの
+   コメント参照）。順番どおりに進めたときだけ記録する（飛ばしてタップした
+   ときは、どこからどこまでの時間か決められないため記録しない）。
+   ============================================================ */
+var TIMEMAX = 1200;
+function timesFor(sid, stepText, days){
+  var k = noteKey(stepText), lim = days ? (Date.now() - days*86400000) : 0, out = [];
+  for(var i=DB.times.length-1;i>=0;i--){
+    var r = DB.times[i];
+    if(r && r.sid===sid && noteKey(r.step)===k && r.t>=lim) out.push(r);
+  }
+  return out;
+}
+function avgAct(sid, stepText, days){
+  var rs = timesFor(sid, stepText, days);
+  if(!rs.length) return { n:0, avg:0 };
+  var sum = 0;
+  rs.forEach(function(r){ sum += (r.act||0); });
+  return { n:rs.length, avg: Math.round(sum/rs.length) };
+}
+/* 平均に合わせるときの丸め。1秒刻みの数字を並べても読みにくいだけなので、
+   桁に応じてざっくり丸める。 */
+function roundSec(n){
+  n = Math.max(5, Math.round(n));
+  if(n < 60)  return Math.round(n/5)*5;
+  if(n < 300) return Math.round(n/10)*10;
+  return Math.round(n/30)*30;
+}
+/* そのセットで、過去に記録があるのに いまは無くなっている項目 */
+function goneSteps(sid, days){
+  var s = setOf(sid); if(!s) return [];
+  var now = {}, lim = days ? (Date.now() - days*86400000) : 0, seen = {}, out = [];
+  stepsOf(s).forEach(function(x){ now[noteKey(x.text)] = true; });
+  for(var i=DB.times.length-1;i>=0;i--){
+    var r = DB.times[i];
+    if(!r || r.sid!==sid || r.t<lim) continue;
+    var k = noteKey(r.step);
+    if(now[k] || seen[k]) continue;
+    seen[k] = true; out.push(r.step);
+  }
+  /* メモだけ残っている項目も「変化」として拾う */
+  DB.notes.forEach(function(r){
+    if(!r || r.sid!==sid || r.t<lim) return;
+    var k = noteKey(r.step);
+    if(now[k] || seen[k]) return;
+    seen[k] = true; out.push(r.step);
+  });
+  return out;
+}
+function runCount(sid, days){
+  var lim = days ? (Date.now() - days*86400000) : 0, n = 0;
+  DB.log.forEach(function(r){ if(r && r.id===sid && r.t>=lim) n++; });
+  return n;
+}
 function noteKey(x){ return String(x==null?"":x).trim(); }
 function notesFor(sid, stepText){
   var k = noteKey(stepText), out = [];
@@ -594,6 +680,15 @@ function runAdd(pos){
   });
   doneSet = nd;
   if(curStep >= pos) curStep++;
+  save();
+  inputOpen = null; render();
+}
+/* v14: 実行中に項目の名前を直す。秒数・読み上げ・開くアプリはそのまま。 */
+function runRename(i){
+  var s = setOf(curId); if(!s) return;
+  var st = stepsOf(s), t = String(ioVal()||"").trim();
+  if(!t || !st[i]){ closeInput(); return; }
+  s.steps[i] = joinStep(st[i].sec, t, st[i].say, st[i].app);
   save();
   inputOpen = null; render();
 }
@@ -770,12 +865,40 @@ function mmss(s){ var m=Math.floor(Math.abs(s)/60), x=Math.abs(s)%60; return (s<
    3列目が無いときは、画面の文言から（…）を外したものを読み上げます。 */
 function parseStep(line){
   var p = String(line).split("|");
-  if(p.length<2) return { sec:60, text:String(line).trim(), say:"" };
+  if(p.length<2) return { sec:60, text:String(line).trim(), say:"", app:"" };
   return {
     sec: parseInt(p[0],10)||60,
     text: (p[1]||"").trim(),
-    say: p.length>2 ? p.slice(2).join("|").trim() : ""
+    say: (p[2]||"").trim(),
+    app: p.length>3 ? p.slice(3).join("|").trim() : ""   /* v14: 開くアプリ */
   };
+}
+/* v14: ステップの行を組み立て直す（末尾の空欄は付けない） */
+function joinStep(sec, text, say, app){
+  var out = sec + "|" + text;
+  if(app) return out + "|" + (say||"") + "|" + app;
+  if(say) return out + "|" + say;
+  return out;
+}
+/* v14: 項目から開ける他のアプリ。同じフォルダに置いてある前提（GitHub Pages）。 */
+var APPS = {
+  gym:     { icon:"🏋", name:"Gym（筋トレ）", url:"gym.html" },
+  stretch: { icon:"🧘", name:"ストレッチ",   url:"stretch.html" },
+  fast:    { icon:"⏱", name:"断食の記録",   url:"fast.html" },
+  packing: { icon:"🧳", name:"持ち物",       url:"packing.html" }
+};
+function appOf(x){
+  var k = x && x.app ? String(x.app).trim() : "";
+  if(!k) return null;
+  if(APPS[k]) return APPS[k];
+  if(/^https?:\/\//.test(k)) return { icon:"🔗", name:"リンクを開く", url:k };
+  return null;
+}
+function openApp(k){
+  var a = APPS[k] || (/^https?:\/\//.test(k) ? { url:k } : null);
+  if(!a) return;
+  /* 同じタブで開くと、いま動いている実行の状態（画面の中だけにある）が消えるので新規タブ */
+  try{ window.open(a.url, "_blank"); }catch(e){}
 }
 function sayOf(x){
   if(x && x.say) return x.say;
@@ -906,6 +1029,7 @@ function start(id, fromIndex){
   curId = id; doneSet = {}; curStep = fromIndex||0;
   for(var i=0;i<curStep;i++) doneSet[i] = "skip";
   startAt = Date.now();
+  stepAt = startAt; stepExtra = {}; runTimes = {};
   runIdx = null;
   autoPaused = false; pauseAt = 0; autoFinished = false;
   var s = setOf(id);
@@ -921,11 +1045,54 @@ function start(id, fromIndex){
   if(s && s.timer && limitOf(s)>0) nativeTimer(limitOf(s));
   else openSpotify(s);   /* set.spotify が入っているセットだけ開く（中で判定） */
 }
-function stop(){ if(tick) clearInterval(tick); tick=null; startAt=0; curId=null; doneSet={}; curStep=0; runIdx=null; autoPaused=false; pauseAt=0; autoFinished=false; }
+function stop(){ if(tick) clearInterval(tick); tick=null; startAt=0; curId=null; doneSet={}; curStep=0; runIdx=null; autoPaused=false; pauseAt=0; autoFinished=false; stepAt=0; stepExtra={}; runTimes={}; inputOpen=null; }
+/* v14: いまの項目に許された秒数（この回の延長を足したもの）と、その残り */
+function stepSec(i){
+  var s = setOf(curId); if(!s) return 60;
+  var st = stepsOf(s);
+  if(!st[i]) return 60;
+  return st[i].sec + (stepExtra[i]||0);
+}
+function stepUsed(){ return stepAt ? Math.floor((Date.now()-stepAt)/1000) : 0; }
+function stepLeft(){ return stepSec(curStep) - stepUsed(); }
+/* v14: その場で延長する。**この回だけ**の延長で、セットの秒数は変えない
+   （セット側を直すのは編集画面と、振り返りの「平均に合わせる」の役目）。
+   実績には延長した分もそのまま入る。 */
+function extendStep(sec){
+  if(curStep==null) return;
+  stepExtra[curStep] = (stepExtra[curStep]||0) + sec;
+  render();
+}
 function toggleStep(i){
-  if(doneSet[i]){ delete doneSet[i]; render(); return; }
+  var s = setOf(curId);
+  if(doneSet[i]){
+    /* 取り消し：この回に足した実績も一緒に取り消す（間違って押した分を残さない） */
+    if(runTimes[i]){
+      var k = DB.times.indexOf(runTimes[i]);
+      if(k>=0) DB.times.splice(k,1);
+      delete runTimes[i];
+      save();
+    }
+    delete doneSet[i];
+    curStep = i;            /* 取り消した項目に戻る（やり直す、という意味なので） */
+    stepAt = Date.now();
+    render(); return;
+  }
   doneSet[i] = "done";
-  var s = setOf(curId), next = -1;
+  /* 順番どおりに進めたときだけ、実際にかかった時間を残す */
+  if(i===curStep && stepAt){
+    var xx = stepsOf(s)[i];
+    if(xx){
+      var rec = { t:stepAt, sid:s.id, step:noteKey(xx.text),
+                  plan:stepSec(i), act:Math.max(0, Math.round((Date.now()-stepAt)/1000)) };
+      DB.times.push(rec);
+      if(DB.times.length > TIMEMAX) DB.times = DB.times.slice(DB.times.length - TIMEMAX);
+      runTimes[i] = rec;
+      save();
+    }
+  }
+  stepAt = Date.now();
+  var next = -1;
   for(var j=0;j<s.steps.length;j++){ if(!doneSet[j]){ next=j; break; } }
   curStep = next<0 ? s.steps.length : next;
   if(allDone()){ chimeDone(); enterDone(); }
@@ -980,6 +1147,7 @@ function render(){
   else if(view==="focusSet") h = viewFocusSet();
   else if(view==="edit") h = viewEdit();
   else if(view==="log") h = viewLog();
+  else if(view==="review") h = viewReview();
   else if(view==="about") h = viewAbout();
   else if(view==="scale") h = viewScale();
   else if(view==="backup") h = viewBackup();
@@ -1039,6 +1207,7 @@ function viewHome(){
      + '<p class="note">作り方は <b>行動計画_2026-08-14 §10</b> にあります。未作成でも、このアプリ自体は使えます。</p></div>';
   h += '<button class="btn ghost" onclick="go(\'scale\')">📏 満腹度のものさし（食後に見る）</button>';
   h += '<button class="btn ghost" onclick="go(\'log\')">📖 これまでの記録</button>';
+  h += '<button class="btn ghost" onclick="revGo(null)">📊 ルーティンの振り返り（実績とメモ）</button>';
   h += '<button class="btn ghost" onclick="go(\'edit\')">セットを編集・追加・削除</button>';
   h += '<button class="btn ghost" onclick="bkGo()">💾 バックアップ（書き出し・読み込み）</button>';
   h += '<button class="btn link" onclick="go(\'about\')">このアプリが持たないもの</button>';
@@ -1158,24 +1327,56 @@ function viewRun(){
   var s = setOf(curId);
   if(s && s.auto) return viewRunAuto(s);
   var st = stepsOf(s), lim = limitOf(s), l = left();
-  var pct = Math.max(0, Math.min(100, (elapsed()/lim)*100));
+  /* v14: 数字はその項目の残り時間にする（全体は下に小さく添える）。
+     全体の残りを大きく出しても、いま何分使っているかは分からないため。 */
+  var cur = st[Math.min(curStep, st.length-1)];
+  var sl = (curStep < st.length) ? stepLeft() : 0;
+  var sSec = (curStep < st.length) ? stepSec(curStep) : 1;
+  var spct = Math.max(0, Math.min(100, (stepUsed()/Math.max(1,sSec))*100));
   var h = '<h1>'+esc(s.icon)+' '+esc(s.name)+'</h1>'+(s.note ? '<p class="sub">'+esc(s.note)+'</p>' : '');
   h += '<div class="card">';
-  h += '<div class="big'+(l<0?' over':'')+'">'+mmss(l)+'</div>';
-  h += '<div class="bigsub">'+(l<0 ? '時間は超えました。続けて大丈夫です' : '残り時間')+'</div>';
-  h += '<div class="bar"><i style="width:'+pct+'%"></i></div>';
+  h += '<div class="bigsub" style="margin-bottom:2px">'+(curStep<st.length ? (curStep+1)+' / '+st.length+'　'+esc(cur?cur.text:"") : 'ぜんぶ終わりました')+'</div>';
+  h += '<div class="big'+(sl<0?' over':'')+'">'+mmss(sl)+'</div>';
+  h += '<div class="bigsub">'+(sl<0 ? 'この項目の予定を過ぎています。続けて大丈夫です' : 'この項目の残り時間')+'</div>';
+  h += '<div class="bar"><i style="width:'+spct+'%"></i></div>';
+  h += '<p class="note" style="text-align:center;margin-top:9px">この項目に使った時間 <b>'+mmss(stepUsed())+'</b>'
+     + (stepExtra[curStep] ? '（延長 +'+durLabel(stepExtra[curStep])+'）' : '')
+     + '<br>ルーティン全体： 経過 '+mmss(elapsed())+' ／ 目安 '+durLabel(lim)+'</p>';
   h += '</div>';
+  /* いまの項目を、大きく押せる形で進める */
+  if(curStep < st.length){
+    h += '<button class="btn big" onclick="toggleStep('+curStep+')">✓ できた — 次へ</button>';
+    h += '<div class="row" style="margin-top:9px">'
+       + '<button class="btn ghost" style="margin-top:0" onclick="extendStep(60)">＋1分 延長</button>'
+       + '<button class="btn ghost" style="margin-top:0" onclick="extendStep(300)">＋5分 延長</button>'
+       + '</div>';
+    var ap = appOf(cur);
+    if(ap) h += '<button class="btn ghost" onclick="openApp(\''+esc(cur.app)+'\')">'+ap.icon+' '+esc(ap.name)+'を開く</button>';
+    h += '<p class="note">延長は<b>この回だけ</b>です。セットの秒数は変わりません（実際にかかった時間は、延長した分もそのまま記録されます）。</p>';
+  }
   st.forEach(function(x,i){
     var cls = doneSet[i] ? "step done" : (i===curStep ? "step cur" : "step");
     var mark = doneSet[i]==="done" ? "✓" : (doneSet[i]==="skip" ? "–" : (i+1));
+    var ap0 = appOf(x);
     h += '<div class="'+cls+'" onclick="toggleStep('+i+')"><div class="n">'+mark+'</div>'
        + '<div class="t">'+(doneSet[i]==="skip"?'<s>'+esc(x.text)+'</s>':esc(x.text))
-       + '<em>目安 '+(x.sec>=60 ? Math.round(x.sec/60)+'分' : x.sec+'秒')+'</em></div></div>';
+       + (ap0 ? ' <span class="tag">'+ap0.icon+' '+esc(ap0.name)+'</span>' : '')
+       + '<em>目安 '+durLabel(x.sec)+(stepExtra[i]?'（延長 +'+durLabel(stepExtra[i])+'）':'')+'</em></div></div>';
     /* v13: いまの項目にだけ、メモと「次に足す」を出す。
        全部の行に出すと、行そのもののタップ（＝完了）と取り合いになるため。 */
     if(i===curStep && !doneSet[i]){
       var prev = notesFor(s.id, x.text);
-      if(inputOpen === "note:"+i){
+      if(inputOpen === "name:"+i){
+        h += '<div class="iobox">'
+           + '<label style="margin-top:0">この項目の名前を直す</label>'
+           + '<input class="inp" type="text" id="io_text" value="'+esc(x.text)+'">'
+           + '<p class="note" style="margin-top:5px">直した内容は<b>このセットにそのまま残ります</b>。'
+           + '過去のメモと実績は、直す前の文言のほうに残ります（消えはしません）。</p>'
+           + '<div class="row" style="margin-top:8px">'
+           + '<button class="btn ghost" style="margin-top:0" onclick="closeInput()">やめる</button>'
+           + '<button class="btn save" style="margin-top:0" onclick="runRename('+i+')">直す</button>'
+           + '</div></div>';
+      }else if(inputOpen === "note:"+i){
         h += '<div class="iobox">'
            + '<label style="margin-top:0">やってみて、どう感じましたか</label>'
            + '<input class="inp" type="text" id="io_text" placeholder="例）これは要らない気がする／もっと短くていい">'
@@ -1195,7 +1396,8 @@ function viewRun(){
            + '</div></div>';
       }else{
         h += '<div class="stbtns" style="margin:-4px 0 10px">'
-           + '<button onclick="openInput(\'note:'+i+'\')">💬 メモを残す</button>'
+           + '<button onclick="openInput(\'note:'+i+'\')">💬 メモ</button>'
+           + '<button onclick="openInput(\'name:'+i+'\')">✏️ 名前を直す</button>'
            + '<button onclick="openInput(\'add:'+(i+1)+'\')">＋ 次に足す</button>'
            + '</div>';
       }
@@ -1356,6 +1558,7 @@ function viewDone(){
   }else{
     h += '<button class="btn" onclick="stop();go(\'home\')">最初に戻る</button>';
   }
+  h += '<button class="btn link" onclick="stop();revGo(s.id)">📊 このルーティンの振り返りを見る</button>';
   h += '<button class="btn link" onclick="stop();go(\'log\')">📖 これまでの記録を見る</button>';
   return h;
 }
@@ -1896,12 +2099,14 @@ function collectSteps(s){
     var old = parseStep(s.steps[i]==null ? "" : s.steps[i]);
     var tt = document.getElementById("st_"+s.id+"_"+i);
     var yy = document.getElementById("sy_"+s.id+"_"+i);
+    var aa = document.getElementById("ap_"+s.id+"_"+i);
     var n = parseInt(sc.value,10);
     /* 空欄・0・マイナスは「変更なし」として前の値を残す（うっかり消えないように） */
     var sec = (n>0) ? n : old.sec;
     var txt = (tt && tt.value.trim()) ? tt.value.trim() : old.text;
     var say = yy ? yy.value.trim() : old.say;
-    rows.push(sec + "|" + txt + (say ? "|" + say : ""));
+    var app = aa ? String(aa.value||"").trim() : old.app;   /* 「なし」を選べるので空欄も取り込む */
+    rows.push(joinStep(sec, txt, say, app));
     i++;
   }
   if(rows.length) s.steps = rows;
@@ -1982,6 +2187,17 @@ function stepAdd(id, at){
     if(el){ el.focus(); el.select(); }
   }, 30);
 }
+/* v14: 「開くアプリ」の選択肢 */
+function appOptions(cur){
+  cur = String(cur||"").trim();
+  var h = '<option value=""'+(cur?'':' selected')+'>なし</option>', known = false;
+  for(var k in APPS){
+    if(k===cur) known = true;
+    h += '<option value="'+k+'"'+(k===cur?' selected':'')+'>'+APPS[k].icon+' '+APPS[k].name+'</option>';
+  }
+  if(cur && !known) h += '<option value="'+esc(cur)+'" selected>'+esc(cur)+'</option>';
+  return h;
+}
 /* v13: その項目に付いたメモを並べる（構成を見直すときの材料）。
    × で1件ずつ消せる。 */
 function noteList(sid, stepText){
@@ -2011,6 +2227,15 @@ function stepRows(s){
           ? '<div class="stline" style="margin-top:6px">'
             + '<span class="stunit" style="width:52px;text-align:left">読み上げ</span>'
             + '<input class="inp" type="text" id="sy_'+s.id+'_'+i+'" value="'+esc(x.say)+'" placeholder="空欄なら上の文言を読みます">'
+            + '</div>'
+          : '')
+       /* v14: この項目から他のアプリへ移れるようにする。
+          自動で進むセットでは、すでに指定してあるとき以外は出さない
+          （呼吸のような細かい刻みでアプリを開くことはないため）。 */
+       + ((!s.auto || x.app)
+          ? '<div class="stline" style="margin-top:6px">'
+            + '<span class="stunit" style="width:66px;text-align:left">開くアプリ</span>'
+            + '<select class="inp" id="ap_'+s.id+'_'+i+'">'+appOptions(x.app)+'</select>'
             + '</div>'
           : '')
        + noteList(s.id, x.text)
@@ -2047,11 +2272,13 @@ function dup(id){
   setTimeout(function(){ var el = document.getElementById("nm_"+c.id); if(el){ el.focus(); el.select(); } }, 30);
 }
 function viewEdit(){
-  var h = '<h1>セットを編集・追加・削除</h1><p class="sub">タイトル・説明文・ステップ、すべて変えられます。<br>ステップは1行に1つ、<b>秒数|文言</b> の形です。読み上げる言葉を画面の文言と変えたいときだけ、<b>秒数|文言|読み上げ</b> と3つめを足します。<br><b>全体の時間は、ステップの秒数から自動で出ます。</b></p>';
+  var h = '<h1>セットを編集・追加・削除</h1><p class="sub">タイトル・説明文・ステップ、すべて変えられます。<br>実行中でも、名前を直したり項目を足したりできます。<br>ステップは1行に1つ、<b>秒数|文言</b> の形です。読み上げる言葉を画面の文言と変えたいときだけ、<b>秒数|文言|読み上げ</b> と3つめを足します。<br><b>全体の時間は、ステップの秒数から自動で出ます。</b></p>';
   h += '<div class="hint"><b>ステップの書き方</b><br>'
      + '<b>60|温かい飲み物をいれる</b> … 60秒。読み上げも同じ文言<br>'
      + '<b>4|吸う（4秒）</b> … 読み上げは「吸う」（（　）の中は読みません）<br>'
      + '<b>7|止める（7秒）|息を止めて</b> … 読み上げだけ別の言葉にしたいとき<br><br>'
+     + '<b>開くアプリ</b>を選ぶと、その項目で Gym・ストレッチ・断食・持ち物 のアプリへ移れます。'
+     + '新しいタブで開くので、実行中のルーティンはそのまま残ります。<br><br>'
      + '<b>自動で進む</b>にすると、秒数どおりに数えて次のステップへ勝手に進みます（タップ不要）。'
      + '同じ並びの繰り返し（吸う・止める・吐く など）は実行画面が自動で「サイクル ○/○」に、'
      + 'ばらばらの内容なら「ステップ ○/○」になります。設定は要りません。<br><br>'
@@ -2167,6 +2394,129 @@ function addSet(){
 }
 function resetAll(){ DB.sets = defaults(); armed = null; save(); go("home"); }
 
+/* ============================================================
+   v14: 振り返り（2026-08-19 ご依頼）
+   ------------------------------------------------------------
+   過去2週間ぶんの「実際にかかった時間」の平均と、そのあいだに書いたメモを
+   項目ごとに並べる。予定と平均がずれていたら、その場で予定のほうを平均に
+   合わせられる（＝現実に合わせて形を直すための画面）。
+
+   出す数は「起きた事実」だけにしてある。やらなかった日・守れなかった回数
+   のような、できなかったことから計算する数は出さない（v1からの線引き）。
+   ============================================================ */
+var REVDAYS = 14;
+var revId = null;
+function revGo(id){ revId = id || null; go("review"); }
+function applyAvg(sid, stepText){
+  var s = setOf(sid); if(!s) return;
+  var st = stepsOf(s), k = noteKey(stepText);
+  for(var i=0;i<st.length;i++){
+    if(noteKey(st[i].text)===k){
+      var a = avgAct(sid, stepText, REVDAYS);
+      if(!a.n) return;
+      s.steps[i] = joinStep(roundSec(a.avg), st[i].text, st[i].say, st[i].app);
+      save(); render(); return;
+    }
+  }
+}
+function applyAvgAll(sid){
+  var s = setOf(sid); if(!s) return;
+  var st = stepsOf(s), changed = 0;
+  st.forEach(function(x,i){
+    var a = avgAct(sid, x.text, REVDAYS);
+    if(a.n){ s.steps[i] = joinStep(roundSec(a.avg), x.text, x.say, x.app); changed++; }
+  });
+  if(changed){ save(); }
+  render();
+  alertLess(changed ? changed+"個の項目を、実績の平均に合わせました。" : "合わせられる実績がまだありません。");
+}
+function viewReview(){
+  var h = '<h1>📊 ルーティンの振り返り</h1>'
+    + '<p class="sub">過去'+REVDAYS+'日ぶんの<b>実際にかかった時間</b>と、書いたメモを並べます。<br>'
+    + '予定と実績がずれていたら、予定のほうを実績に合わせられます。</p>';
+  /* 選んだあとは一覧を畳む（選び直しは下のリンクから）。ここは読む画面なので、
+     選択肢を出しっぱなしにすると本題までスクロールが長くなる。 */
+  var list = revId ? DB.sets.filter(function(x){ return x.id===revId; }) : DB.sets;
+  h += '<div class="sec">'+(revId ? '見ているルーティン' : 'どのルーティンを見ますか')+'</div>';
+  list.forEach(function(x){
+    var n = runCount(x.id, REVDAYS);
+    h += '<button class="setb"'+(revId===x.id?' style="border-color:#e0a86a;background:#211d18"':'')
+       + ' onclick="revGo(\''+x.id+'\')">'+esc(x.icon)+' '+esc(x.name)
+       + '<small>'+(n>0 ? this_n(n) : 'この'+REVDAYS+'日は記録がありません')+'</small></button>';
+  });
+  if(revId) h += '<button class="btn link" style="padding:6px" onclick="revGo(null)">ほかのルーティンを見る</button>';
+  if(!revId){
+    h += '<p class="note">見たいものを選んでください。</p>';
+    h += '<button class="btn ghost" onclick="go(\'home\')">戻る</button>';
+    return h;
+  }
+  var s = setOf(revId);
+  if(!s){ revId = null; return viewReview(); }
+  var st = stepsOf(s), any = false;
+  h += '<div class="sec">'+esc(s.icon)+' '+esc(s.name)+' ・ いまの項目</div>';
+  st.forEach(function(x){
+    var a = avgAct(s.id, x.text, REVDAYS);
+    var ns = notesFor(s.id, x.text);
+    if(a.n) any = true;
+    var diff = a.n ? (a.avg - x.sec) : 0;
+    h += '<div class="dnrow">'
+       + '<div class="h">'+esc(x.text)+(appOf(x)?' <span class="tag">'+appOf(x).icon+'</span>':'')+'</div>'
+       + '<div class="nline" style="padding:2px 0"><span style="flex:1">予定</span><b>'+durLabel(x.sec)+'</b></div>';
+    if(a.n){
+      h += '<div class="nline" style="padding:2px 0"><span style="flex:1">実績の平均（'+a.n+'回）</span>'
+         + '<b style="color:'+(Math.abs(diff)>=30?'#e0a86a':'#9ec8a4')+'">'+durLabel(a.avg)+'</b></div>'
+         + '<div class="nline" style="padding:2px 0"><span style="flex:1">差</span><span>'
+         + (diff===0 ? 'ぴったり' : (diff>0 ? '実績のほうが '+durLabel(diff)+' 長い' : '実績のほうが '+durLabel(-diff)+' 短い'))
+         + '</span></div>';
+      if(roundSec(a.avg)!==x.sec){
+        h += '<button class="btn ghost" style="margin-top:7px" onclick="applyAvg(\''+s.id+'\',\''+esc(x.text).replace(/\x27/g,"&#39;")+'\')">'
+           + '予定を '+durLabel(roundSec(a.avg))+' に合わせる</button>';
+      }else{
+        h += '<p class="note" style="margin-top:5px">予定と実績が合っています。</p>';
+      }
+    }else{
+      h += '<p class="note" style="margin:4px 0 0">まだ実績がありません（順番どおりに進めた回だけ記録します）。</p>';
+    }
+    if(ns.length){
+      h += '<div class="nlist" style="margin-top:8px;border-top:1px solid #262d3a;padding-top:7px">';
+      ns.slice(0,5).forEach(function(o){
+        h += '<div class="nline"><span class="d">'+dayLabel(o.r.t)+'</span>'
+           + '<span style="flex:1">'+esc(o.r.v)+'</span>'
+           + '<button class="x" onclick="delNote('+o.i+');render()">×</button></div>';
+      });
+      if(ns.length>5) h += '<p class="note" style="margin:2px 0 0">ほか'+(ns.length-5)+'件</p>';
+      h += '</div>';
+    }
+    h += '</div>';
+  });
+  if(any) h += '<button class="btn save" onclick="applyAvgAll(\''+s.id+'\')">全部の項目を実績の平均に合わせる</button>';
+  var gone = goneSteps(s.id, REVDAYS);
+  if(gone.length){
+    h += '<div class="sec">この'+REVDAYS+'日のあいだに無くなった項目</div>';
+    gone.forEach(function(t){
+      var a = avgAct(s.id, t, REVDAYS), ns = notesFor(s.id, t);
+      h += '<div class="dnrow" style="opacity:.85">'
+         + '<div class="h"><s>'+esc(t)+'</s></div>'
+         + (a.n ? '<p class="note" style="margin:0">実績の平均 '+durLabel(a.avg)+'（'+a.n+'回）</p>' : '<p class="note" style="margin:0">実績はありません</p>');
+      if(ns.length){
+        h += '<div class="nlist" style="margin-top:6px">';
+        ns.slice(0,3).forEach(function(o){
+          h += '<div class="nline"><span class="d">'+dayLabel(o.r.t)+'</span><span style="flex:1">'+esc(o.r.v)+'</span>'
+             + '<button class="x" onclick="delNote('+o.i+');render()">×</button></div>';
+        });
+        h += '</div>';
+      }
+      h += '</div>';
+    });
+    h += '<p class="note">消した項目のメモと実績も、ここに残しています。<b>戻したくなったときの材料です。</b></p>';
+  }
+  h += '<p class="note">実績は「順番どおりに進めた項目」だけを数えています（飛ばしてタップした回は、どこからどこまでか決められないので数えません）。<br>'
+     + '<b>できなかった回数・守れた率のような数は出しません。</b>形を直すための材料だけを置いています。</p>';
+  h += '<button class="btn ghost" onclick="go(\'edit\')">セットを編集する</button>';
+  h += '<button class="btn ghost" onclick="go(\'home\')">戻る</button>';
+  return h;
+}
+function this_n(n){ return 'この'+REVDAYS+'日に '+n+' 回'; }
 function viewAbout(){
   var h = '<h1>このアプリが持つもの・持たないもの</h1>';
   h += '<div class="card"><p class="sub" style="margin:0">'
