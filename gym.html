@@ -64,7 +64,7 @@ h2{font-size:15px;margin:0 0 3px}
 .hint{color:#cbd5e3;font-size:12.5px;line-height:1.7;background:#1f1c19;border:1px solid #2f2a24;border-radius:10px;padding:11px 13px;margin-top:11px}
 .note{color:#6f7a8c;font-size:12px;line-height:1.75;margin:10px 0 0}
 label{display:block;font-size:12.5px;color:#8a94a6;margin:12px 0 5px}
-select,input[type=number],input[type=date]{
+select,input[type=number],input[type=date],input[type=text]{
   width:100%;background:#12151c;border:1px solid #303a4a;color:#e8ecf2;
   border-radius:10px;padding:12px;font-size:15px;font-family:inherit;
 }
@@ -116,6 +116,8 @@ textarea{width:100%;height:120px;background:#12151c;border:1px solid #303a4a;col
         3. 前回の重量・回数を表示 → 同じならタップ1回で記録
         4. セット間の休憩タイマー＋終了音
         5. （v2で追加）全体の経過時間タイマー
+        6. （v3で追加）セット数を種目ごとに変えられる。既定は3のまま。
+           目標を超えたセットも、そのまま記録できる（3で頭打ちにしない）
 
    ■ この画面が「やらないこと」（fast.html と同じ方針で揃えています）
      ・連続日数・自己ベスト・達成バッジを持たない。streak/best は実装しない
@@ -126,6 +128,45 @@ textarea{width:100%;height:120px;background:#12151c;border:1px solid #303a4a;col
    ■ 8/31までの扱い
      ダブル・プログレッションの判定は内部では常に動かすが、画面に「上げましょう」と
      出すのは 2026-09-01 以降にする（PROG_FROM）。それまでは静かに数えておくだけ。
+
+   ■ v4（2026-08-19、指示_2026-08-19_3・Quick Memoご依頼）: 自宅代替プログラム
+     ジムに行けない日用に、環境（🏋️ジム／🏠自宅・ダンベルあり／🏠自宅・器具なし）
+     ごとの代替種目を追加。ジム版のプログラムそのものは1文字も変えていない。
+
+     【計画書_2026-07-30「重量は下げない・セット数を増やさない」との関係】
+     この方針はジムのプログラム（マシンの重量）に対するもの。自宅代替は
+     「同じ種目の重量を下げる」のではなく「別の種目（ダンベル／自重）に
+     置き換える」ものなので、方針とは正面から衝突しない。ただし数字を
+     混ぜると意味を失う（マシン28kgとダンベル6kgは比べられない）ため、
+     セッションに env を持たせ、前回値・ダブルプログレッションの判定は
+     必ず同じ env 同士でのみ比較する。総挙上量も env をまたいで合算・
+     比較しない（種目が違えば負荷の性質が違うため）。
+     催促は出さない（増やす／自宅版に切り替えるべきという案内は一切出さない。
+     環境の選択はご本人の任意）。
+
+   ■ v5（2026-08-19、チャットでのご指示）: 自宅の種目をご本人が入力できるようにする
+     > 種目を代理でいれているが、種目内容をユーザー自身が入力できるようにしてほしい。
+     > また負荷もダンベル以外にバンドを使うこともあるので、そのバンドが
+     > Medium/Heavy などマニュアルの負荷がなんだったか入力できるようにしてほしい。
+
+     1. **自宅2環境（home_db / home_none）の種目を、アプリ内で書き換えられる**ようにした。
+        書き換えられるのは 種目名 / ひとこと / 負荷の種類 / 目安の負荷 / 目安回数 /
+        上限回数 / 1段の刻み。**ジム版（gym）は編集できない**（ご選択どおり。
+        計画書_2026-07-30「重量は下げない・セット数を増やさない」を画面上で守るため）。
+     2. **負荷の種類に「バンド」を追加**（kg／自重／バンド の3種）。バンドの強さは
+        kg のような数値ではないので、**ご本人が言葉を登録**し（既定は Light /
+        Medium / Heavy）、記録時はそこから選ぶ。**配列の並び順＝弱い→強い**。
+     3. 種目の枠（9種目・A/B/Cの割り当て）は変えていない。種目の追加・削除もしない。
+
+     【上書き防止（memory.md の設計原則に従う）】
+     ・ご本人の編集内容は DB.settings.alt[env][id] に**別建て**で持つ。
+       コード側の既定値（ALT）は、ご本人が編集していない種目にだけ効く。
+       → 今後この HTML を差し替えても、編集した種目は上書きされない。
+     ・過去の記録（sets）は1文字も書き換えない。新しく記録する行にだけ
+       ld（負荷の種類）・bd（バンドの言葉）が入る。古い行は従来どおり
+       「その種目のいまの種類」として読む＝v4以前の記録もそのまま出る。
+     ・バンドの言葉を後から改名しても、過去の記録は**押した当時の言葉のまま**残る
+       （記録は事実なので、あとから書き換えない）。
    ========================================================================= */
 
 const KEY="bmc_gym_v1";
@@ -144,7 +185,95 @@ const PROGRAM=[
   {id:"rdl", name:"ルーマニアンデッドリフト",   r:"C", w:24,   reps:12, cap:15, step:2.5,  unit:"kg"},
   {id:"bic", name:"バイシクルクランチ",         r:"C", w:0,    reps:15, cap:20, step:0,    unit:"自重"}
 ];
-const SETS=3;
+
+/* ---------- v4（2026-08-19）: 環境ごとの代替種目 ----------
+   ジムに行けない日の代替。id は PROGRAM と共通（同じ種目枠の中身が入れ替わるだけ）。
+   ALT[id][env] が無ければ、その種目はどの環境でも同じ（例: bic は元々自重）。
+   数値（w/reps/cap/step/unit）は初回の目安。実測ではないため軽めに置いてある。 */
+const ENVS = [
+  {id:"gym",       label:"🏋️ ジム"},
+  {id:"home_db",   label:"🏠 自宅（ダンベルあり）"},
+  {id:"home_none", label:"🏠 自宅（器具なし）"}
+];
+const ALT = {
+  tri:{
+    home_db:  {name:"ダンベルトライセップエクステンション（片手ずつ）", w:3,  reps:12, cap:16, step:0.5, unit:"kg", memo:"肘を高く固定し、前腕だけを動かします"},
+    home_none:{name:"ナロープッシュアップ（膝つき可）",                 w:0,  reps:10, cap:15, step:0,   unit:"自重", memo:"手は肩幅より少し狭く。きつい場合は膝をついて構いません"}
+  },
+  bul:{
+    home_db:  {name:"ブルガリアンスクワット（ダンベル持ち）", w:8, reps:10, cap:13, step:1.0, unit:"kg", memo:"後ろ足を椅子やソファに乗せます。片足ずつ"},
+    home_none:{name:"ブルガリアンスクワット（自重）",         w:0, reps:12, cap:20, step:0,   unit:"自重", memo:"後ろ足を椅子やソファに乗せます。きつければ浅めの可動域から"}
+  },
+  lat:{
+    home_db:  {name:"ダンベルベントオーバーロウ（両手）", w:6, reps:12, cap:15, step:1.0, unit:"kg", memo:"背中を丸めず、肘を後ろに引きます"},
+    home_none:{name:"タオルプルダウン／ドア枠での逆手懸垂",   w:0, reps:12, cap:15, step:0,   unit:"自重", memo:"タオルを頭上で両手に持ち、引き下げる動きで背中に効かせます"}
+  },
+  add:{
+    home_db:  {name:"サイドライイング内転筋レイズ", w:0, reps:12, cap:18, step:0, unit:"自重", memo:"横向きに寝て下の脚をまっすぐ持ち上げます。重ければ足首に軽いダンベルを"},
+    home_none:{name:"サイドライイング内転筋レイズ", w:0, reps:12, cap:18, step:0, unit:"自重", memo:"横向きに寝て下の脚をまっすぐ持ち上げます"}
+  },
+  abd:{
+    home_db:  {name:"サイドライイング脚上げ（外転）", w:0, reps:15, cap:20, step:0, unit:"自重", memo:"横向きに寝て上の脚を天井方向に。重ければ足首に軽いダンベルを"},
+    home_none:{name:"サイドライイング脚上げ（外転）", w:0, reps:15, cap:20, step:0, unit:"自重", memo:"横向きに寝て上の脚を天井方向に持ち上げます"}
+  },
+  crm:{
+    home_db:  {name:"ダンベルクランチ（胸の前で保持）", w:3, reps:12, cap:16, step:0.5, unit:"kg", memo:"腰を反らさないよう注意します"},
+    home_none:{name:"クランチ（自重）",                 w:0, reps:15, cap:20, step:0,   unit:"自重", memo:"腰を反らさないよう注意します"}
+  },
+  che:{
+    home_db:  {name:"ダンベルチェストプレス（床・フロアプレス）", w:6, reps:10, cap:14, step:1.0, unit:"kg", memo:"床に仰向けになり、肘は床につくところで止めます"},
+    home_none:{name:"プッシュアップ（膝つき可）",               w:0, reps:10, cap:15, step:0,   unit:"自重", memo:"きつい場合は膝をついて構いません"}
+  },
+  rdl:{
+    home_db:  {name:"ダンベルルーマニアンデッドリフト", w:8, reps:12, cap:15, step:1.0, unit:"kg", memo:"膝は軽く曲げたまま、股関節を折りたたむように下ろします"},
+    home_none:{name:"片脚デッドリフト（自重）",         w:0, reps:10, cap:14, step:0,   unit:"自重", memo:"バランスが難しければ壁や椅子に軽く触れて構いません。片足ずつ"}
+  }
+  /* bic は自重種目のため ALT を持たない（どの環境でも同じ＝PROGRAM の値をそのまま使う） */
+};
+/* ---------- v5（2026-08-19）: 負荷の種類 ----------
+   kg（マシン・ダンベル）／ bw（自重）／ band（ゴムバンド）の3種。
+   バンドは kg のような連続した数値ではないため、**言葉（Light/Medium/Heavy 等）**で持つ。
+   古い定義には load が無いので、unit から読み替える（冪等・過去データを書き換えない）。 */
+const LOADS=[{id:"kg",label:"重さ（kg）"},{id:"bw",label:"自重"},{id:"band",label:"バンド"}];
+const BANDS_DEF=["Light","Medium","Heavy"];
+function loadOf(e){ return e && e.load ? e.load : ((e && e.unit==="自重") ? "bw" : "kg"); }
+function bands(){ return DB.settings.bands; }
+function unitOf(ld){ return ld==="bw" ? "自重" : (ld==="band" ? "バンド" : "kg"); }
+
+/* env の種目定義を返す。gym、またはALTが無い種目は PROGRAM の値そのまま。
+   r（ルーティンA/B/C区分）と id は常にベース（PROGRAM）から引き継ぐ。
+   v5: 最後に **ご本人の編集（DB.settings.alt[env][id]）** を重ねる。
+   重ねる順は PROGRAM → ALT（コードの既定） → ご本人の編集。
+   ジム（gym）はご本人の編集を受け付けない（編集画面から辿れないだけでなく、ここでも通さない）。 */
+function userAlt(id, env){
+  const m = DB.settings.alt[env];
+  return (m && m[id]) ? m[id] : null;
+}
+function def(id, env){
+  const base = ex(id); if(!base) return null;
+  if(!env || env==="gym") return base;
+  let e = base;
+  if(ALT[id] && ALT[id][env]) e = Object.assign({}, e, ALT[id][env]);
+  const u = userAlt(id, env);
+  if(u) e = Object.assign({}, e, u);
+  return e;
+}
+function isEditableEnv(env){ return env==="home_db" || env==="home_none"; }
+function curEnv(){ return DB.settings.env || "gym"; }
+function envLabel(env){ const e=ENVS.filter(function(x){return x.id===env})[0]; return e?e.label:env; }
+
+/* ---------- v3（2026-08-16）: セット数を種目ごとに可変にする ----------
+   【なぜ】3固定だったため、4セット目をやった日に、その事実を入れる場所が無かった。
+   これは「器の制約」であって、プログラムとしてセット数を増やす話ではない。
+   （指示_2026-08-16_1 §3 / 計画書_2026-07-30「〜8/31は重量を下げない・セット数を増やさない」）
+   【線引き】
+     ・既定は3のまま。変えられるのは **種目ごと**（全体を一律4や5にしない）
+     ・「増やしましょう」という案内・催促は一切出さない。静かに数えるだけ。
+       促す作りにするのは 9/1 以降（PROG_FROM と同じ扱い）
+     ・過去の記録は1セット＝1行で入っているので、書き換えは一切しない
+     ・総挙上量（重量×レップ×セットの合計）は行ごとの合計なので、式は変わらない  */
+const SETS_DEF=3;                 /* 既定のセット数（従来の固定値と同じ） */
+const SETS_MIN=1, SETS_MAX=8;     /* MAX は押しっぱなしの暴発を止めるためだけの天井 */
 const ROUTINES=["A","B","C"];
 
 /* ---------- v2: 休憩の長さ（既定値・その場で変更可） ----------
@@ -165,6 +294,16 @@ if(!DB.sessions) DB.sessions=[];
 if(DB.active===undefined) DB.active=null;
 if(!DB.settings) DB.settings={};
 if(typeof DB.settings.rest!=="number") DB.settings.rest=REST_DEF;
+/* v3: 種目ごとのセット数。既定（3）の種目はキーを持たない＝古い控えを貼り戻しても壊れない。
+   この初期化は何度走らせても同じ結果になる（冪等）。 */
+if(!DB.settings.sets || typeof DB.settings.sets!=="object") DB.settings.sets={};
+/* v4: 選んでいる環境。既定はジム（従来どおり）。 */
+if(!ENVS.some(function(x){return x.id===DB.settings.env})) DB.settings.env="gym";
+/* v5: ご本人が書き換えた種目（環境ごと）。空なら従来どおりコード側の既定が出る。
+   何度走らせても同じ結果になる（冪等）。古い控えを貼り戻しても壊れない。 */
+if(!DB.settings.alt || typeof DB.settings.alt!=="object") DB.settings.alt={};
+/* v5: バンドの言葉。**並び順が弱い→強い**を表す（この配列そのものが強さの順序）。 */
+if(!Array.isArray(DB.settings.bands) || !DB.settings.bands.length) DB.settings.bands=BANDS_DEF.slice();
 function restSec(){ return DB.settings.rest; }
 function save(){
   try{ localStorage.setItem(KEY,JSON.stringify(DB)); }
@@ -173,10 +312,36 @@ function save(){
 
 /* ---------- ユーティリティ ---------- */
 function ex(id){ return PROGRAM.filter(function(e){return e.id===id})[0]; }
+/* v3: この種目の目標セット数。設定が無ければ既定の3。 */
+function setsOf(id){
+  const n=DB.settings.sets[id];
+  return (typeof n==="number" && n>=SETS_MIN && n<=SETS_MAX) ? n : SETS_DEF;
+}
+function bumpSets(id,d){
+  const v=Math.min(SETS_MAX,Math.max(SETS_MIN,setsOf(id)+d));
+  if(v===SETS_DEF) delete DB.settings.sets[id]; else DB.settings.sets[id]=v;
+  save(); render();
+}
 function exOf(r){ return PROGRAM.filter(function(e){return e.r===r}); }
 function ymd(ms){ const d=new Date(ms); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
 function mdw(ms){ const d=new Date(ms),w="日月火水木金土"[d.getDay()]; return (d.getMonth()+1)+"/"+d.getDate()+"("+w+")"; }
-function fmtW(e,w){ return e.unit==="自重" ? "自重" : (Math.round(w*100)/100)+"kg"; }
+/* v5: 負荷の表示。kg / 自重 / バンド の3種に対応。
+   bd（バンドの言葉）は band のときだけ見る。 */
+function fmtW(e,w,bd){
+  const ld=loadOf(e);
+  if(ld==="bw")   return "自重";
+  if(ld==="band") return "バンド "+(bd || e.band || bands()[0] || "—");
+  return (Math.round(w*100)/100)+"kg";
+}
+/* 記録済みの1セットの表示。**その行に ld が入っていればそれを優先**する
+   （あとから種目の負荷の種類を変えても、過去の記録は当時のまま出る）。 */
+function fmtSet(e,s){
+  const ld = s.ld || loadOf(e);
+  if(ld==="bw")   return "自重";
+  if(ld==="band") return "バンド "+(s.bd || "—");
+  return (Math.round((s.w||0)*100)/100)+"kg";
+}
+function esc(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 
 /* 完了したセッションのみ（記録として確定したもの） */
 function done(){ return DB.sessions.filter(function(s){return s.sets && s.sets.length}); }
@@ -192,12 +357,22 @@ function suggestRoutine(){
   return ROUTINES[(i+1)%ROUTINES.length];
 }
 
-/* --- 機能3: 前回の重量・回数 --- */
-function lastOf(id){
+/* --- 機能3: 前回の重量・回数 ---
+   v4: env を指定すると、その環境の記録だけを見る（ジムとダンベルの重さを混ぜない）。
+   env未指定時は従来どおり（後方互換・呼び出し側で必ずenvを渡す運用にしている）。
+   過去のセッション（v3以前）に env が無いものは "gym" として扱う。 */
+function lastOf(id, env){
   const d=done();
   for(let i=d.length-1;i>=0;i--){
+    if(env && (d[i].env||"gym")!==env) continue;
     const hit=d[i].sets.filter(function(s){return s.id===id});
-    if(hit.length) return {w:hit[hit.length-1].w, reps:Math.min.apply(null,hit.map(function(s){return s.reps})), date:d[i].date, n:hit.length};
+    /* v5: ld（負荷の種類）・bd（バンドの言葉）も一緒に返す。古い記録には無いので undefined。 */
+    if(hit.length){
+      const last=hit[hit.length-1];
+      return {w:last.w, bd:last.bd, ld:last.ld,
+              reps:Math.min.apply(null,hit.map(function(s){return s.reps})),
+              date:d[i].date, n:hit.length};
+    }
   }
   return null;
 }
@@ -206,15 +381,37 @@ function lastOf(id){
    「決めた回数を3セットとも余裕をもってできた日が2回続いたら、次から1段上げる」
    ここでは「3セットすべてがレンジ上限(cap)に達した日」を1回と数え、
    同じ重量で2日続いたら案内を出す。9/1より前は数えるだけで表示しない。 */
-function progressReady(id){
-  const e=ex(id); if(!e || !e.step) return null;
-  const d=done(); let hits=0, w=null;
+/* v4: env指定でその環境のセッションだけを見る。cap/stepは def(id,env) の値を使う
+   （自宅版は目安の数値が違うため、ジムのcapで自宅版を判定しない）。 */
+/* v5: バンドにも対応。バンドは数値で足せないので、**登録した言葉の並び（弱い→強い）の
+   1つ隣**を次の候補にする。いちばん強いバンドに達していたら、案内は出さない
+   （持っていないバンドを買うよう促さないため）。自重（bw）は対象外。 */
+function progressReady(id, env){
+  const e=def(id,env); if(!e) return null;
+  const ld=loadOf(e);
+  if(ld==="bw") return null;
+  if(ld==="kg" && !e.step) return null;
+  const d=done(); let hits=0, key=null;
   for(let i=d.length-1;i>=0;i--){
+    if(env && (d[i].env||"gym")!==env) continue;
     const s=d[i].sets.filter(function(x){return x.id===id});
     if(!s.length) continue;
-    const allCap = s.length>=SETS && s.every(function(x){return x.reps>=e.cap});
-    const sameW  = (w===null) || (s[0].w===w);
-    if(allCap && sameW){ w=s[0].w; hits++; if(hits>=2) return {w:w, next:Math.round((w+e.step)*100)/100}; }
+    /* v3: 「3セットとも」ではなく「いま設定している目標セット数ぶんとも」で判定する。
+       セット数を減らして条件を満たしやすくしない・増やして厳しくしすぎない、という意図。 */
+    const allCap = s.length>=setsOf(id) && s.every(function(x){return x.reps>=e.cap});
+    const k    = (ld==="band") ? (s[0].bd||"") : s[0].w;
+    const same = (key===null) || (k===key);
+    if(allCap && same){
+      key=k; hits++;
+      if(hits>=2){
+        if(ld==="band"){
+          const bi=bands().indexOf(key);
+          if(bi<0 || bi>=bands().length-1) return null;
+          return {band:key, nextBand:bands()[bi+1]};
+        }
+        return {w:key, next:Math.round((key+e.step)*100)/100};
+      }
+    }
     else break;
   }
   return null;
@@ -251,6 +448,7 @@ function startRest(){
   if(restTimer) clearInterval(restTimer);
   restTimer=setInterval(function(){
     if(Date.now()>=restEnd){ clearInterval(restTimer); restTimer=null; restEnd=0; chimeDone(); }
+    if(isTyping()) return;   /* v5: 入力中の画面は描き直さない */
     render();
   },1000);
   render();
@@ -287,6 +485,7 @@ function startSessionClock(){
     if(DB.active && !DB.active.marked && elapsedSec()>=TARGET_MIN*60){
       DB.active.marked=true; save(); chimeMark();
     }
+    if(isTyping()) return;   /* v5: 入力中の画面は描き直さない（打った文字が消えるため） */
     render();
   },1000);
 }
@@ -338,8 +537,11 @@ function dropHint(id){
 }
 
 /* ===================== 画面 ===================== */
-let view="home", curId=null, tmpW=null, tmpR=null;
+let view="home", curId=null, tmpW=null, tmpR=null, tmpB=null;
 function go(v){ view=v; render(); }
+/* v5: 文字を打ち込む画面では、1秒ごとの自動再描画を止める（打っている途中で消えないように）。
+   経過時間そのものは Date.now() から計算しているので、戻れば正しい値に追いつく。 */
+function isTyping(){ return view==="backup" || view==="edlist" || view==="edex" || view==="bands"; }
 
 /* ===== バックアップ（書き出し・読み込み）　2026-08-15追加 =====================
    記録はこの端末のブラウザの中だけにあります。ここのテキストを控えておけば、
@@ -415,9 +617,207 @@ function bkValid(o){ return o && typeof o==="object" && Array.isArray(o.sessions
 function bkSummary(){ try{ return "記録 "+(DB.sessions?DB.sessions.length:0)+"回"; }catch(e){ return "—"; } }
 
 
+/* ===== v5: 種目を自分で入力する画面 ==========================================
+   【線引き】編集できるのは自宅2環境だけ。ジム版は読むだけ（isEditableEnv）。
+   【壊さないための約束】
+     ・ご本人の編集は DB.settings.alt[env][id] にだけ書く。PROGRAM も ALT も触らない
+     ・過去の記録（sets）は一切書き換えない
+     ・「既定に戻す」はご本人の編集を消すだけ（記録には触らない）
+     ・催促は出さない。空欄のまま保存しようとしたときだけ、そっと止める             */
+var edEnv="home_db", edId=null, edBuf=null, edMsg="";
+
+/* 入力欄の値をいったん手元に控える。押した拍子に打ちかけの文字が消えないように、
+   ボタンを押す処理の先頭で必ず呼ぶ（backup画面の bkGrab と同じ考え方）。 */
+function edGrab(){
+  if(!edBuf) return;
+  ["name","memo","w","band","reps","cap","step"].forEach(function(k){
+    const el=document.getElementById("ed_"+k);
+    if(el) edBuf[k]= (k==="name"||k==="memo"||k==="band") ? el.value : el.value;
+  });
+}
+function edList(env){
+  edEnv = env || curEnv();
+  if(!isEditableEnv(edEnv)) edEnv="home_db";
+  edId=null; edBuf=null; edMsg=""; edResetArmed=false; go("edlist");
+}
+function edOpen(id){
+  const e=def(id,edEnv);
+  edBuf={
+    name: e.name,
+    memo: e.memo||"",
+    load: loadOf(e),
+    w:    (e.w==null?0:e.w),
+    band: e.band || bands()[0] || "",
+    reps: e.reps, cap: e.cap, step: (e.step==null?0:e.step)
+  };
+  edId=id; edMsg=""; edResetArmed=false; go("edex");
+}
+function edSetLoad(ld){ edGrab(); edBuf.load=ld; render(); }
+function edSave(){
+  edGrab();
+  const nm=String(edBuf.name||"").trim();
+  if(!nm){ edMsg="種目名が空です。何をやるのか、ひとことで入れてください。"; return render(); }
+  const num=function(v,fb){ const n=parseFloat(v); return isFinite(n)?n:fb; };
+  const ld=edBuf.load;
+  const o={
+    name: nm,
+    memo: String(edBuf.memo||"").trim(),
+    load: ld,
+    unit: unitOf(ld),
+    w:    ld==="kg" ? Math.max(0,num(edBuf.w,0)) : 0,
+    reps: Math.max(1,Math.round(num(edBuf.reps,10))),
+    cap:  Math.max(1,Math.round(num(edBuf.cap,15))),
+    step: ld==="kg" ? Math.max(0,num(edBuf.step,0)) : 0
+  };
+  if(o.cap<o.reps) o.cap=o.reps;                 /* 上限が目安を下回らないようにするだけ */
+  if(ld==="band") o.band = String(edBuf.band||bands()[0]||"");
+  if(!DB.settings.alt[edEnv]) DB.settings.alt[edEnv]={};
+  DB.settings.alt[edEnv][edId]=o;
+  save(); edId=null; edBuf=null; edMsg="保存しました。"; go("edlist");
+}
+var edResetArmed=false;
+function edReset(){
+  if(!edResetArmed){ edResetArmed=true; edMsg=""; return render(); }
+  edResetArmed=false;
+  if(DB.settings.alt[edEnv]) delete DB.settings.alt[edEnv][edId];
+  save(); edId=null; edBuf=null; edMsg="最初の内容に戻しました。（記録は何も変わっていません）"; go("edlist");
+}
+function viewEdList(){
+  const rows=ROUTINES.map(function(r){
+    const inner=exOf(r).map(function(e0){
+      const e=def(e0.id,edEnv), mine=userAlt(e0.id,edEnv);
+      return `<div class="ex">
+        <div class="t"><h2>${esc(e.name)}</h2><span class="pill">${fmtW(e,e.w)}</span></div>
+        <div class="prev">目安 <b>${e.reps}回</b>（上限 ${e.cap}回）${mine?' ／ <span style="color:#e0a86a">自分で入力した内容</span>':""}
+        ${e.memo?`<br><span style="color:#6f7a8c">${esc(e.memo)}</span>`:""}</div>
+        <button class="btn ghost" onclick="edOpen('${e0.id}')">この種目を入力する</button>
+      </div>`;
+    }).join("");
+    return `<div class="sec">ルーティン ${r}</div><div class="card">${inner}</div>`;
+  }).join("");
+  return `<h1>種目を自分で決める</h1>
+  <p class="sub">代理で入れてある種目は<strong>ただの初期値</strong>です。実際にやっている種目に書き換えてください。<br>
+  <strong>ジム版はここでは変えられません</strong>（8/31までの方針を守るため）。過去の記録は何をしても変わりません。</p>
+  ${edMsg?`<div class="card"><p class="note">${esc(edMsg)}</p></div>`:""}
+  <div class="sec">どの環境の種目を入力しますか</div>
+  <div class="card"><div class="row">
+    ${ENVS.filter(function(x){return isEditableEnv(x.id)}).map(function(x){
+      return `<button class="btn ${x.id===edEnv?'':'ghost'}" style="margin-top:0" onclick="edList('${x.id}')">${x.label}</button>`;
+    }).join("")}
+  </div></div>
+  ${rows}
+  <div class="sec">バンドの強さ</div>
+  <div class="card"><p class="note">お手持ちのバンドの呼び名（${esc(bands().join(" / "))}）を登録しておくと、記録のときに選べます。</p>
+    <button class="btn ghost" onclick="go('bands')">バンドの呼び名を登録・並べ替える</button></div>
+  <button class="btn ghost" onclick="go('home')">戻る</button>`;
+}
+function viewEdEx(){
+  const e=def(edId,edEnv), b=edBuf, ld=b.load;
+  const base=(function(){ let x=ex(edId); if(ALT[edId]&&ALT[edId][edEnv]) x=Object.assign({},x,ALT[edId][edEnv]); return x; })();
+  return `<h1>種目を入力する</h1>
+  <p class="sub">${envLabel(edEnv)} ／ ルーティン ${ex(edId).r}<br>
+  ジム版のこの枠は「${esc(ex(edId).name)}」です。<strong>同じ体の場所を使う種目</strong>に置き換えてください。</p>
+  ${edMsg?`<div class="card"><p class="note">${esc(edMsg)}</p></div>`:""}
+  <div class="card">
+    <label>種目名</label>
+    <input id="ed_name" type="text" value="${esc(b.name)}" placeholder="例：バンドプルアパート">
+
+    <label>ひとこと（やり方の注意など・空欄でも構いません）</label>
+    <input id="ed_memo" type="text" value="${esc(b.memo)}" placeholder="例：肩をすくめない">
+
+    <label>負荷の種類</label>
+    <div class="row">
+      ${LOADS.map(function(x){
+        return `<button class="btn ${x.id===ld?'':'ghost'}" style="margin-top:0;font-size:14px;padding:12px" onclick="edSetLoad('${x.id}')">${x.label}</button>`;
+      }).join("")}
+    </div>
+
+    ${ld==="kg" ? `
+    <label>重さの目安（kg）</label>
+    <input id="ed_w" type="number" inputmode="decimal" step="0.5" value="${b.w}">
+    <label>1段上げるときの刻み（kg）</label>
+    <input id="ed_step" type="number" inputmode="decimal" step="0.5" value="${b.step}">` : ""}
+
+    ${ld==="band" ? `
+    <label>いつも使うバンド</label>
+    <select id="ed_band">
+      ${bands().map(function(n){ return `<option value="${esc(n)}"${n===b.band?" selected":""}>${esc(n)}</option>`; }).join("")}
+    </select>
+    <p class="note">記録のときは、この一覧から<strong>その日に実際に使ったバンド</strong>を選べます。呼び名を増やしたいときは、前の画面の「バンドの呼び名を登録」から。</p>` : ""}
+
+    ${ld==="bw" ? `<p class="note">自重なので、重さの欄は出しません。回数だけ記録します。</p>` : ""}
+
+    <label>回数の目安</label>
+    <input id="ed_reps" type="number" inputmode="numeric" step="1" value="${b.reps}">
+    <label>上限の目安（ここまで伸びたら1段上げる目安）</label>
+    <input id="ed_cap" type="number" inputmode="numeric" step="1" value="${b.cap}">
+  </div>
+  <button class="btn" onclick="edSave()">この内容で保存する</button>
+  <button class="btn ghost" style="${edResetArmed?'border-color:#7a4a4a;color:#ffb4b4':''}" onclick="edReset()">
+    ${edResetArmed?'もう一度押すと最初の内容に戻します':'最初の内容に戻す'}</button>
+  <p class="note">最初の内容＝「${esc(base.name)}」（こちらで仮に置いた種目）です。</p>
+  <button class="btn link" onclick="edResetArmed=false;edId=null;edBuf=null;go('edlist')">やめて戻る</button>
+  <p class="note">保存しても<strong>過去の記録は何も変わりません。</strong>これまでに記録した分は、記録したときの内容のまま残ります。<br>
+  前回値・重さアップの案内は、<strong>同じ環境の記録同士だけ</strong>で比べます。</p>`;
+}
+
+/* ===== v5: バンドの呼び名の登録 ==============================================
+   並び順そのものが「弱い→強い」。強さの数値は持たない（メーカーによって違うため、
+   ご本人が持っているバンドの呼び名を、弱い順に並べていただくのが一番正確）。 */
+var bnMsg="";
+function bnGrab(){
+  const out=[];
+  for(let i=0;i<bands().length;i++){
+    const el=document.getElementById("bn_"+i);
+    out.push(el ? el.value : bands()[i]);
+  }
+  DB.settings.bands=out;
+}
+function bnSave(){
+  bnGrab();
+  const clean=DB.settings.bands.map(function(s){return String(s||"").trim()}).filter(function(s){return s.length});
+  if(!clean.length){ DB.settings.bands=BANDS_DEF.slice(); bnMsg="すべて空欄だったので、最初の3つに戻しました。"; }
+  else { DB.settings.bands=clean; bnMsg="保存しました。"; }
+  save(); render();
+}
+function bnAdd(){ bnGrab(); DB.settings.bands.push(""); bnMsg=""; save(); render(); }
+function bnDel(i){ bnGrab(); DB.settings.bands.splice(i,1); if(!DB.settings.bands.length) DB.settings.bands=BANDS_DEF.slice(); bnMsg=""; save(); render(); }
+function bnMove(i,d){
+  bnGrab();
+  const a=DB.settings.bands, j=i+d;
+  if(j<0||j>=a.length) return;
+  const t=a[i]; a[i]=a[j]; a[j]=t; bnMsg=""; save(); render();
+}
+function viewBands(){
+  return `<h1>バンドの呼び名</h1>
+  <p class="sub">お手持ちのバンドの呼び名を、<strong>弱い順に上から</strong>並べてください（例：Light → Medium → Heavy、色で呼んでいるなら 黄 → 赤 → 黒 でも構いません）。<br>
+  この並び順が、そのまま「1段強くする」の順番になります。</p>
+  ${bnMsg?`<div class="card"><p class="note">${esc(bnMsg)}</p></div>`:""}
+  <div class="card">
+    ${bands().map(function(n,i){
+      return `<div class="ex">
+        <div class="t"><span class="pill">${i+1}${i===0?"（いちばん弱い）":(i===bands().length-1?"（いちばん強い）":"")}</span></div>
+        <input id="bn_${i}" type="text" value="${esc(n)}" placeholder="例：Medium">
+        <div class="row" style="margin-top:8px">
+          <button class="btn ghost" style="margin-top:0" onclick="bnMove(${i},-1)" ${i===0?"disabled":""}>↑ 弱いほうへ</button>
+          <button class="btn ghost" style="margin-top:0" onclick="bnMove(${i},1)" ${i===bands().length-1?"disabled":""}>↓ 強いほうへ</button>
+          <button class="btn ghost" style="margin-top:0" onclick="bnDel(${i})">消す</button>
+        </div>
+      </div>`;
+    }).join("")}
+  </div>
+  <button class="btn" onclick="bnSave()">保存する</button>
+  <button class="btn ghost" onclick="bnAdd()">＋ バンドを1つ増やす</button>
+  <p class="note">呼び名を変えても、<strong>これまでの記録は押した当時の言葉のまま残ります</strong>（記録は事実なので、あとから書き換えません）。</p>
+  <button class="btn ghost" onclick="go('edlist')">戻る</button>`;
+}
+
 function render(){
   const A=document.getElementById("app");
   if(view==="backup") return void(A.innerHTML=viewBackup());
+  if(view==="bands")  return void(A.innerHTML=viewBands());
+  if(view==="edex" && edId && edBuf) return void(A.innerHTML=viewEdEx());
+  if(view==="edlist") return void(A.innerHTML=viewEdList());
   if(view==="log")  return void(A.innerHTML=viewLog());
   if(view==="work" && DB.active) return void(A.innerHTML=viewWork());
   if(view==="ex" && DB.active && curId) return void(A.innerHTML=viewEx());
@@ -428,18 +828,33 @@ function render(){
 /* --- ホーム --- */
 function viewHome(){
   const r=suggestRoutine();
-  const list=exOf(r).map(function(e){
-    const l=lastOf(e.id);
+  const env=curEnv();
+  const list=exOf(r).map(function(e0){
+    const e=def(e0.id,env);
+    const l=lastOf(e0.id,env);
     return `<div class="ex">
-      <div class="t"><h2>${e.name}</h2><span class="pill">${fmtW(e,l?l.w:e.w)}</span></div>
-      <div class="prev">${l ? `前回 <b>${fmtW(e,l.w)} × ${l.reps}回 × ${l.n}セット</b>（${mdw(l.date)}）`
-                            : `記録なし。まずは <b>${fmtW(e,e.w)} × ${e.reps}回 × ${SETS}セット</b> から`}</div>
+      <div class="t"><h2>${esc(e.name)}</h2><span class="pill">${l?fmtSet(e,l):fmtW(e,e.w)}</span></div>
+      <div class="prev">${l ? `前回 <b>${fmtSet(e,l)} × ${l.reps}回 × ${l.n}セット</b>（${mdw(l.date)}）`
+                            : `記録なし。まずは <b>${fmtW(e,e.w)} × ${e.reps}回 × ${setsOf(e0.id)}セット</b> から`}
+      ${e.memo?`<br><span style="color:#6f7a8c">${esc(e.memo)}</span>`:""}</div>
     </div>`;
   }).join("");
   const d=done();
   return `
   <h1>筋トレ記録</h1>
-  <p class="sub">1回15分・3種目・各3セット。<strong>8/31までは重さを上げなくて構いません</strong>（いまの筋肉を減らさないことが目的です）。<br>始めると<strong>開始からの経過時間</strong>が出ます。15分は目安で、超えても構いません。</p>
+  <p class="sub">1回15分・3種目・各3セット（<strong>セット数は種目ごとに変えられます</strong>。種目の画面の下にあります）。<strong>8/31までは重さを上げなくて構いません</strong>（いまの筋肉を減らさないことが目的です）。<br>始めると<strong>開始からの経過時間</strong>が出ます。15分は目安で、超えても構いません。</p>
+
+  <div class="sec">環境（今日はどこでやりますか）</div>
+  <div class="card">
+    <div class="row">
+      ${ENVS.map(function(x){
+        return `<button class="btn ${x.id===env?'':'ghost'}" style="margin-top:0" onclick="setEnv('${x.id}')">${x.label}</button>`;
+      }).join("")}
+    </div>
+    ${env!=="gym" ? `<p class="note">自宅代替は<strong>ジムのプログラムを置き換えるものではありません。</strong>ジム版の重量・セット数の方針（8/31まで上げない・増やさない）はここには適用されません。前回値・重さアップの案内は<strong>同じ環境の記録同士だけ</strong>で比較します。</p>` : `<p class="note">ジムに行けない日は、自宅（ダンベルあり／器具なし）に切り替えられます。</p>`}
+    ${isEditableEnv(env) ? `<button class="btn ghost" onclick="edList('${env}')">🛠 自宅の種目を自分で決める（バンドの登録もここ）</button>
+    <p class="note">いま入っている自宅の種目は<strong>こちらで仮に置いた初期値</strong>です。実際にやっている種目・バンドの強さに書き換えてください。</p>` : ""}
+  </div>
 
   <div class="card">
     <div class="sec" style="margin:0 0 6px">今日おすすめのルーティン</div>
@@ -452,7 +867,7 @@ function viewHome(){
     </div>
   </div>
 
-  <div class="sec">${r} の内容</div>
+  <div class="sec">${r} の内容（${envLabel(env)}）</div>
   <div class="card">${list}</div>
 
   <div class="sec">休憩の長さ</div>
@@ -467,19 +882,20 @@ function viewHome(){
 
 /* --- セッション中 --- */
 function viewWork(){
-  const s=DB.active;
-  const list=exOf(s.routine).map(function(e){
-    const n=s.sets.filter(function(x){return x.id===e.id}).length;
-    const l=lastOf(e.id);
+  const s=DB.active, env=s.env||"gym";
+  const list=exOf(s.routine).map(function(e0){
+    const e=def(e0.id,env);
+    const n=s.sets.filter(function(x){return x.id===e0.id}).length;
+    const l=lastOf(e0.id,env);
     return `<div class="ex">
-      <div class="t"><h2>${e.name}</h2><span class="pill">${n}/${SETS}セット</span></div>
-      <div class="prev">${l ? `前回 <b>${fmtW(e,l.w)} × ${l.reps}回</b>` : `目安 <b>${fmtW(e,e.w)} × ${e.reps}回</b>`}</div>
-      <button class="btn ghost" onclick="openEx('${e.id}')">${n>=SETS?"記録を見直す":"記録する"}</button>
+      <div class="t"><h2>${esc(e.name)}</h2><span class="pill">${n}/${setsOf(e0.id)}セット</span></div>
+      <div class="prev">${l ? `前回 <b>${fmtSet(e,l)} × ${l.reps}回</b>` : `目安 <b>${fmtW(e,e.w)} × ${e.reps}回</b>`}</div>
+      <button class="btn ghost" onclick="openEx('${e0.id}')">${n>=setsOf(e0.id)?"記録を見直す":"記録する"}</button>
     </div>`;
   }).join("");
   return `
   <h1>${s.routine} を実施中</h1>
-  <p class="sub">${mdw(s.date)} ／ 記録済み ${s.sets.length} セット</p>
+  <p class="sub">${mdw(s.date)} ／ ${envLabel(env)} ／ 記録済み ${s.sets.length} セット</p>
   ${clockCard()}
   <div class="card">${list}</div>
   <div class="card">${restStepper()}</div>
@@ -489,20 +905,27 @@ function viewWork(){
 
 /* --- 種目ごとの記録画面 --- */
 function viewEx(){
-  const e=ex(curId), s=DB.active;
+  const s=DB.active, env=s.env||"gym";
+  const e=def(curId,env);
   const mine=s.sets.filter(function(x){return x.id===curId});
-  const l=lastOf(curId);
-  if(tmpW===null) tmpW = l ? l.w : e.w;
+  const l=lastOf(curId,env);
+  const ld=loadOf(e);
+  /* v5: 前回値を引き継ぐのは「前回と負荷の種類が同じとき」だけ。
+     途中で種類を変えた種目に、別の種類の数字を持ち込まないため。 */
+  const sameKind = l ? ((l.ld||ld)===ld) : false;
+  if(tmpW===null) tmpW = sameKind ? l.w : e.w;
   if(tmpR===null) tmpR = l ? l.reps : e.reps;
+  if(tmpB===null) tmpB = (sameKind && l.bd) ? l.bd : (e.band || bands()[0] || "");
 
-  const pg=progressReady(curId);
+  const pg=progressReady(curId,env);
   const left=restLeft();
 
   return `
-  <h1>${e.name}</h1>
-  <p class="sub">${l ? `前回 <strong>${fmtW(e,l.w)} × ${l.reps}回 × ${l.n}セット</strong>（${mdw(l.date)}）`
-                     : `はじめての記録です。目安は ${fmtW(e,e.w)} × ${e.reps}回。`}
-  ${e.memo?`<br>${e.memo}`:""}</p>
+  <h1>${esc(e.name)}</h1>
+  <p class="sub">${envLabel(env)}
+  ${l ? `<br>前回 <strong>${fmtSet(e,l)} × ${l.reps}回 × ${l.n}セット</strong>（${mdw(l.date)}）`
+      : `<br>はじめての記録です（この環境では）。目安は ${fmtW(e,e.w)} × ${e.reps}回。`}
+  ${e.memo?`<br>${esc(e.memo)}`:""}</p>
 
   <div class="card" style="padding-bottom:6px">
     <div style="display:flex;justify-content:space-between;align-items:baseline">
@@ -523,25 +946,46 @@ function viewEx(){
   ${dropHint(curId)}
 
   <div class="card">
-    <div class="sets">
-      ${[0,1,2].map(function(i){
-        const d=mine[i];
-        return `<div class="setb${d?" done":""}">${i+1}セット目<b>${d?fmtW(e,d.w)+" × "+d.reps:"—"}</b></div>`;
-      }).join("")}
+    <div class="sets" style="flex-wrap:wrap">
+      ${(function(){
+        /* v3: 枠の数は「目標セット数」と「実際に入れた数」の多いほう。
+           目標を超えて入れた分も、そのまま枠として出す（入らない・見えないを作らない）。 */
+        const tgt=setsOf(curId), rows=Math.max(tgt,mine.length), out=[];
+        for(let i=0;i<rows;i++){
+          const d=mine[i];
+          out.push(`<div class="setb${d?" done":""}" style="min-width:88px">${i+1}セット目<b>${d?fmtSet(e,d)+" × "+d.reps:"—"}</b></div>`);
+        }
+        return out.join("");
+      })()}
     </div>
 
-    <button class="btn" onclick="quickAdd()" ${mine.length>=SETS?"disabled":""}>
-      ${mine.length>=SETS ? "3セット終わりました" : `${fmtW(e,tmpW)} × ${tmpR}回 で記録`}
+    <button class="btn" onclick="quickAdd()" ${mine.length>=SETS_MAX?"disabled":""}>
+      ${mine.length>=SETS_MAX ? `${SETS_MAX}セット入っています`
+        : mine.length>=setsOf(curId) ? `もう1セット記録する（${fmtW(e,tmpW,tmpB)} × ${tmpR}回）`
+        : `${fmtW(e,tmpW,tmpB)} × ${tmpR}回 で記録`}
     </button>
-    <p class="note">前回と同じならこのままタップ1回で記録できます。変えたいときだけ下で直してください。</p>
+    <p class="note">前回と同じならこのままタップ1回で記録できます。変えたいときだけ下で直してください。<br><strong>${setsOf(curId)}セットを終えたあとも、そのまま押せば記録できます。</strong></p>
 
-    ${e.unit==="自重" ? "" : `
+    ${ld==="kg" ? `
     <label>重さ</label>
     <div class="stepper">
       <button onclick="bumpW(-1)">−</button>
       <div class="val">${fmtW(e,tmpW)}<small>1段 ${e.step}kg</small></div>
       <button onclick="bumpW(1)">＋</button>
-    </div>`}
+    </div>` : ""}
+
+    ${ld==="band" ? `
+    <label>今日使ったバンド</label>
+    <div class="stepper">
+      <button onclick="bumpB(-1)">−</button>
+      <div class="val">${esc(tmpB||"—")}<small>${(function(){
+        const i=bands().indexOf(tmpB);
+        return i<0 ? "登録にない呼び名です（そのまま記録できます）"
+                   : "登録した"+bands().length+"本のうち "+(i+1)+"本目（弱い順）";
+      })()}</small></div>
+      <button onclick="bumpB(1)">＋</button>
+    </div>
+    <p class="note">その日に実際に使ったバンドを選んでください。<strong>選んだ言葉がそのまま記録に残ります。</strong></p>` : ""}
 
     <label>回数</label>
     <div class="stepper">
@@ -549,16 +993,27 @@ function viewEx(){
       <div class="val">${tmpR}<small>上限の目安 ${e.cap}回</small></div>
       <button onclick="bumpR(1)">＋</button>
     </div>
+
+    <label>この種目のセット数</label>
+    <div class="stepper">
+      <button onclick="bumpSets('${curId}',-1)">−</button>
+      <div class="val">${setsOf(curId)}セット<small>この種目だけ・次回からもこの数です</small></div>
+      <button onclick="bumpSets('${curId}',1)">＋</button>
+    </div>
+    <p class="note"><strong>やった分をそのまま入れるための欄です。増やすことを勧めるものではありません。</strong>3セットのままで構いません。ここを変えても、過去の記録は何も変わりません。</p>
   </div>
 
   ${(pg && showProgress()) ? `<div class="hint">
-    <strong>${fmtW(e,pg.w)} で ${e.cap}回×${SETS}セットが2回続きました。</strong>
-    次から <strong>${fmtW(e,pg.next)}</strong> に上げて、回数は ${e.reps}回まで戻して構いません。
+    ${pg.nextBand
+      ? `<strong>バンド ${esc(pg.band)} で ${e.cap}回×${setsOf(curId)}セットが2回続きました。</strong>
+         次から <strong>バンド ${esc(pg.nextBand)}</strong> にして、回数は ${e.reps}回まで戻して構いません。`
+      : `<strong>${fmtW(e,pg.w)} で ${e.cap}回×${setsOf(curId)}セットが2回続きました。</strong>
+         次から <strong>${fmtW(e,pg.next)}</strong> に上げて、回数は ${e.reps}回まで戻して構いません。`}
     <br>上げたくない日は上げなくて大丈夫です。この案内は消えません。
   </div>` : ""}
 
   ${mine.length ? `<button class="btn link" onclick="undoSet()">最後の1セットを取り消す</button>` : ""}
-  <button class="btn ghost" onclick="tmpW=null;tmpR=null;go('work')">種目一覧へ戻る</button>`;
+  <button class="btn ghost" onclick="tmpW=null;tmpR=null;tmpB=null;go('work')">種目一覧へ戻る</button>`;
 }
 
 /* --- 記録一覧 --- */
@@ -569,15 +1024,23 @@ function viewLog(){
   <p class="sub">新しい順。<strong>並べ替えや強調はしていません。</strong></p>
   <div class="card">
     ${d.length ? d.map(function(s){
+      const senv=s.env||"gym";
       const by={};
       s.sets.forEach(function(x){ (by[x.id]=by[x.id]||[]).push(x); });
       const inner=Object.keys(by).map(function(id){
-        const e=ex(id), a=by[id];
-        return e.name+" "+fmtW(e,a[0].w)+" × "+a.map(function(x){return x.reps}).join("/")+"回";
+        const e=def(id,senv), a=by[id];
+        /* v5: 負荷はセットごとに記録した内容（ld/bd）から出す。
+           セット間でバンドを変えた回は、そのまま「Medium/Heavy」のように並べる。 */
+        const w0=fmtSet(e,a[0]);
+        const same=a.every(function(x){ return fmtSet(e,x)===w0; });
+        const head=same ? w0 : a.map(function(x){return fmtSet(e,x)}).join("/");
+        return esc(e.name)+" "+esc(head)+" × "+a.map(function(x){return x.reps}).join("/")+"回";
       }).join("<br>");
       /* v2: 所要時間は事実として並べるだけ。速い順に並べ替えない・最短を出さない・
-         15分を超えた回に印を付けない。すべて同じ字面。 */
+         15分を超えた回に印を付けない。すべて同じ字面。
+         v4: 環境（ジム／自宅）も事実として添えるだけ。強調・並べ替えはしない。 */
       const head=mdw(s.date)+" ルーティン"+s.routine
+        +(senv!=="gym" ? "・"+envLabel(senv) : "")
         +(typeof s.sec==="number" ? " ／ "+mmss(s.sec) : "")
         +(typeof s.rest==="number" ? "（休憩"+s.rest+"秒）" : "");
       return `<div class="log"><strong>${head}</strong><small>${inner}</small></div>`;
@@ -593,23 +1056,46 @@ function viewLog(){
 
 /* ===================== 操作 ===================== */
 function startSession(r){
-  DB.active={date:Date.now(),routine:r,sets:[],marked:false};
-  save(); tmpW=null; tmpR=null; startSessionClock(); go("work");
+  /* v4: セッション開始時点の環境をそのまま記録に固定する（途中で環境設定を変えても、
+     この回の記録・前回値の比較には影響しない）。 */
+  DB.active={date:Date.now(),routine:r,sets:[],marked:false,env:curEnv()};
+  save(); tmpW=null; tmpR=null; tmpB=null; startSessionClock(); go("work");
 }
-function openEx(id){ curId=id; tmpW=null; tmpR=null; go("ex"); }
+function setEnv(env){
+  if(!ENVS.some(function(x){return x.id===env})) return;
+  DB.settings.env=env; save(); render();
+}
+function openEx(id){ curId=id; tmpW=null; tmpR=null; tmpB=null; go("ex"); }
 function bumpW(d){
-  const e=ex(curId); if(!e.step) return;
+  const e=def(curId,(DB.active&&DB.active.env)||"gym"); if(!e || !e.step) return;
   tmpW=Math.max(0, Math.round((tmpW + d*e.step)*100)/100); render();
+}
+/* v5: バンドは登録した並び（弱い→強い）の中を1つずつ動く。
+   登録にない呼び名（改名・削除のあと）だったときは、いちばん弱いところから入り直す。 */
+function bumpB(d){
+  const a=bands(); if(!a.length) return;
+  let i=a.indexOf(tmpB);
+  if(i<0) i = d>0 ? -1 : a.length;
+  tmpB = a[Math.min(a.length-1, Math.max(0, i+d))];
+  render();
 }
 function bumpR(d){ tmpR=Math.max(1, tmpR+d); render(); }
 
 function quickAdd(){
-  const e=ex(curId), s=DB.active;
-  if(s.sets.filter(function(x){return x.id===curId}).length>=SETS) return;
-  s.sets.push({id:curId,w:tmpW,reps:tmpR,t:Date.now()});
+  const s=DB.active;
+  const n0=s.sets.filter(function(x){return x.id===curId}).length;
+  if(n0>=SETS_MAX) return;                    /* v3: 天井。押しっぱなしの暴発だけを止める */
+  /* v5: 負荷の種類（ld）と、バンドなら使った言葉（bd）も一緒に残す。
+     こうしておくと、あとで種目の設定を変えても、この行は当時のまま読める。 */
+  const e5=def(curId,(s.env||"gym")), ld5=loadOf(e5);
+  const rec={id:curId, w:(ld5==="kg"?tmpW:0), reps:tmpR, t:Date.now(), ld:ld5};
+  if(ld5==="band") rec.bd=tmpB;
+  s.sets.push(rec);
   save();
-  if(s.sets.filter(function(x){return x.id===curId}).length<SETS) startRest();
-  else { stopRest(); chimeDone(); }
+  const n=n0+1, tgt=setsOf(curId);
+  /* v3: 目標ちょうどで終わりの合図。目標を超えて続けるときは休憩タイマーを出す
+     （超えた回だけ休憩が出ない、という穴を作らない）。 */
+  if(n===tgt){ stopRest(); chimeDone(); } else { startRest(); }
   render();
 }
 function undoSet(){

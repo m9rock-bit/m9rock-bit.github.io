@@ -116,10 +116,74 @@ label{display:block;font-size:12.5px;color:#8a94a6;margin:12px 0 5px}
 <div class="wrap" id="app"></div>
 <script>
 /* ============================================================
-   B.M.C. 切り替えルーティン (routine.html)
+   B.M.C. 切り替えルーティン (routine.html) ＝ Switchアプリ
    作成: B.M.C.(Claude) / 2026-08-14
    v2: セットの追加・削除・並べ替えに対応
    v3: 2026-08-15 実行の記録（履歴）を追加
+   v4: 2026-08-19（指示_2026-08-19_2、Quick Memoご依頼）
+     ご依頼3点: ①4-7-8呼吸法・3分ガイド ②音声で切り替えを案内
+                ③起動時にSpotify瞑想プレイリストを開く ④各ステップに
+                タイマーを持たせ、終わったら自動で次のタイマーが動く流れ
+
+     【④が本体】従来のセットはすべて「タップで完了→次へ」（toggleStep）で、
+     ステップの秒数は目安の文字表示だけでした。④はこれと別に「自動で進む」
+     モード（set.auto=true）を新設。既存5セットは一切変えず（auto無し＝
+     従来どおりタップ式）、新設の🫁セットだけ auto:true にしています。
+     auto セットは「いま何ステップ目にいるべきか」を毎回 elapsed()（開始
+     時刻からの経過）から計算し直します（autoTick）。setTimeoutの連鎖で
+     進めると、iOSでバックグラウンドに回った瞬間に止まって二度と進まない
+     ため採用していません。elapsed() は他の機能同様、画面に戻ったときに
+     時刻から再計算されるので、バックグラウンドから戻っても正しい位置に
+     復帰します（ズレるのは、飛ばされた間の音声・チャイムだけ）。
+
+     ②音声案内は Web Speech API（speechSynthesis）。未対応環境では
+     何も起きないだけで、タイマー自体は変わらず動きます。DB.voice で
+     オンオフ（既定オン）。
+
+     ③Spotifyは「起動時にURLを新規タブで開く」だけの実装です。プレイ
+     リストのURL自体はご本人しか持っていないため、こちらでは決め打ち
+     せず、設定欄（DB.spotifyUrl）に入れていただく形にしました。未入力
+     なら何もしません。iOSでSpotifyアプリの前面に切り替わると、このペ
+     ージ側のタイマーはバックグラウンド扱いになり一時停止しますが、
+     ページに戻れば時刻から再計算されるので秒数はズレません（止まって
+     見えるのは音声とチャイムだけ）。この制約は正直に画面内に書きました。
+
+     【やらないこと】呼吸法セットも、他の5セットと同じ安全方針を継承
+     しています。連続日数・達成率・「できなかった呼吸」は数えません。
+     3分は目安であって、達成/未達の判定基準にはしません。
+
+   v5: 2026-08-19（チャットでの追加ご要望）
+     ご依頼: ①自動進行にするかタップ式にするかを「ルーティンごと」に選べる
+             ②音声ガイドも自分で編集できる ③Spotifyのプレイリストも
+             ルーティンごとに設定できる ④呼吸法を含む休憩ルーティンを
+             自分で組めるようにする
+
+     【v4の何を直したか】v4は「🫁セットだけが自動進行・音声・Spotify」と
+     いう特別扱いでした。v5はその特別扱いを解体し、すべてを**セット単位の
+     設定**に格下げしています。コード側に「呼吸法だけの分岐」は残っていま
+     せん（breathSteps() は既定データを組み立てるためだけの関数です）。
+
+     - set.auto      … 自動で進む（false/未設定＝従来どおりタップ式）
+     - set.voice     … このセットで読み上げる
+     - set.spotify   … 開始時にプレイリストを開く
+     - set.spotifyUrl… このセット専用のURL。空ならホーム画面の既定URLを使う
+     いずれも編集画面から切り替えられます。既存5セットの中身は1文字も
+     変えていません（auto が無いセットは従来どおりタップ式のまま）。
+
+     【ステップ書式の拡張】「秒|画面の文言|読み上げ」の3列目を追加しました。
+     3列目を省略したときは、従来どおり画面の文言から（…）を除いたものを
+     読みます。※副作用：文言そのものに「|」を含めていた場合、その後ろが
+     読み上げ文として扱われます（画面表示は「|」の手前までになります）。
+
+     【自動進行画面の汎用化】v4の実行画面は「3ステップ＝1サイクル」を決め
+     打ちしており、呼吸法以外のセットでは表示が壊れました。v5はステップの
+     繰り返し周期を自動検出し、繰り返しがあれば「サイクル m/n」、無ければ
+     「ステップ m/n」と出します。次のステップも1行だけ添えます（休憩ルー
+     ティンのように中身がばらばらのセットでは、次に何が来るかが要るため）。
+
+     【自動進行セットの全体時間】ステップの合計から毎回計算します（制限
+     時間の欄は出しません）。ステップを増減したときに総時間だけ古いまま
+     残る事故を防ぐためです。
 
    === v3で置いた線引き（fast.html・gym.html にも同じものが効きます） ===
    出す  : 起きた事実だけ。   実行の累計回数／実行した日と時刻／前回やったセット
@@ -143,6 +207,20 @@ label{display:block;font-size:12.5px;color:#8a94a6;margin:12px 0 5px}
    ============================================================ */
 
 var KEY = "bmc_routine_v1";
+
+/* --- v4: 4-7-8呼吸法のステップを組み立てる ----------------------
+   吸う4秒・止める7秒・吐く8秒＝1サイクル19秒。9サイクルで171秒（2:51）。
+   「3分」はぴったりではなく目安です。回数を変えたいときは、既存の
+   セット編集画面（ステップのテキストエリア）でそのまま増減できます。 */
+function breathSteps(n){
+  var out = [];
+  for(var i=0;i<n;i++){
+    out.push("4|吸う（4秒）");
+    out.push("7|止める（7秒）");
+    out.push("8|吐く（8秒）");
+  }
+  return out;
+}
 
 /* --- 既定のルーティン ---------------------------------------
    すべて既存の記録から採っています（新しく思いついた行動は入れていません）。
@@ -189,6 +267,10 @@ function defaults(){ return [
       "40|残り半分に、手のひら1枚の主菜 と こぶし1個のごはん",
       "40|タレ・ドレッシングは小皿へ。今日は焼く・蒸す・煮る・レンジ"
     ]},
+  { id:"breath478", icon:"🫁", name:"4-7-8呼吸法（ストレス解消・約3分）", limit:171,
+    auto:true, voice:true, spotify:true,
+    note:"吸う4秒・止める7秒・吐く8秒 × 9回。タップして進める必要はありません。合図（音・声）に合わせて呼吸するだけです。",
+    steps: breathSteps(9) },
   { id:"rescue", icon:"🛟", name:"崩れたあとの復帰（1手だけ）", limit:180, rescue:true,
     note:"やり直しではありません。今日をここで終わらせて、次の合図まで戻るためのものです。",
     steps:[
@@ -197,16 +279,19 @@ function defaults(){ return [
     ]}
 ]; }
 
-var DB = { v:3, sets:null, chime:true, scName:"ルーティンタイマー", log:[], count:0 };
+var DB = { v:5, sets:null, chime:true, voice:true, spotifyUrl:"", scName:"ルーティンタイマー", log:[], count:0 };
 try{
   var raw = localStorage.getItem(KEY);
   if(raw){
     var p = JSON.parse(raw);
     if(typeof p.chime==="boolean") DB.chime = p.chime;
+    if(typeof p.voice==="boolean") DB.voice = p.voice;
+    if(typeof p.spotifyUrl==="string") DB.spotifyUrl = p.spotifyUrl;
     if(p.scName) DB.scName = p.scName;
     if(Array.isArray(p.log)) DB.log = p.log;
     if(typeof p.count==="number" && p.count>=0) DB.count = p.count;
     if(p.mig_dinner===true) DB.mig_dinner = true;
+    if(p.mig_breath478===true) DB.mig_breath478 = true;
     if(DB.count < DB.log.length) DB.count = DB.log.length;
     if(Array.isArray(p.sets)) DB.sets = p.sets;
     else if(p.sets && typeof p.sets==="object"){
@@ -233,6 +318,18 @@ if(!DB.mig_dinner){
   }
   save();
 }
+/* 2026-08-19追加：🫁 4-7-8呼吸法。dinnerと同じ原則＝一度だけ差し込み、
+   以後は編集済みの内容（削除・書き換え）を正として扱う（二度と戻さない）。 */
+if(!DB.mig_breath478){
+  DB.mig_breath478 = true;
+  if(!DB.sets.some(function(s){return s.id==="breath478"})){
+    var br = defaults().filter(function(s){return s.id==="breath478"})[0];
+    var at2 = DB.sets.length;
+    DB.sets.forEach(function(s,i){ if(s.rescue && i<at2) at2 = i; });
+    DB.sets.splice(at2, 0, br);
+  }
+  save();
+}
 
 function save(){ try{ localStorage.setItem(KEY, JSON.stringify(DB)); }catch(e){} }
 
@@ -246,6 +343,11 @@ var tick = null;
 var armed = null;   /* 削除の1回目を押したセットid（2回押しで削除） */
 var runIdx = null;  /* この回の履歴の位置。1回の実行で1件しか増やさないための目印 */
 var clearArmed = false; /* 履歴の消去も2回押し */
+
+/* --- v4: auto セット（4-7-8呼吸法）の状態 ---------------------
+   setTimeoutを連鎖させず、常に「いま何ステップ目にいるべきか」を
+   elapsed() から逆算する（バックグラウンド復帰後も自己修復するため）。 */
+var autoPaused = false, pauseAt = 0, autoFinished = false;
 
 /* --- 実行の記録 --------------------------------------------
    1回の実行につき1件。押した時刻・セット・やれたステップ数だけを持ちます。
@@ -300,20 +402,132 @@ function beep(f,d){
 function chimeStep(){ beep(660,.18); }
 function chimeDone(){ beep(587,.22); setTimeout(function(){beep(880,.45);},200); }
 
+/* --- v4: 音声案内（Web Speech API） -----------------------------
+   未対応環境・発話エンジン取得失敗時は、何もせず無音で終わる
+   （タイマー自体の動作には影響しない）。 */
+function speak(text){
+  if(!DB.voice) return;
+  try{
+    if(!window.speechSynthesis) return;
+    window.speechSynthesis.cancel();  /* 前の発話が残っていたら止めてから話す */
+    var u = new SpeechSynthesisUtterance(text);
+    u.lang = "ja-JP"; u.rate = 0.95;
+    window.speechSynthesis.speak(u);
+  }catch(e){}
+}
+
+/* --- v5: Spotifyのプレイリストを開く ----------------------------
+   URLはこちらでは決め打ちせず、ご本人が入れたものだけを使う。
+   優先順位は「そのセット専用のURL → ホーム画面の既定URL」。
+   set.spotify（開始時に開く）が入っていないセットでは何もしない。
+   新規タブで開くだけで、このページの続行を保証するものではない
+   （前面がSpotifyに切り替わると、このタイマーはバックグラウンド扱いで
+   一時停止する。戻れば時刻から再計算されるので秒数はズレない）。 */
+function spUrl(s){
+  if(!s || !s.spotify) return "";
+  var u = String(s.spotifyUrl||"").trim();
+  return u || String(DB.spotifyUrl||"").trim();
+}
+function openSpotify(s){
+  var u = spUrl(s || setOf(curId));
+  if(!u) return;
+  try{ window.open(u, "_blank"); }catch(e){}
+}
+
+/* --- v4: いまの経過秒数（一時停止中は止めて見せる） --- */
+function curElapsed(){ return autoPaused ? Math.floor((pauseAt-startAt)/1000) : elapsed(); }
+
+/* --- v4: autoセットのステップ位置を elapsed() から逆算する ---
+   render() のたびに呼ぶ。ステップが変わった瞬間だけチャイム・音声を鳴らす。
+   一時停止中は何もしない（curElapsed が動かないため呼んでも実質同じだが、
+   念のため早期リターンする）。 */
+/* 注意: render() の中から呼ぶため、ここでは render() を呼び直さない
+   （呼ぶと二重実行になり、あとに呼ばれた側の描画で上書きされて画面が
+   壊れる）。完了時は view を書き換えるだけにして、続きの分岐は
+   呼び出し元の render() に任せる。 */
+function autoTick(s){
+  if(!s || !s.auto || autoPaused || autoFinished) return;
+  var st = stepsOf(s), cum = 0, idx = -1, e = curElapsed();
+  for(var i=0;i<st.length;i++){
+    cum += st[i].sec;
+    if(e < cum){ idx = i; break; }
+  }
+  if(idx < 0){
+    /* 最後まで来た */
+    for(var k=0;k<st.length;k++) doneSet[k] = "done";
+    autoFinished = true;
+    if(tick){ clearInterval(tick); tick = null; }
+    chimeDone();
+    logRun();
+    view = "done";
+    return;
+  }
+  if(idx !== curStep){
+    for(var j=curStep; j<idx && j<st.length; j++){ if(!doneSet[j]) doneSet[j] = "done"; }
+    curStep = idx;
+    chimeStep();
+    if(s.voice) speak(sayOf(st[idx]));  /* 3列目があればそれを、無ければ（…）を外した文言を読む */
+  }
+}
+/* v4: 手動で次のステップへ進める（合わないときのための逃げ道） */
+function autoSkip(){
+  var s = setOf(curId); if(!s || !s.auto) return;
+  var st = stepsOf(s), cum = 0;
+  for(var i=0;i<=curStep && i<st.length;i++){ cum += st[i].sec; }
+  var base = autoPaused ? pauseAt : Date.now();
+  startAt = base - (cum+0.05)*1000;
+  if(autoPaused) pauseAt = base;
+  render();
+}
+/* v4: 一時停止・再開 */
+function autoPauseToggle(){
+  if(autoPaused){ startAt += (Date.now()-pauseAt); autoPaused = false; }
+  else { pauseAt = Date.now(); autoPaused = true; }
+  render();
+}
+
 /* --- 補助 --- */
 function esc(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 function mmss(s){ var m=Math.floor(Math.abs(s)/60), x=Math.abs(s)%60; return (s<0?"+":"")+m+":"+String(x).padStart(2,"0"); }
+/* v5: ステップの書式は「秒|画面の文言|読み上げ（省略可）」。
+   3列目が無いときは、画面の文言から（…）を外したものを読み上げます。 */
 function parseStep(line){
-  var i = String(line).indexOf("|");
-  if(i<0) return { sec:60, text:String(line).trim() };
-  return { sec: parseInt(line.slice(0,i),10)||60, text: line.slice(i+1).trim() };
+  var p = String(line).split("|");
+  if(p.length<2) return { sec:60, text:String(line).trim(), say:"" };
+  return {
+    sec: parseInt(p[0],10)||60,
+    text: (p[1]||"").trim(),
+    say: p.length>2 ? p.slice(2).join("|").trim() : ""
+  };
+}
+function sayOf(x){
+  if(x && x.say) return x.say;
+  return String(x&&x.text||"").replace(/（[^）]*）/g,"").replace(/\([^)]*\)/g,"").trim();
+}
+/* v5: 繰り返しの周期を見つける（4-7-8のように同じ並びが続くセット用）。
+   見つかれば「サイクル m/n」、見つからなければ「ステップ m/n」と出す。 */
+function cyclePeriod(st){
+  var n = st.length;
+  if(n < 4) return 0;
+  for(var p=1; p<=n/2; p++){
+    if(n % p) continue;
+    var ok = true;
+    for(var i=p;i<n;i++){
+      if(st[i].text !== st[i%p].text || st[i].sec !== st[i%p].sec){ ok = false; break; }
+    }
+    if(ok) return p;
+  }
+  return 0;
 }
 function setOf(id){ for(var i=0;i<DB.sets.length;i++){ if(DB.sets[i].id===id) return DB.sets[i]; } return null; }
 function idxOf(id){ for(var i=0;i<DB.sets.length;i++){ if(DB.sets[i].id===id) return i; } return -1; }
 function normals(){ return DB.sets.filter(function(s){return !s.rescue}); }
 function rescues(){ return DB.sets.filter(function(s){return s.rescue}); }
 function stepsOf(s){ return s.steps.map(parseStep); }
-function limitOf(s){ return s.limit ? s.limit : stepsOf(s).reduce(function(a,b){return a+b.sec;},0); }
+function sumSec(s){ return stepsOf(s).reduce(function(a,b){return a+b.sec;},0); }
+/* v5: 自動進行のセットは、全体時間を必ずステップの合計から出す。
+   （ステップを増減したのに制限時間だけ古い数字が残る事故を防ぐため） */
+function limitOf(s){ if(s.auto) return sumSec(s); return s.limit ? s.limit : sumSec(s); }
 function elapsed(){ return startAt ? Math.floor((Date.now()-startAt)/1000) : 0; }
 function left(){ var s = setOf(curId); return s ? limitOf(s) - elapsed() : 0; }
 function allDone(){ var s=setOf(curId); for(var i=0;i<s.steps.length;i++){ if(!doneSet[i]) return false; } return true; }
@@ -401,18 +615,28 @@ function start(id, fromIndex){
   for(var i=0;i<curStep;i++) doneSet[i] = "skip";
   startAt = Date.now();
   runIdx = null;
+  autoPaused = false; pauseAt = 0; autoFinished = false;
+  var s = setOf(id);
+  if(s && s.voice){ var st0 = stepsOf(s)[curStep]; if(st0) speak(sayOf(st0)); }
+  openSpotify(s);   /* set.spotify が入っているセットだけ開く（中で判定） */
   if(tick) clearInterval(tick);
   tick = setInterval(render, 250);
   view = "run"; render();
 }
-function stop(){ if(tick) clearInterval(tick); tick=null; startAt=0; curId=null; doneSet={}; curStep=0; runIdx=null; }
+function stop(){ if(tick) clearInterval(tick); tick=null; startAt=0; curId=null; doneSet={}; curStep=0; runIdx=null; autoPaused=false; pauseAt=0; autoFinished=false; }
 function toggleStep(i){
   if(doneSet[i]){ delete doneSet[i]; render(); return; }
   doneSet[i] = "done";
   var s = setOf(curId), next = -1;
   for(var j=0;j<s.steps.length;j++){ if(!doneSet[j]){ next=j; break; } }
   curStep = next<0 ? s.steps.length : next;
-  if(allDone()){ chimeDone(); enterDone(); } else { chimeStep(); render(); }
+  if(allDone()){ chimeDone(); enterDone(); }
+  else {
+    chimeStep();
+    /* v5: タップ式のセットでも、音声がオンなら次のステップを読み上げる */
+    if(s.voice){ var nx = stepsOf(s)[curStep]; if(nx) speak(sayOf(nx)); }
+    render();
+  }
 }
 function enterDone(){
   if(tick) clearInterval(tick); tick=null;
@@ -442,7 +666,11 @@ function nativeTimer(){
 function render(){
   var h = "";
   if(view==="home") h = viewHome();
-  else if(view==="run") h = viewRun();
+  else if(view==="run"){
+    var _s = setOf(curId);
+    if(_s && _s.auto) autoTick(_s);   /* 完了すると内部で view="done" に変わることがある */
+    h = (view==="run") ? viewRun() : viewDone();
+  }
   else if(view==="done") h = viewDone();
   else if(view==="edit") h = viewEdit();
   else if(view==="log") h = viewLog();
@@ -452,6 +680,13 @@ function render(){
   document.getElementById("app").innerHTML = h;
 }
 
+/* v5: 一覧に出す「9サイクル・自動進行」「5ステップ」などの短い説明 */
+function countLabel(s){
+  var st = stepsOf(s);
+  if(!s.auto) return st.length+'ステップ';
+  var p = cyclePeriod(st);
+  return (p ? (st.length/p)+'サイクル' : st.length+'ステップ') + '・自動進行';
+}
 function viewHome(){
   var h = '<h1>切り替えルーティン</h1>'
     + '<p class="sub">押した瞬間が合図です。タイマーの中でやり切れたら完了。<br>途中から始めても、飛ばしても構いません。</p>';
@@ -463,7 +698,7 @@ function viewHome(){
   }
   normals().forEach(function(s){
     h += '<button class="setb" onclick="start(\''+s.id+'\')">'+esc(s.icon)+' '+esc(s.name)
-       + '<small>'+Math.round(limitOf(s)/60)+'分 ・ '+s.steps.length+'ステップ'
+       + '<small>'+Math.round(limitOf(s)/60)+'分 ・ '+countLabel(s)
        + (s.note ? '<br>'+esc(s.note) : '')+'</small></button>';
   });
   h += '<div class="sec">崩れてしまったとき</div>';
@@ -473,7 +708,16 @@ function viewHome(){
   });
   h += '<div class="sec">設定</div>';
   h += '<div class="card"><div class="toggle"><b>終了音を鳴らす</b>'
-     + '<button class="sw'+(DB.chime?' on':'')+'" onclick="DB.chime=!DB.chime;save();render()"><i></i></button></div></div>';
+     + '<button class="sw'+(DB.chime?' on':'')+'" onclick="DB.chime=!DB.chime;save();render()"><i></i></button></div>'
+     + '<div class="toggle" style="margin-top:8px"><b>音声で切り替えを案内する</b>'
+     + '<button class="sw'+(DB.voice?' on':'')+'" onclick="DB.voice=!DB.voice;save();render()"><i></i></button></div>'
+     + '<p class="note">ここは<b>全体のスイッチ</b>です。これを切ると、どのセットでも読み上げません。'
+     + '<br>セットごとのオンオフと読み上げる文言は「セットを編集」の中にあります。対応していない端末では何も起きません。</p></div>';
+  h += '<div class="card"><label>Spotifyプレイリストの既定URL</label>'
+     + '<input class="inp" type="text" id="spurl" placeholder="https://open.spotify.com/playlist/..." value="'+esc(DB.spotifyUrl)+'" onchange="DB.spotifyUrl=this.value.trim();save()">'
+     + '<p class="note"><b>セットごとにURLを入れていないとき</b>に、ここのURLを使います。'
+     + '「開始時にプレイリストを開く」がオンのセットを始めると、新規タブで開こうとします。'
+     + '<br>Spotifyアプリが前面に出ると、この画面はバックグラウンドになり一時停止します。戻れば秒数はズレずに続きます。</p></div>';
   h += '<div class="card"><label>ショートカットの名前（iPhone標準タイマーを起動するもの）</label>'
      + '<input class="inp" type="text" id="scn" value="'+esc(DB.scName)+'" onchange="DB.scName=this.value;save()">'
      + '<p class="note">作り方は <b>行動計画_2026-08-14 §10</b> にあります。未作成でも、このアプリ自体は使えます。</p></div>';
@@ -593,7 +837,9 @@ function clearLog(){
 }
 
 function viewRun(){
-  var s = setOf(curId), st = stepsOf(s), lim = limitOf(s), l = left();
+  var s = setOf(curId);
+  if(s && s.auto) return viewRunAuto(s);
+  var st = stepsOf(s), lim = limitOf(s), l = left();
   var pct = Math.max(0, Math.min(100, (elapsed()/lim)*100));
   var h = '<h1>'+esc(s.icon)+' '+esc(s.name)+'</h1>'+(s.note ? '<p class="sub">'+esc(s.note)+'</p>' : '');
   h += '<div class="card">';
@@ -611,8 +857,61 @@ function viewRun(){
   h += '<p class="note">タップで完了。もう一度タップで戻せます。<br>下の行から始めても構いません（上は「–」になるだけで、失敗にはなりません）。</p>';
   h += '<button class="btn ghost" onclick="nativeTimer()">⏱ iPhoneのタイマーにも残り'+Math.max(1,Math.round(left()/60))+'分を渡す</button>';
   h += '<p class="note">この画面は他のアプリを開くと止まります（戻れば時刻から計算し直すのでズレません）。<br><b>画面の上に残り時間を出したいときは、上のボタンでiPhone標準のタイマーへ渡してください。</b></p>';
+  if(s.spotify){
+    h += '<button class="btn ghost" onclick="openSpotify()">🎵 プレイリストを開く'+(spUrl(s)?'':'（未設定）')+'</button>';
+  }
   h += '<button class="btn" onclick="finishNow()">ここまでで終える</button>';
   if(!s.rescue && rescues().length) h += '<button class="btn ghost" onclick="start(\''+rescues()[0].id+'\')">🛟 崩れた — 復帰の1手へ</button>';
+  h += '<button class="btn link" onclick="leaveRun()">やめて最初に戻る</button>';
+  return h;
+}
+
+/* --- v5: 自動で進むセットの実行画面 ---------------------------
+   タップで進める一覧ではなく、いまのステップだけを大きく出す。
+   残り秒数は「このステップの残り」。全体の経過は下に小さく添える。
+   v4では「3ステップ＝1サイクル」を決め打ちしていたが、呼吸法以外の
+   セット（休憩ルーティン等）では意味を成さないため、繰り返しの周期を
+   自動検出する形にした（cyclePeriod）。繰り返しが無いセットでは
+   「ステップ m/n」と出し、次に来るステップを1行だけ添える。 */
+function viewRunAuto(s){
+  var st = stepsOf(s), e = curElapsed();
+  var cum = 0, stepEnd = 0, cur = st[Math.min(curStep,st.length-1)];
+  var curText = cur ? cur.text : "";
+  for(var i=0;i<st.length;i++){
+    cum += st[i].sec; stepEnd = cum;
+    if(i===curStep) break;
+  }
+  var remainInStep = Math.max(0, stepEnd - e);
+  var p = cyclePeriod(st), head;
+  if(p){
+    head = 'サイクル '+Math.min(Math.floor(curStep/p)+1, st.length/p)+' / '+(st.length/p);
+  }else{
+    head = 'ステップ '+Math.min(curStep+1, st.length)+' / '+st.length;
+  }
+  var nx = st[curStep+1];
+  var h = '<h1>'+esc(s.icon)+' '+esc(s.name)+'</h1>'+(s.note ? '<p class="sub">'+esc(s.note)+'</p>' : '');
+  h += '<div class="card">';
+  h += '<div class="bigsub">'+head+'</div>';
+  /* 文言が長いセット（休憩ルーティン等）でも1〜2行に収まるよう字を小さくする */
+  var fs = curText.length>26 ? 20 : (curText.length>13 ? 26 : 34);
+  h += '<div class="big" style="font-size:'+fs+'px;line-height:1.4;margin:2px 0 8px">'+esc(curText)+'</div>';
+  h += '<div class="big'+(autoPaused?' over':'')+'">'+remainInStep+'</div>';
+  h += '<div class="bigsub">'+(autoPaused ? '一時停止中' : 'このステップの残り秒数')+'</div>';
+  h += '<div class="bar"><i style="width:'+Math.max(0,Math.min(100,(e/limitOf(s))*100))+'%"></i></div>';
+  h += '<p class="note" style="text-align:center;margin-top:8px">'
+     + (nx ? '次： '+esc(nx.text)+'<br>' : '次でおしまいです<br>')
+     + '全体の経過 '+mmss(e)+' ／ 目安 '+Math.round(limitOf(s)/60)+'分</p>';
+  h += '</div>';
+  h += '<p class="note">タップして進める必要はありません。'+(s.voice?'合図（音・声）':'合図（音）')+'に合わせて進めてください。<br>合わない長さのときは「次へ」で先に進めます。</p>';
+  h += '<div class="row">';
+  h += '<button class="btn ghost" onclick="autoPauseToggle()">'+(autoPaused?'再開':'一時停止')+'</button>';
+  h += '<button class="btn ghost" onclick="autoSkip()">次へ ▶</button>';
+  h += '</div>';
+  if(s.spotify){
+    h += '<button class="btn ghost" onclick="openSpotify()">🎵 プレイリストを開く'+(spUrl(s)?'':'（未設定）')+'</button>';
+    if(!spUrl(s)) h += '<p class="note">このセットの編集画面か、ホーム画面の「設定」にプレイリストのURLを入れると、次回からここで開けます。</p>';
+  }
+  h += '<button class="btn" onclick="finishNow()">ここまでで終える</button>';
   h += '<button class="btn link" onclick="leaveRun()">やめて最初に戻る</button>';
   return h;
 }
@@ -645,15 +944,51 @@ function collect(){
     var nt = document.getElementById("nt_"+s.id); if(nt) s.note = nt.value.trim();
     var lm = document.getElementById("lim_"+s.id);
     if(lm){ var lv = parseInt(lm.value,10); if(lv>0) s.limit = lv; }
+    /* v5: URLは「空にする」操作も意味を持つので、空欄もそのまま取り込む */
+    var sp = document.getElementById("sp_"+s.id);
+    if(sp) s.spotifyUrl = sp.value.trim();
     var tx = document.getElementById("tx_"+s.id);
     if(tx){ var arr = tx.value.split("\n").filter(function(x){return x.trim()!==""}); if(arr.length) s.steps = arr; }
   });
 }
+/* v5: セットごとのオンオフ（進み方・音声・Spotify）。
+   トグルは押すと再描画されるので、入力中の文字が消えないよう
+   先に collect() で取り込んでから切り替える（move/del と同じ手順）。 */
+function setFlag(id, key){
+  collect();
+  var s = setOf(id); if(!s) return;
+  s[key] = !s[key];
+  armed = null; save(); render();
+}
+/* v5: セットの複製。呼吸法のセットを土台に休憩ルーティンを組むための入口。 */
+function dup(id){
+  collect();
+  var s = setOf(id); if(!s) return;
+  var c;
+  try{ c = JSON.parse(JSON.stringify(s)); }catch(e){ return; }
+  c.id = newId();
+  c.name = s.name + "（コピー）";
+  c.rescue = false;   /* 🛟の複製は普通のセットとして増やす（飛び先は1つのままにする） */
+  DB.sets.splice(idxOf(id)+1, 0, c);
+  armed = null; save(); render();
+  setTimeout(function(){ var el = document.getElementById("nm_"+c.id); if(el){ el.focus(); el.select(); } }, 30);
+}
 function viewEdit(){
-  var h = '<h1>セットを編集・追加・削除</h1><p class="sub">タイトル・説明文・時間・ステップ、すべて変えられます。<br>ステップは1行に1つ、<b>秒数|文言</b> の形です。</p>';
+  var h = '<h1>セットを編集・追加・削除</h1><p class="sub">タイトル・説明文・時間・ステップ、すべて変えられます。<br>ステップは1行に1つ、<b>秒数|文言</b> の形です。読み上げる言葉を画面の文言と変えたいときだけ、<b>秒数|文言|読み上げ</b> と3つめを足します。</p>';
+  h += '<div class="hint"><b>ステップの書き方</b><br>'
+     + '<b>60|温かい飲み物をいれる</b> … 60秒。読み上げも同じ文言<br>'
+     + '<b>4|吸う（4秒）</b> … 読み上げは「吸う」（（　）の中は読みません）<br>'
+     + '<b>7|止める（7秒）|息を止めて</b> … 読み上げだけ別の言葉にしたいとき<br><br>'
+     + '<b>自動で進む</b>にすると、秒数どおりに数えて次のステップへ勝手に進みます（タップ不要）。'
+     + '同じ並びの繰り返し（吸う・止める・吐く など）は実行画面が自動で「サイクル ○/○」に、'
+     + 'ばらばらの内容なら「ステップ ○/○」になります。設定は要りません。<br><br>'
+     + '<b>読み上げ</b>は、ホーム画面の「音声で切り替えを案内する」がオフだと、ここがオンでも鳴りません。<br>'
+     + '呼吸法のセットを土台に別のルーティンを組みたいときは、<b>複製</b>から始めるのが早いです。</div>';
   DB.sets.forEach(function(s,i){
     var isArmed = (armed===s.id);
-    h += '<div class="sec">'+esc(s.icon)+' '+esc(s.name)+(s.rescue?'<span class="tag">崩れたとき用</span>':'')+'</div>';
+    h += '<div class="sec">'+esc(s.icon)+' '+esc(s.name)
+       + (s.auto?'<span class="tag">自動で進む</span>':'')
+       + (s.rescue?'<span class="tag">崩れたとき用</span>':'')+'</div>';
     h += '<div class="card'+(isArmed?' del':'')+'">'
        + '<label>アイコンとタイトル</label>'
        + '<div class="iconrow">'
@@ -662,13 +997,30 @@ function viewEdit(){
        + '</div>'
        + '<label>説明文（一覧と実行中の画面に出ます）</label>'
        + '<textarea class="inp" id="nt_'+s.id+'" style="min-height:76px;font-family:inherit;font-size:14px">'+esc(s.note)+'</textarea>'
-       + '<label>全体の制限時間（秒）</label>'
-       + '<input class="inp" type="number" id="lim_'+s.id+'" value="'+limitOf(s)+'">'
-       + '<label>ステップ</label>'
+       /* --- v5: このセットの進み方・音声・Spotify --- */
+       + '<label>このセットの進み方・音声・プレイリスト</label>'
+       + '<div class="toggle"><b>'+(s.auto?'自動で進む':'タップして進む')+'</b>'
+       + '<button class="sw'+(s.auto?' on':'')+'" onclick="setFlag(\''+s.id+'\',\'auto\')"><i></i></button></div>'
+       + '<div class="toggle" style="margin-top:6px"><b>読み上げる</b>'
+       + '<button class="sw'+(s.voice?' on':'')+'" onclick="setFlag(\''+s.id+'\',\'voice\')"><i></i></button></div>'
+       + '<div class="toggle" style="margin-top:6px"><b>開始時にプレイリストを開く</b>'
+       + '<button class="sw'+(s.spotify?' on':'')+'" onclick="setFlag(\''+s.id+'\',\'spotify\')"><i></i></button></div>'
+       + (s.spotify
+          ? '<input class="inp" type="text" style="margin-top:7px" id="sp_'+s.id+'" placeholder="このセット専用のURL（空ならホーム画面の既定URL）" value="'+esc(s.spotifyUrl||"")+'">'
+            + '<p class="note" style="margin-top:4px">'
+            + (String(s.spotifyUrl||"").trim() ? 'このセット専用のURLを開きます。'
+               : (String(DB.spotifyUrl||"").trim() ? 'ホーム画面の既定URLを開きます。' : '<b>まだURLがありません。</b>入れるまでは何も開きません。'))
+            + '</p>'
+          : '')
+       + (s.auto
+          ? '<p class="note" style="margin-top:9px">秒数どおりに数えて次へ進みます。全体の時間は<b>ステップの合計（'+mmss(sumSec(s))+'）</b>で、ここでは入力しません。</p>'
+          : '<label>全体の制限時間（秒）</label><input class="inp" type="number" id="lim_'+s.id+'" value="'+limitOf(s)+'">')
+       + '<label>ステップ<span class="tag">秒数|文言|読み上げ</span></label>'
        + '<textarea id="tx_'+s.id+'">'+esc(s.steps.join("\n"))+'</textarea>'
        + '<div class="tools">'
        + '<button onclick="move(\''+s.id+'\',-1)"'+(i===0?' disabled':'')+'>↑ 上へ</button>'
        + '<button onclick="move(\''+s.id+'\',1)"'+(i===DB.sets.length-1?' disabled':'')+'>↓ 下へ</button>'
+       + '<button onclick="dup(\''+s.id+'\')">複製</button>'
        + '<button class="rm'+(isArmed?' armed':'')+'" onclick="del(\''+s.id+'\')">'
        + (isArmed?'もう一度押すと削除':'削除')+'</button>'
        + '</div>'
@@ -677,8 +1029,8 @@ function viewEdit(){
   });
   h += '<button class="btn ghost" onclick="addSet()">＋ セットを追加する</button>';
   h += '<button class="btn save" onclick="collect();save();go(\'home\')">保存する</button>';
-  h += '<p class="note">空にした欄は、変更なしとして扱います（うっかり消えないようにするためです）。説明文だけは空にできます。<br>並べ替え・削除・追加は、押した時点でその場で保存されます。</p>';
-  h += '<button class="btn link" onclick="resetAll()">既定の5セットに戻す</button>';
+  h += '<p class="note">空にした欄は、変更なしとして扱います（うっかり消えないようにするためです）。説明文とプレイリストURLだけは空にできます。<br>並べ替え・複製・削除・追加・トグルの切り替えは、押した時点でその場で保存されます。</p>';
+  h += '<button class="btn link" onclick="resetAll()">既定のセットに戻す</button>';
   h += '<button class="btn ghost" onclick="collect();save();go(\'home\')">戻る</button>';
   return h;
 }
