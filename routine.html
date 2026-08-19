@@ -105,6 +105,20 @@ label{display:block;font-size:12.5px;color:#8a94a6;margin:12px 0 5px}
   margin:0 0 14px;color:#8a94a6;font-size:13px;line-height:1.7;text-align:center;
 }
 .past b{color:#e0a86a;font-size:19px;font-weight:700;font-variant-numeric:tabular-nums}
+/* v10: ステップを1行ずつ編集する行 */
+.strow{background:#12151c;border:1px solid #262d3a;border-radius:11px;padding:10px 11px;margin-bottom:8px}
+.stline{display:flex;gap:7px;align-items:center}
+.stline .inp{padding:10px}
+.stsec{width:72px;flex:none;text-align:center;padding:10px 4px}
+.stunit{flex:none;color:#6f7a8c;font-size:12px;width:16px}
+.stbtns{display:flex;gap:6px;margin-top:8px}
+.stbtns button{
+  flex:1;background:#232b38;border:1px solid #303a4a;color:#cbd5e3;border-radius:9px;
+  padding:9px 2px;font-size:12.5px;font-family:inherit;cursor:pointer;font-weight:600;
+}
+.stbtns button:disabled{opacity:.3}
+.stbtns button.rm{background:#3a2427;border-color:#5c3138;color:#e8b3b8}
+
 .lrow{display:flex;gap:10px;align-items:baseline;padding:9px 0;border-bottom:1px solid #222833;font-size:14px}
 .lrow:last-child{border-bottom:none}
 .lt{flex:none;width:44px;color:#6f7a8c;font-size:12.5px;font-variant-numeric:tabular-nums}
@@ -184,6 +198,37 @@ label{display:block;font-size:12.5px;color:#8a94a6;margin:12px 0 5px}
      【自動進行セットの全体時間】ステップの合計から毎回計算します（制限
      時間の欄は出しません）。ステップを増減したときに総時間だけ古いまま
      残る事故を防ぐためです。
+
+   v10: 2026-08-19（チャットでの追加ご依頼）
+     「各セットもUIで入れ替えができるようにしてほしい。今だとテキスト入力で
+       編集しづらい」
+     - ステップを**1行ずつの欄**にした。秒数と文言（と読み上げ）を別々の
+       入力欄にし、↑↓で入れ替え・＋下にで追加・削除で1つ消せる。既定はこちら。
+     - **まとめて編集（テキスト）も残した。**こちらから「入力用」として
+       お渡しした複数行をそのまま貼り付ける使い方（2026-08-15の運用）が
+       あり、1行ずつの欄だけにすると貼れなくなるため。セットごとに切替。
+     - 読み上げの欄は、そのセットが「読み上げる」オンのとき、または
+       すでに読み上げが入っているときだけ出す（普段は畳んでおく）。
+     - 空欄・0・マイナスの秒数は「変更なし」として前の値を残す。消したい
+       ときは削除ボタン。最後の1つは消せない。
+     - 移動・追加・削除の前に必ず collect() で入力中の文字を取り込む
+       （セットの移動・削除と同じ手順。これを忘れると打ちかけが消える）。
+
+   v9: 2026-08-19（チャットでの追加ご依頼）
+     「セットを編集したら、ステップの秒数から全体の秒数と何時間何分かを
+       自動計算してほしい」
+     - 全体の時間を**タップ式のセットでもステップの合計から出す**ように
+       統一した（v8まではタップ式だけ「全体の制限時間（秒）」を手入力
+       できた。ステップを直したのに総時間だけ古い、という食い違いの元）。
+       入力欄そのものを廃止。データ側の s.limit はもう読まない（消さない）。
+     - 編集画面のステップ欄の下に「全体の時間（自動計算）」を置き、
+       **打ち込んでいる途中でもその場で数え直す**（recalc）。画面全体を
+       描き直すと入力位置が飛ぶため、その1か所の文字だけを差し替える。
+     - durLabel() を追加。「2時間30分」「15分」「2分51秒」の形にする
+       （1時間以上のときは秒を出さない）。一覧・実行画面・集中の設定にも
+       同じ表記を使う。
+     【注意】ステップの合計と食い違う秒数を手で入れていたセットは、
+     この版から**合計のほうに揃います**（食い違いを直すのが目的のため）。
 
    v8: 2026-08-19（チャットでの追加ご依頼）
      「Routineで自分でセットしたものにもiPhoneのアラームを設定したい」
@@ -318,7 +363,7 @@ function defaults(){ return [
           「まず短時間から、乗ってきたら伸ばす」を素直に形にしたもの。
    すべて集中の設定画面から変えられます。 */
 var FOCUS_DEF = { len:{am:120,pm:90,ev:50}, from:{pm:12,ev:16}, seg:[15,25,40], sound:false, native:true };
-var DB = { v:7, sets:null, chime:true, voice:true, spotifyUrl:"", scName:"ルーティンタイマー", log:[], count:0, focus:null };
+var DB = { v:9, sets:null, chime:true, voice:true, spotifyUrl:"", scName:"ルーティンタイマー", log:[], count:0, focus:null };
 try{
   var raw = localStorage.getItem(KEY);
   if(raw){
@@ -581,9 +626,22 @@ function normals(){ return DB.sets.filter(function(s){return !s.rescue}); }
 function rescues(){ return DB.sets.filter(function(s){return s.rescue}); }
 function stepsOf(s){ return s.steps.map(parseStep); }
 function sumSec(s){ return stepsOf(s).reduce(function(a,b){return a+b.sec;},0); }
-/* v5: 自動進行のセットは、全体時間を必ずステップの合計から出す。
-   （ステップを増減したのに制限時間だけ古い数字が残る事故を防ぐため） */
-function limitOf(s){ if(s.auto) return sumSec(s); return s.limit ? s.limit : sumSec(s); }
+/* v9: 全体の時間は、タップ式・自動進行のどちらも**必ずステップの合計**から出す。
+   v8までは、タップ式のセットだけ「全体の制限時間（秒）」を手入力できた。
+   ステップを直したのに全体の秒数だけ古いまま残る、という食い違いが起きるため、
+   入力欄そのものを廃止した。データ側の s.limit はもう読まない（消しもしない）。
+   0秒のセットで進捗バーが壊れないよう、下限を1秒にしてある。 */
+function limitOf(s){ return Math.max(1, sumSec(s)); }
+/* v9: 秒数を「2時間30分」「15分」「2分51秒」の形にする。
+   1時間以上のときは秒を出さない（読みたいのは桁であって精度ではないため）。 */
+function durLabel(sec){
+  sec = Math.max(0, Math.round(sec));
+  var h = Math.floor(sec/3600), m = Math.floor((sec%3600)/60), s2 = sec%60, out = "";
+  if(h) out += h+"時間";
+  if(m) out += m+"分";
+  if(s2 && !h) out += s2+"秒";
+  return out || "0秒";
+}
 function elapsed(){ return startAt ? Math.floor((Date.now()-startAt)/1000) : 0; }
 function left(){ var s = setOf(curId); return s ? limitOf(s) - elapsed() : 0; }
 function allDone(){ var s=setOf(curId); for(var i=0;i<s.steps.length;i++){ if(!doneSet[i]) return false; } return true; }
@@ -772,12 +830,12 @@ function viewHome(){
   }
   normals().forEach(function(s){
     h += '<button class="setb" onclick="start(\''+s.id+'\')">'+esc(s.icon)+' '+esc(s.name)
-       + '<small>'+Math.round(limitOf(s)/60)+'分 ・ '+countLabel(s)
+       + '<small>'+durLabel(limitOf(s))+' ・ '+countLabel(s)
        + (s.note ? '<br>'+esc(s.note) : '')+'</small></button>';
   });
   h += '<div class="sec">仕事</div>';
   h += '<button class="setb" onclick="focusGo()">🎯 仕事に集中する'
-     + '<small>いまは '+SLOTN[slotAt(Date.now())]+' ・ 休憩まで '+DB.focus.len[slotAt(Date.now())]+'分'
+     + '<small>いまは '+SLOTN[slotAt(Date.now())]+' ・ 休憩まで '+durLabel(DB.focus.len[slotAt(Date.now())]*60)
      + '<br>区切り： '+segLabel(slotAt(Date.now()))
      + '<br>没頭して他のプロジェクトが止まるのを防ぐための、締め切りのタイマーです。</small></button>';
   h += '<div class="sec">崩れてしまったとき</div>';
@@ -988,7 +1046,7 @@ function viewRunAuto(s){
   h += '<div class="bar"><i style="width:'+Math.max(0,Math.min(100,(e/limitOf(s))*100))+'%"></i></div>';
   h += '<p class="note" style="text-align:center;margin-top:8px">'
      + (nx ? '次： '+esc(nx.text)+'<br>' : '次でおしまいです<br>')
-     + '全体の経過 '+mmss(e)+' ／ 目安 '+Math.round(limitOf(s)/60)+'分</p>';
+     + '全体の経過 '+mmss(e)+' ／ 目安 '+durLabel(limitOf(s))+'</p>';
   h += '</div>';
   h += '<p class="note">タップして進める必要はありません。'+(s.voice?'合図（音・声）':'合図（音）')+'に合わせて進めてください。<br>合わない長さのときは「次へ」で先に進めます。</p>';
   h += '<div class="row">';
@@ -1253,7 +1311,7 @@ function viewFocusStart(){
   var sl = fSlotNow(), segs = segsFor(sl);
   var h = '<h1>🎯 仕事に集中する</h1>'
     + '<p class="sub">押した瞬間から、休憩までの時間を数えます。<br>途中の区切りは「別のところへ移る合図」です。</p>';
-  h += '<div class="card"><div class="big ok" style="font-size:44px">'+Math.round(DB.focus.len[sl])+'<span style="font-size:19px">分</span></div>'
+  h += '<div class="card"><div class="big ok" style="font-size:40px">'+durLabel(DB.focus.len[sl]*60)+'</div>'
      + '<div class="bigsub">'+SLOTN[sl]+' ・ 休憩まで</div>'
      + '<div class="row" style="margin-top:10px">'
      + ["am","pm","ev"].map(function(k){
@@ -1271,7 +1329,7 @@ function viewFocusStart(){
   h += '<button class="btn ghost" onclick="focusBegin(\'one\')">1つに集中して始める</button>';
   h += '<p class="note">区切りは「いま何分経ったか」を知らせるだけ。続けるか移るかは、その場で決めます。</p>';
   if(DB.focus.native){
-    h += '<div class="hint">開始と同時に、iPhone標準のタイマーへ<b>休憩までの'+Math.round(DB.focus.len[sl])+'分</b>を渡します（ショートカット「'+esc(DB.scName)+'」）。ロック画面に残り時間が出て、アプリを閉じていても鳴ります。<br>'
+    h += '<div class="hint">開始と同時に、iPhone標準のタイマーへ<b>休憩までの'+durLabel(DB.focus.len[sl]*60)+'</b>を渡します（ショートカット「'+esc(DB.scName)+'」）。ロック画面に残り時間が出て、アプリを閉じていても鳴ります。<br>'
        + '<b>音を消してバイブだけにしたいときは、iPhoneの時計アプリ →「タイマー終了時」→ 一覧のいちばん下の「停止」</b>を選んでください。振動するかどうかは端末の設定によります（Webページ側からは振動を出せません）。</div>';
   }else{
     h += '<div class="warn">iPhoneのタイマーへ渡す設定がオフです。<b>この画面を閉じると、休憩の合図は鳴りません</b>（Webページからは通知を出せません）。</div>';
@@ -1340,7 +1398,7 @@ function viewFocusDone(){
   var h = '<h1>'+(full ? '休憩です' : 'ここまで')+'</h1>';
   h += '<div class="card"><div class="big ok">'+mmss(fElapsed())+'</div>'
      + '<div class="bigsub">'+SLOTN[fSlotNow()]+' ・ 区切り '+Math.min(fSeg,fSegs.length)+' / '+fSegs.length+'</div></div>';
-  if(full) h += '<div class="hint">'+Math.round(fTotal()/60)+'分たちました。<b>ここで一度離れてください。</b>次のブロックは、戻ってきてからまた押せます。</div>';
+  if(full) h += '<div class="hint">'+durLabel(fTotal())+'たちました。<b>ここで一度離れてください。</b>次のブロックは、戻ってきてからまた押せます。</div>';
   else h += '<div class="hint">途中で終えました。<b>0か1かではありません。</b>次の合図でまた押せます。</div>';
   h += '<label>このブロックで出せたもの（任意・1行）</label>'
      + '<input class="inp" type="text" id="f_memo" value="'+esc(fMemo)+'" placeholder="例）企画書の骨子まで" onchange="focusMemo()">'
@@ -1375,9 +1433,9 @@ function viewFocusSet(){
   var f = DB.focus;
   var h = '<h1>集中の設定</h1><p class="sub">数字はいつでも変えられます。ここで決めた長さが、押したときの時間帯に応じて使われます。</p>';
   h += '<div class="sec">休憩までの長さ（分）</div><div class="card">'
-     + '<label>午前</label><input class="inp" type="number" id="fl_am" value="'+f.len.am+'">'
-     + '<label>午後</label><input class="inp" type="number" id="fl_pm" value="'+f.len.pm+'">'
-     + '<label>夕方</label><input class="inp" type="number" id="fl_ev" value="'+f.len.ev+'">'
+     + '<label>午前（'+durLabel(f.len.am*60)+'）</label><input class="inp" type="number" id="fl_am" value="'+f.len.am+'">'
+     + '<label>午後（'+durLabel(f.len.pm*60)+'）</label><input class="inp" type="number" id="fl_pm" value="'+f.len.pm+'">'
+     + '<label>夕方（'+durLabel(f.len.ev*60)+'）</label><input class="inp" type="number" id="fl_ev" value="'+f.len.ev+'">'
      + '</div>';
   h += '<div class="sec">時間帯の境目（時）</div><div class="card">'
      + '<label>午後はここから</label><input class="inp" type="number" id="ff_pm" value="'+f.from.pm+'">'
@@ -1410,14 +1468,142 @@ function collect(){
     var ic = document.getElementById("ic_"+s.id); if(ic && ic.value.trim()) s.icon = ic.value.trim();
     var nm = document.getElementById("nm_"+s.id); if(nm && nm.value.trim()) s.name = nm.value.trim();
     var nt = document.getElementById("nt_"+s.id); if(nt) s.note = nt.value.trim();
-    var lm = document.getElementById("lim_"+s.id);
-    if(lm){ var lv = parseInt(lm.value,10); if(lv>0) s.limit = lv; }
+    /* v9: 全体の秒数の入力欄は廃止した（ステップの合計から自動計算する） */
     /* v5: URLは「空にする」操作も意味を持つので、空欄もそのまま取り込む */
     var sp = document.getElementById("sp_"+s.id);
     if(sp) s.spotifyUrl = sp.value.trim();
-    var tx = document.getElementById("tx_"+s.id);
-    if(tx){ var arr = tx.value.split("\n").filter(function(x){return x.trim()!==""}); if(arr.length) s.steps = arr; }
+    collectSteps(s);
   });
+}
+/* --- v10: ステップの取り込み ---------------------------------
+   1行ずつの編集（既定）と、まとめて編集（テキスト）の2つがある。
+   いま画面に出ているほうから読む。 */
+function collectSteps(s){
+  if(bulk[s.id]){
+    var tx = document.getElementById("tx_"+s.id);
+    if(tx){
+      var arr = tx.value.split("\n").filter(function(x){ return x.trim()!==""; });
+      if(arr.length) s.steps = arr;
+    }
+    return;
+  }
+  var rows = [], i = 0, sc;
+  while((sc = document.getElementById("sc_"+s.id+"_"+i))){
+    var old = parseStep(s.steps[i]==null ? "" : s.steps[i]);
+    var tt = document.getElementById("st_"+s.id+"_"+i);
+    var yy = document.getElementById("sy_"+s.id+"_"+i);
+    var n = parseInt(sc.value,10);
+    /* 空欄・0・マイナスは「変更なし」として前の値を残す（うっかり消えないように） */
+    var sec = (n>0) ? n : old.sec;
+    var txt = (tt && tt.value.trim()) ? tt.value.trim() : old.text;
+    var say = yy ? yy.value.trim() : old.say;
+    rows.push(sec + "|" + txt + (say ? "|" + say : ""));
+    i++;
+  }
+  if(rows.length) s.steps = rows;
+}
+/* v9: 編集画面の「全体の時間（自動計算）」の表示。
+   ステップ欄に打ち込むたびに呼ばれる。画面全体を描き直すと入力中の位置が
+   飛んでしまうので、この1か所の文字だけを差し替える。 */
+function sumText(s){
+  var n = s.steps.filter(function(x){ return String(x).trim()!==""; }).length;
+  return durLabel(sumSec(s)) + ' ／ ' + n + 'ステップ';
+}
+function recalc(id){
+  var el = document.getElementById("sum_"+id);
+  if(!el) return;
+  var t = 0, n = 0;
+  if(bulk[id]){
+    var tx = document.getElementById("tx_"+id);
+    if(!tx) return;
+    var arr = tx.value.split("\n").filter(function(x){ return x.trim()!==""; });
+    arr.forEach(function(line){ t += parseStep(line).sec; });
+    n = arr.length;
+  }else{
+    var i = 0, sc;
+    while((sc = document.getElementById("sc_"+id+"_"+i))){
+      var v = parseInt(sc.value,10);
+      t += (v>0) ? v : 0;
+      n++; i++;
+    }
+  }
+  el.textContent = durLabel(t) + ' ／ ' + n + 'ステップ';
+}
+
+/* ============================================================
+   v10: ステップを1行ずつ編集する（2026-08-19 ご依頼）
+   ------------------------------------------------------------
+   「テキスト入力で編集しづらい」というご指摘。秒数と文言を別々の欄にし、
+   ↑↓で入れ替え・🗑で削除・＋で追加できるようにした。
+
+   まとめて編集（テキスト）も残してある。理由：こちらから「入力用」として
+   お渡しした複数行をそのまま貼り付ける使い方（2026-08-15の運用）が
+   あり、1行ずつの欄しかないと貼れなくなるため。既定は1行ずつ。
+
+   移動・削除・追加のたびに画面を描き直すので、その前に必ず collect() で
+   入力中の文字を取り込む（セットの移動・削除と同じ手順）。 */
+var bulk = {};   /* セットidごと：まとめて編集（テキスト）を開いているか */
+
+function bulkToggle(id){
+  collect();
+  bulk[id] = !bulk[id];
+  armed = null; save(); render();
+}
+function stepMove(id, i, d){
+  collect();
+  var s = setOf(id); if(!s) return;
+  var j = i + d;
+  if(i<0 || j<0 || j>=s.steps.length) return;
+  var t = s.steps[i]; s.steps[i] = s.steps[j]; s.steps[j] = t;
+  armed = null; save(); render();
+}
+function stepDel(id, i){
+  collect();
+  var s = setOf(id); if(!s) return;
+  if(s.steps.length<=1){
+    alertLess("最後の1つは消せません。中身は自由に書き換えられます。");
+    return;
+  }
+  s.steps.splice(i,1);
+  armed = null; save(); render();
+}
+function stepAdd(id, at){
+  collect();
+  var s = setOf(id); if(!s) return;
+  var pos = (at==null || at<0 || at>s.steps.length) ? s.steps.length : at;
+  s.steps.splice(pos, 0, "60|新しいステップ");
+  armed = null; save(); render();
+  setTimeout(function(){
+    var el = document.getElementById("st_"+id+"_"+pos);
+    if(el){ el.focus(); el.select(); }
+  }, 30);
+}
+/* 1行ずつの編集欄を組み立てる */
+function stepRows(s){
+  var st = stepsOf(s), h = '';
+  st.forEach(function(x,i){
+    var showSay = s.voice || !!x.say;
+    h += '<div class="strow">'
+       + '<div class="stline">'
+       + '<input class="inp stsec" type="number" inputmode="numeric" id="sc_'+s.id+'_'+i+'" value="'+x.sec+'" oninput="recalc(\''+s.id+'\')">'
+       + '<span class="stunit">秒</span>'
+       + '<input class="inp" type="text" id="st_'+s.id+'_'+i+'" value="'+esc(x.text)+'">'
+       + '</div>'
+       + (showSay
+          ? '<div class="stline" style="margin-top:6px">'
+            + '<span class="stunit" style="width:52px;text-align:left">読み上げ</span>'
+            + '<input class="inp" type="text" id="sy_'+s.id+'_'+i+'" value="'+esc(x.say)+'" placeholder="空欄なら上の文言を読みます">'
+            + '</div>'
+          : '')
+       + '<div class="stbtns">'
+       + '<button onclick="stepMove(\''+s.id+'\','+i+',-1)"'+(i===0?' disabled':'')+'>↑</button>'
+       + '<button onclick="stepMove(\''+s.id+'\','+i+',1)"'+(i===st.length-1?' disabled':'')+'>↓</button>'
+       + '<button onclick="stepAdd(\''+s.id+'\','+(i+1)+')">＋下に</button>'
+       + '<button class="rm" onclick="stepDel(\''+s.id+'\','+i+')">削除</button>'
+       + '</div>'
+       + '</div>';
+  });
+  return h;
 }
 /* v5: セットごとのオンオフ（進み方・音声・Spotify）。
    トグルは押すと再描画されるので、入力中の文字が消えないよう
@@ -1442,7 +1628,7 @@ function dup(id){
   setTimeout(function(){ var el = document.getElementById("nm_"+c.id); if(el){ el.focus(); el.select(); } }, 30);
 }
 function viewEdit(){
-  var h = '<h1>セットを編集・追加・削除</h1><p class="sub">タイトル・説明文・時間・ステップ、すべて変えられます。<br>ステップは1行に1つ、<b>秒数|文言</b> の形です。読み上げる言葉を画面の文言と変えたいときだけ、<b>秒数|文言|読み上げ</b> と3つめを足します。</p>';
+  var h = '<h1>セットを編集・追加・削除</h1><p class="sub">タイトル・説明文・ステップ、すべて変えられます。<br>ステップは1行に1つ、<b>秒数|文言</b> の形です。読み上げる言葉を画面の文言と変えたいときだけ、<b>秒数|文言|読み上げ</b> と3つめを足します。<br><b>全体の時間は、ステップの秒数から自動で出ます。</b></p>';
   h += '<div class="hint"><b>ステップの書き方</b><br>'
      + '<b>60|温かい飲み物をいれる</b> … 60秒。読み上げも同じ文言<br>'
      + '<b>4|吸う（4秒）</b> … 読み上げは「吸う」（（　）の中は読みません）<br>'
@@ -1451,7 +1637,9 @@ function viewEdit(){
      + '同じ並びの繰り返し（吸う・止める・吐く など）は実行画面が自動で「サイクル ○/○」に、'
      + 'ばらばらの内容なら「ステップ ○/○」になります。設定は要りません。<br><br>'
      + '<b>読み上げ</b>は、ホーム画面の「音声で切り替えを案内する」がオフだと、ここがオンでも鳴りません。<br>'
-     + '<b>iPhoneのタイマーへ渡す</b>と、アプリを閉じていても鳴ります。<b>ショートカット「'+esc(DB.scName)+'」が要ります</b>（未作成なら何も起きません）。<br>'
+     + '<b>iPhoneのタイマーへ渡す</b>と、アプリを閉じていても鳴ります。<b>ショートカット「'+esc(DB.scName)+'」が要ります</b>（未作成なら何も起きません）。<br><br>'
+     + '<b>全体の時間は、ステップの秒数を足して自動で出します。</b>打ち込んでいる途中でもその場で数え直すので、'
+     + '別に総時間を入力する欄はありません（ステップを直したのに総時間だけ古いまま、という食い違いが起きないようにするためです）。<br>'
      + '呼吸法のセットを土台に別のルーティンを組みたいときは、<b>複製</b>から始めるのが早いです。</div>';
   DB.sets.forEach(function(s,i){
     var isArmed = (armed===s.id);
@@ -1476,7 +1664,7 @@ function viewEdit(){
        + '<div class="toggle" style="margin-top:6px"><b>開始時にiPhoneのタイマーへ渡す</b>'
        + '<button class="sw'+(s.timer?' on':'')+'" onclick="setFlag(\''+s.id+'\',\'timer\')"><i></i></button></div>'
        + (s.timer
-          ? '<p class="note" style="margin-top:4px">押した瞬間に、このセットの<b>'+mmss(limitOf(s))+'</b>をiPhone標準のタイマーへ渡します（ショートカット「'+esc(DB.scName)+'」）。ロック画面に残り時間が出て、アプリを閉じていても鳴ります。</p>'
+          ? '<p class="note" style="margin-top:4px">押した瞬間に、このセットの<b>'+durLabel(limitOf(s))+'</b>をiPhone標準のタイマーへ渡します（ショートカット「'+esc(DB.scName)+'」）。ロック画面に残り時間が出て、アプリを閉じていても鳴ります。</p>'
           : '')
        + '<div class="toggle" style="margin-top:6px"><b>開始時にプレイリストを開く</b>'
        + '<button class="sw'+(s.spotify?' on':'')+'" onclick="setFlag(\''+s.id+'\',\'spotify\')"><i></i></button></div>'
@@ -1491,11 +1679,17 @@ function viewEdit(){
                : (String(DB.spotifyUrl||"").trim() ? 'ホーム画面の既定URLを開きます。' : '<b>まだURLがありません。</b>入れるまでは何も開きません。'))
             + '</p>'
           : '')
-       + (s.auto
-          ? '<p class="note" style="margin-top:9px">秒数どおりに数えて次へ進みます。全体の時間は<b>ステップの合計（'+mmss(sumSec(s))+'）</b>で、ここでは入力しません。</p>'
-          : '<label>全体の制限時間（秒）</label><input class="inp" type="number" id="lim_'+s.id+'" value="'+limitOf(s)+'">')
-       + '<label>ステップ<span class="tag">秒数|文言|読み上げ</span></label>'
-       + '<textarea id="tx_'+s.id+'">'+esc(s.steps.join("\n"))+'</textarea>'
+       + '<label>ステップ'+(bulk[s.id]?'<span class="tag">秒数|文言|読み上げ</span>':'')+'</label>'
+       + (bulk[s.id]
+          ? '<textarea id="tx_'+s.id+'" oninput="recalc(\''+s.id+'\')">'+esc(s.steps.join("\n"))+'</textarea>'
+          : stepRows(s) + '<button class="btn ghost" style="margin-top:2px" onclick="stepAdd(\''+s.id+'\')">＋ ステップを追加する</button>')
+       + '<button class="btn link" style="padding:7px" onclick="bulkToggle(\''+s.id+'\')">'
+       + (bulk[s.id] ? '1行ずつの編集に戻す' : 'まとめて編集する（テキストで貼り付け）')+'</button>'
+       /* v9: 全体の時間はステップの合計。打ち込みながらその場で数え直す（recalc）。 */
+       + '<div class="card" style="margin:9px 0 0;padding:11px 13px;background:#12151c">'
+       + '<div class="toggle"><b style="color:#8a94a6;font-weight:500;font-size:12.5px;flex:none">全体の時間</b>'
+       + '<span id="sum_'+s.id+'" style="color:#e0a86a;font-weight:700;font-size:15px;white-space:nowrap;text-align:right">'+sumText(s)+'</span></div>'
+       + '<p class="note" style="margin:5px 0 0">ステップの秒数から自動で出しています。</p></div>'
        + '<div class="tools">'
        + '<button onclick="move(\''+s.id+'\',-1)"'+(i===0?' disabled':'')+'>↑ 上へ</button>'
        + '<button onclick="move(\''+s.id+'\',1)"'+(i===DB.sets.length-1?' disabled':'')+'>↓ 下へ</button>'
@@ -1544,7 +1738,7 @@ function alertLess(msg){
 }
 function addSet(){
   collect();
-  var s = { id:newId(), icon:"⏱", name:"新しいセット", note:"", limit:600,
+  var s = { id:newId(), icon:"⏱", name:"新しいセット", note:"",
             steps:["60|やること1","300|やること2"] };
   var last = -1;
   DB.sets.forEach(function(x,i){ if(!x.rescue) last = i; });
