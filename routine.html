@@ -185,6 +185,16 @@ label{display:block;font-size:12.5px;color:#8a94a6;margin:12px 0 5px}
      時間の欄は出しません）。ステップを増減したときに総時間だけ古いまま
      残る事故を防ぐためです。
 
+   v6: 2026-08-19（チャットでの追加ご依頼）
+     🎯 仕事の集中ブロックを新設。詳しい設計意図は下の「v6: 仕事の集中
+     ブロック」のコメントに書いてあります。要点だけ：
+     - 午前2時間・午後90分・夕方50分（押した時刻から自動判定・変更可）
+     - ブロックの中は 15分→25分→40分→40分… と徐々に伸ばす区切り
+     - 目的は休憩ではなく「没頭して他のプロジェクトが止まるのを防ぐ」
+       締め切り効果。画面の主役は「休憩までの残り時間」
+     - 音は既定オフ（設定で戻せる）。閉じていても鳴らせるのはiPhone標準
+       タイマーだけなので、開始時にショートカット経由で1本だけ渡す
+
    === v3で置いた線引き（fast.html・gym.html にも同じものが効きます） ===
    出す  : 起きた事実だけ。   実行の累計回数／実行した日と時刻／前回やったセット
    出さない: 起きなかった事実から計算した数。
@@ -279,7 +289,14 @@ function defaults(){ return [
     ]}
 ]; }
 
-var DB = { v:5, sets:null, chime:true, voice:true, spotifyUrl:"", scName:"ルーティンタイマー", log:[], count:0 };
+/* --- v6: 仕事の集中ブロックの既定値 -----------------------------
+   len  … 時間帯ごとの「休憩までの上限」（分）
+   from … 時間帯の境目（時）。pm=12 なら 12:00 から午後、ev=16 なら 16:00 から夕方
+   seg  … ブロックの中の区切りの並び（分）。最後の値が以降ずっと続く。
+          「まず短時間から、乗ってきたら伸ばす」を素直に形にしたもの。
+   すべて集中の設定画面から変えられます。 */
+var FOCUS_DEF = { len:{am:120,pm:90,ev:50}, from:{pm:12,ev:16}, seg:[15,25,40], sound:false, native:true };
+var DB = { v:6, sets:null, chime:true, voice:true, spotifyUrl:"", scName:"ルーティンタイマー", log:[], count:0, focus:null };
 try{
   var raw = localStorage.getItem(KEY);
   if(raw){
@@ -290,6 +307,7 @@ try{
     if(p.scName) DB.scName = p.scName;
     if(Array.isArray(p.log)) DB.log = p.log;
     if(typeof p.count==="number" && p.count>=0) DB.count = p.count;
+    if(p.focus && typeof p.focus==="object") DB.focus = p.focus;
     if(p.mig_dinner===true) DB.mig_dinner = true;
     if(p.mig_breath478===true) DB.mig_breath478 = true;
     if(DB.count < DB.log.length) DB.count = DB.log.length;
@@ -303,6 +321,20 @@ try{
     }
   }
 }catch(e){}
+/* v6: 集中の設定は、足りない項目だけ既定で埋める（保存済みの値は上書きしない）。
+   毎回まるごと既定に戻すと、編集した数字が起動のたびに消えるため。 */
+(function(){
+  var f = DB.focus && typeof DB.focus==="object" ? DB.focus : {};
+  if(!f.len || typeof f.len!=="object") f.len = {};
+  ["am","pm","ev"].forEach(function(k){ if(typeof f.len[k]!=="number" || f.len[k]<1) f.len[k] = FOCUS_DEF.len[k]; });
+  if(!f.from || typeof f.from!=="object") f.from = {};
+  ["pm","ev"].forEach(function(k){ if(typeof f.from[k]!=="number" || f.from[k]<0 || f.from[k]>23) f.from[k] = FOCUS_DEF.from[k]; });
+  if(!Array.isArray(f.seg) || !f.seg.length) f.seg = FOCUS_DEF.seg.slice();
+  f.seg = f.seg.map(function(x){ return Math.max(1, parseInt(x,10)||1); });
+  if(typeof f.sound !== "boolean") f.sound = FOCUS_DEF.sound;
+  if(typeof f.native !== "boolean") f.native = FOCUS_DEF.native;
+  DB.focus = f;
+})();
 if(!DB.sets || !DB.sets.length) DB.sets = defaults();
 if(!DB.sets.some(function(s){return s.rescue})) DB.sets.push(defaults().filter(function(s){return s.rescue})[0]);
 /* 2026-08-15追加：🍽 夕食の準備前。★一度だけ入れる。
@@ -386,8 +418,10 @@ function lastRun(){ return DB.log.length ? DB.log[DB.log.length-1] : null; }
 
 /* --- 音 --- */
 var ac = null;
-function beep(f,d){
-  if(!DB.chime) return;
+function beep(f,d,force){
+  /* force=true は集中ブロック用。集中の音は DB.focus.sound で別に持っており、
+     セットの「終了音を鳴らす」（DB.chime）とは独立させる。 */
+  if(!DB.chime && !force) return;
   try{
     if(!ac) ac = new (window.AudioContext||window.webkitAudioContext)();
     var o = ac.createOscillator(), g = ac.createGain();
@@ -656,8 +690,8 @@ function leaveRun(){
    残り時間を画面上部（ダイナミックアイランド／ロック画面）に出せるのは
    iOS標準のタイマーだけなので、ショートカット経由でそれを起動します。
    ショートカットの作り方は 行動計画_2026-08-14 §10 を参照。 */
-function nativeTimer(){
-  var sec = Math.max(1, left());
+function nativeTimer(sec){
+  sec = Math.max(1, Math.round(sec || left()));
   location.href = "shortcuts://run-shortcut?name=" + encodeURIComponent(DB.scName)
                 + "&input=text&text=" + sec;
 }
@@ -672,6 +706,13 @@ function render(){
     h = (view==="run") ? viewRun() : viewDone();
   }
   else if(view==="done") h = viewDone();
+  else if(view==="focusStart") h = viewFocusStart();
+  else if(view==="focus"){
+    focusTick();                       /* 完了すると内部で view="focusDone" に変わることがある */
+    h = (view==="focus") ? viewFocus() : viewFocusDone();
+  }
+  else if(view==="focusDone") h = viewFocusDone();
+  else if(view==="focusSet") h = viewFocusSet();
   else if(view==="edit") h = viewEdit();
   else if(view==="log") h = viewLog();
   else if(view==="about") h = viewAbout();
@@ -701,6 +742,11 @@ function viewHome(){
        + '<small>'+Math.round(limitOf(s)/60)+'分 ・ '+countLabel(s)
        + (s.note ? '<br>'+esc(s.note) : '')+'</small></button>';
   });
+  h += '<div class="sec">仕事</div>';
+  h += '<button class="setb" onclick="focusGo()">🎯 仕事に集中する'
+     + '<small>いまは '+SLOTN[slotAt(Date.now())]+' ・ 休憩まで '+DB.focus.len[slotAt(Date.now())]+'分'
+     + '<br>区切り： '+segLabel(slotAt(Date.now()))
+     + '<br>没頭して他のプロジェクトが止まるのを防ぐための、締め切りのタイマーです。</small></button>';
   h += '<div class="sec">崩れてしまったとき</div>';
   rescues().forEach(function(s){
     h += '<button class="setb rescue" onclick="start(\''+s.id+'\')">'+esc(s.icon)+' '+esc(s.name)
@@ -812,7 +858,9 @@ function viewLog(){
         /* 0ステップの回は数字を出さない（「押した」という事実だけを残す） */
         var what = r.d>0 ? (r.d+' / '+r.n) : '押しました';
         s += '<div class="lrow"><span class="lt">'+hhmm(r.t)+'</span>'
-           + '<span class="ln">'+esc(r.icon)+' '+esc(r.name)+'</span>'
+           + '<span class="ln">'+esc(r.icon)+' '+esc(r.name)
+           + (r.memo ? '<em style="display:block;font-style:normal;color:#8a94a6;font-size:12.5px;margin-top:3px">'+esc(r.memo)+'</em>' : '')
+           + '</span>'
            + '<span class="ld">'+what+'</span></div>';
       });
       s += '</div>';
@@ -932,6 +980,311 @@ function viewDone(){
   if(!s.rescue && d<n) h += '<button class="btn ghost" onclick="go(\'run\');tick=setInterval(render,250)">続きに戻る</button>';
   h += '<button class="btn" onclick="stop();go(\'home\')">最初に戻る</button>';
   h += '<button class="btn link" onclick="stop();go(\'log\')">📖 これまでの記録を見る</button>';
+  return h;
+}
+
+/* ============================================================
+   v6: 仕事の集中ブロック（2026-08-19 ご依頼）
+   ------------------------------------------------------------
+   ご依頼: 午前2時間・午後90分・夕方50分で休憩の合図。いきなり2時間を
+   やろうとせず、まずは短いところから15分ごとに切り替える。
+
+   【目的（ご本人の言葉）】休憩・回復のためではなく、**複数プロジェクトを
+   同時に走らせているときに、ひとつの作業へ没頭（作業興奮）して他が止まる
+   のを防ぐため**。この時間内・今日中に成果を出すための締め切り効果。
+   → したがって「区切り」は休みではなく**別の行き先へ移る合図**であり、
+      画面の主役は「休憩までの残り時間」（＝締め切り）にしてある。
+   → ブロックを始める前に行き先を書いておける。書かなくても始められる
+      （入力を必須にすると、押すこと自体をやめてしまうため）。
+
+   【正直に書く制約】このページからは通知を出せない（iOSにはWebページから
+   通知を予約する手段がない。navigator.vibrate もiOS Safariは非対応）。
+   閉じていても鳴らせるのはiPhone標準タイマーだけなので、開始時にショート
+   カット経由で「休憩まで」の1本を渡す。iOSのタイマーは1本しか持てないため、
+   途中の区切りは**アプリを開いているときだけの合図**になる（区切りごとに
+   自動でショートカットへ飛ばすことはしない。ユーザー操作なしの遷移はiOSが
+   止めるうえ、作業中に画面を奪うため）。必要なときのために、実行画面に
+   「次の区切りをタイマーに渡す」ボタンを手動用に置いてある。
+
+   【音】既定はオフ（オフィス・会議のため）。設定でいつでも戻せる。
+   ※没頭を切るのが目的の道具で音を消すのは弱い合図になる、という指摘は
+     画面内にも書いてある。判断はご本人。
+
+   【記録】既存3アプリと同じ線引き。押した時刻・時間帯・いくつ区切りを
+   越えたか・出せたもの（任意の1行）だけ。集中時間の合計・連続日数・
+   達成率は持たない。
+   ============================================================ */
+var SLOTN = { am:"午前", pm:"午後", ev:"夕方" };
+function slotAt(t){
+  var h = new Date(t).getHours();
+  if(h < DB.focus.from.pm) return "am";
+  if(h < DB.focus.from.ev) return "pm";
+  return "ev";
+}
+/* ブロックを区切りに割る。seg の並びを順に使い、最後の値はそれ以降ずっと続く。
+   端数（最後の区切りの半分未満）は1つ前に足して、細切れを作らない。 */
+function segsFor(slot){
+  var total = Math.max(60, (DB.focus.len[slot]||60)*60);
+  var arr = (DB.focus.seg && DB.focus.seg.length) ? DB.focus.seg : [25];
+  var out = [], rest = total, i = 0;
+  while(rest > 0 && out.length < 60){
+    var s = Math.max(60, (arr[Math.min(i,arr.length-1)]||25)*60);
+    if(s >= rest){ out.push(rest); rest = 0; break; }
+    out.push(s); rest -= s; i++;
+  }
+  /* 最後が1つ前より短くなったら1つ前に足す＝「短くなって終わる」形を作らない
+     （徐々に伸ばす、という並びの意図に反するため。90分なら 15/25/40/10 ではなく 15/25/50） */
+  if(out.length > 1 && out[out.length-1] < out[out.length-2]){
+    out[out.length-2] += out.pop();
+  }
+  return out;
+}
+function segLabel(slot){
+  return segsFor(slot).map(function(s){ return Math.round(s/60)+'分'; }).join(' → ');
+}
+
+var fStart=0, fSlot=null, fSegs=[], fMode="one", fList=[], fSeg=0;
+var fPaused=false, fPauseAt=0, fFlash=0, fDone=false, fIdx=null, fMemo="";
+
+function fElapsed(){ return fStart ? Math.floor(((fPaused?fPauseAt:Date.now())-fStart)/1000) : 0; }
+function fTotal(){ return fSegs.reduce(function(a,b){return a+b;},0); }
+function fSegEnd(i){ var e=0; for(var k=0;k<=i && k<fSegs.length;k++) e+=fSegs[k]; return e; }
+function fSlotNow(){ return fSlot || slotAt(Date.now()); }
+/* 集中の音。DB.focus.sound だけで決める（既定オフ）。 */
+function fChime(end){
+  if(!DB.focus.sound) return;
+  if(end){ beep(587,.22,true); setTimeout(function(){ beep(880,.45,true); },200); }
+  else beep(660,.18,true);
+}
+function fItem(i){ return fList.length ? fList[i % fList.length] : ""; }
+
+function focusGo(){
+  fSlot = slotAt(Date.now()); fList = []; fMemo = "";
+  go("focusStart");
+}
+function focusPick(sl){ focusGrab(); fSlot = sl; render(); }
+function focusGrab(){
+  var ta = document.getElementById("f_list");
+  if(ta) fList = ta.value.split("\n").filter(function(x){ return x.trim()!==""; });
+}
+function focusBegin(mode){
+  focusGrab();
+  fMode = mode;
+  fSlot = fSlotNow();
+  fSegs = segsFor(fSlot);
+  fStart = Date.now(); fSeg = 0; fPaused = false; fPauseAt = 0;
+  fDone = false; fIdx = null; fMemo = ""; fFlash = Date.now();
+  if(DB.focus.native) nativeTimer(fTotal());   /* 休憩までの1本だけ渡す */
+  if(tick) clearInterval(tick);
+  tick = setInterval(render, 250);
+  view = "focus"; render();
+}
+/* 自動セットと同じ考え方：経過秒から、いま何番目の区切りにいるべきかを毎回逆算する。
+   setTimeoutの連鎖にすると、iOSでバックグラウンドに回った瞬間に止まって戻らない。 */
+function focusTick(){
+  if(fPaused || fDone) return;
+  var e = fElapsed(), cum = 0, idx = -1;
+  for(var i=0;i<fSegs.length;i++){ cum += fSegs[i]; if(e < cum){ idx = i; break; } }
+  if(idx < 0){
+    fSeg = fSegs.length; fDone = true;
+    if(tick){ clearInterval(tick); tick = null; }
+    fChime(true);
+    logFocus();
+    view = "focusDone";
+    return;
+  }
+  if(idx !== fSeg){
+    fSeg = idx; fFlash = Date.now();
+    fChime(false);
+  }
+}
+function focusPause(){
+  if(fPaused){ fStart += (Date.now()-fPauseAt); fPaused = false; }
+  else { fPauseAt = Date.now(); fPaused = true; }
+  render();
+}
+function focusSkip(){
+  var base = fPaused ? fPauseAt : Date.now();
+  fStart = base - (fSegEnd(fSeg)+0.05)*1000;
+  if(fPaused) fPauseAt = base;
+  render();
+}
+function focusSegLeft(){ return Math.max(0, fSegEnd(fSeg) - fElapsed()); }
+function focusFinish(){
+  fDone = true;
+  if(tick){ clearInterval(tick); tick = null; }
+  logFocus();
+  view = "focusDone"; render();
+}
+function focusLeave(){
+  /* 何も進まないうちにやめた回は残さない（開いただけ・押し間違いを増やさないため） */
+  if(fIdx===null && fSeg>0) logFocus();
+  focusReset(); go("home");
+}
+function focusReset(){
+  if(tick){ clearInterval(tick); tick = null; }
+  fStart=0; fSegs=[]; fSeg=0; fPaused=false; fPauseAt=0; fDone=false; fIdx=null; fList=[]; fMemo="";
+}
+function logFocus(){
+  var rec = { t:fStart, id:"focus", icon:"🎯", name:"仕事に集中（"+SLOTN[fSlotNow()]+"）",
+              d:Math.min(fSeg, fSegs.length), n:fSegs.length, sec:fElapsed(), memo:fMemo||"" };
+  if(fIdx===null){
+    DB.log.push(rec); DB.count++;
+    if(DB.log.length > LOGMAX) DB.log = DB.log.slice(DB.log.length - LOGMAX);
+    fIdx = DB.log.length - 1;
+  }else{
+    rec.t = DB.log[fIdx].t;
+    DB.log[fIdx] = rec;
+  }
+  save();
+}
+function focusMemo(){
+  var el = document.getElementById("f_memo");
+  if(!el) return;
+  fMemo = el.value.trim();
+  if(fIdx!==null && DB.log[fIdx]){ DB.log[fIdx].memo = fMemo; save(); }
+  render();
+}
+
+/* --------- 集中：始める前の画面 --------- */
+function viewFocusStart(){
+  var sl = fSlotNow(), segs = segsFor(sl);
+  var h = '<h1>🎯 仕事に集中する</h1>'
+    + '<p class="sub">押した瞬間から、休憩までの時間を数えます。<br>途中の区切りは「別のところへ移る合図」です。</p>';
+  h += '<div class="card"><div class="big ok" style="font-size:44px">'+Math.round(DB.focus.len[sl])+'<span style="font-size:19px">分</span></div>'
+     + '<div class="bigsub">'+SLOTN[sl]+' ・ 休憩まで</div>'
+     + '<div class="row" style="margin-top:10px">'
+     + ["am","pm","ev"].map(function(k){
+         return '<button class="btn ghost" style="margin-top:0'+(k===sl?';border:1px solid #e0a86a;color:#e0a86a':'')+'" onclick="focusPick(\''+k+'\')">'+SLOTN[k]+'</button>';
+       }).join('')
+     + '</div>'
+     + '<p class="note" style="text-align:center">区切り： '+segLabel(sl)+'</p></div>';
+  h += '<label>このブロックで手をつけること（1行に1つ）</label>'
+     + '<textarea id="f_list" style="min-height:96px;font-family:inherit;font-size:14px" placeholder="空のままでも始められます。&#10;例）A案件の企画書のたたき&#10;例）B案件の見積もり確認">'
+     + esc(fList.join("\n"))+'</textarea>'
+     + '<p class="note">書いておくと、区切りのたびに「次はこれ」と出ます。<br><b>書かなくても始められます。</b>先に決めた行き先があると、漂流しにくくなります。</p>';
+  h += '<div class="sec">始める</div>';
+  h += '<button class="btn" onclick="focusBegin(\'rotate\')">順に回して始める</button>';
+  h += '<p class="note">区切りのたびに、書いた行き先を上から順に案内します。没頭して他が止まるのを防ぎたいとき。</p>';
+  h += '<button class="btn ghost" onclick="focusBegin(\'one\')">1つに集中して始める</button>';
+  h += '<p class="note">区切りは「いま何分経ったか」を知らせるだけ。続けるか移るかは、その場で決めます。</p>';
+  if(DB.focus.native){
+    h += '<div class="hint">開始と同時に、iPhone標準のタイマーへ<b>休憩までの'+Math.round(DB.focus.len[sl])+'分</b>を渡します（ショートカット「'+esc(DB.scName)+'」）。ロック画面に残り時間が出て、アプリを閉じていても鳴ります。<br>'
+       + '<b>音を消してバイブだけにしたいときは、iPhoneの時計アプリ →「タイマー終了時」→ 一覧のいちばん下の「停止」</b>を選んでください。振動するかどうかは端末の設定によります（Webページ側からは振動を出せません）。</div>';
+  }else{
+    h += '<div class="warn">iPhoneのタイマーへ渡す設定がオフです。<b>この画面を閉じると、休憩の合図は鳴りません</b>（Webページからは通知を出せません）。</div>';
+  }
+  h += '<button class="btn ghost" onclick="go(\'focusSet\')">⚙ 集中の設定（長さ・区切り・音）</button>';
+  h += '<button class="btn link" onclick="go(\'home\')">戻る</button>';
+  return h;
+}
+
+/* --------- 集中：実行中 --------- */
+function viewFocus(){
+  var e = fElapsed(), total = fTotal(), leftAll = Math.max(0, total - e);
+  var segLeft = focusSegLeft(), flash = (Date.now() - fFlash) < 8000;
+  var h = '<h1>🎯 集中（'+SLOTN[fSlotNow()]+'）</h1>';
+  h += '<div class="card"'+(flash?' style="border-color:#e0a86a;background:#211d18"':'')+'>';
+  h += '<div class="big'+(fPaused?' over':'')+'">'+mmss(leftAll)+'</div>';
+  h += '<div class="bigsub">'+(fPaused?'一時停止中':'休憩まで')+'</div>';
+  h += '<div class="bar"><i style="width:'+Math.max(0,Math.min(100,(e/total)*100))+'%"></i></div>';
+  h += '<p class="note" style="text-align:center;margin-top:9px">区切り '+Math.min(fSeg+1,fSegs.length)+' / '+fSegs.length
+     + ' ・ この区切りの残り <b>'+mmss(segLeft)+'</b></p>';
+  h += '</div>';
+  if(fMode==="rotate" && fList.length){
+    h += '<div class="card"'+(flash?' style="border-color:#e0a86a"':'')+'>'
+       + '<p class="note" style="margin:0">いま</p>'
+       + '<div style="font-size:19px;font-weight:700;margin:3px 0 9px;line-height:1.5">'+esc(fItem(fSeg))+'</div>'
+       + '<p class="note" style="margin:0">'+(fSeg+1<fSegs.length ? '次は '+esc(fItem(fSeg+1)) : 'これで最後の区切りです')+'</p>'
+       + (fList.length > fSegs.length
+          ? '<p class="note" style="margin:7px 0 0">行き先は'+fList.length+'つ書きましたが、このブロックの区切りは'+fSegs.length+'つです。<b>残りは次のブロックへ。</b></p>'
+          : '')
+       + '</div>';
+  }else if(fMode==="rotate"){
+    h += '<div class="card"><p class="note" style="margin:0">行き先を書かずに始めました。区切りの合図だけ出します。</p></div>';
+  }
+  if(flash){
+    h += '<div class="hint"><b>▶ 切り替えの合図です。</b>'
+       + (fMode==="rotate" && fList.length ? '「'+esc(fItem(fSeg))+'」へ移ってください。' : 'いま'+Math.round(fSegEnd(fSeg-1)/60)+'分たちました。続けるか移るか、ここで一度決めてください。')
+       + '</div>';
+  }
+  h += '<div class="row">';
+  h += '<button class="btn ghost" onclick="focusPause()">'+(fPaused?'再開':'一時停止')+'</button>';
+  h += '<button class="btn ghost" onclick="focusSkip()">次の区切りへ ▶</button>';
+  h += '</div>';
+  h += '<button class="btn ghost" onclick="nativeTimer('+Math.max(1,segLeft)+')">⏱ この区切りの残り'+Math.max(1,Math.round(segLeft/60))+'分をiPhoneのタイマーに渡す</button>';
+  h += '<p class="note">この画面は他のアプリを開くと止まりますが、戻れば時刻から計算し直すので、残り時間はズレません。<br><b>途中の区切りの合図は、この画面を開いているときだけ出ます。</b>iPhoneのタイマーは1本しか持てないので、渡してあるのは「休憩まで」の1本です。</p>';
+  h += '<button class="btn" onclick="focusFinish()">ここで終える</button>';
+  h += '<button class="btn link" onclick="focusLeave()">やめて最初に戻る</button>';
+  return h;
+}
+
+/* --------- 集中：休憩の合図 --------- */
+function viewFocusDone(){
+  var full = fSeg >= fSegs.length;
+  var h = '<h1>'+(full ? '休憩です' : 'ここまで')+'</h1>';
+  h += '<div class="card"><div class="big ok">'+mmss(fElapsed())+'</div>'
+     + '<div class="bigsub">'+SLOTN[fSlotNow()]+' ・ 区切り '+Math.min(fSeg,fSegs.length)+' / '+fSegs.length+'</div></div>';
+  if(full) h += '<div class="hint">'+Math.round(fTotal()/60)+'分たちました。<b>ここで一度離れてください。</b>次のブロックは、戻ってきてからまた押せます。</div>';
+  else h += '<div class="hint">途中で終えました。<b>0か1かではありません。</b>次の合図でまた押せます。</div>';
+  h += '<label>このブロックで出せたもの（任意・1行）</label>'
+     + '<input class="inp" type="text" id="f_memo" value="'+esc(fMemo)+'" placeholder="例）企画書の骨子まで" onchange="focusMemo()">'
+     + '<p class="note">空のままで構いません。書いたものは記録の中にだけ残ります（Obsidianには入りません）。</p>';
+  var br = DB.sets.filter(function(s){ return s.auto && !s.rescue; })[0];
+  if(br) h += '<button class="btn ghost" onclick="focusMemo();focusReset();start(\''+br.id+'\')">'+esc(br.icon)+' '+esc(br.name)+' へ</button>';
+  h += '<button class="btn" onclick="focusMemo();focusReset();go(\'home\')">最初に戻る</button>';
+  h += '<button class="btn link" onclick="focusMemo();focusReset();go(\'log\')">📖 これまでの記録を見る</button>';
+  return h;
+}
+
+/* --------- 集中：設定 --------- */
+function focusSave(){
+  var f = DB.focus;
+  ["am","pm","ev"].forEach(function(k){
+    var el = document.getElementById("fl_"+k);
+    if(el){ var v = parseInt(el.value,10); if(v>0 && v<=600) f.len[k] = v; }
+  });
+  ["pm","ev"].forEach(function(k){
+    var el = document.getElementById("ff_"+k);
+    if(el){ var v = parseInt(el.value,10); if(v>=0 && v<=23) f.from[k] = v; }
+  });
+  var sg = document.getElementById("fseg");
+  if(sg){
+    var arr = sg.value.split(/[,、\s]+/).map(function(x){ return parseInt(x,10); })
+                .filter(function(x){ return x>0 && x<=600; });
+    if(arr.length) f.seg = arr;
+  }
+  save();
+}
+function viewFocusSet(){
+  var f = DB.focus;
+  var h = '<h1>集中の設定</h1><p class="sub">数字はいつでも変えられます。ここで決めた長さが、押したときの時間帯に応じて使われます。</p>';
+  h += '<div class="sec">休憩までの長さ（分）</div><div class="card">'
+     + '<label>午前</label><input class="inp" type="number" id="fl_am" value="'+f.len.am+'">'
+     + '<label>午後</label><input class="inp" type="number" id="fl_pm" value="'+f.len.pm+'">'
+     + '<label>夕方</label><input class="inp" type="number" id="fl_ev" value="'+f.len.ev+'">'
+     + '</div>';
+  h += '<div class="sec">時間帯の境目（時）</div><div class="card">'
+     + '<label>午後はここから</label><input class="inp" type="number" id="ff_pm" value="'+f.from.pm+'">'
+     + '<label>夕方はここから</label><input class="inp" type="number" id="ff_ev" value="'+f.from.ev+'">'
+     + '<p class="note">いまは '+SLOTN[slotAt(Date.now())]+' として扱われます（押すときに変えられます）。</p></div>';
+  h += '<div class="sec">区切りの並び（分）</div><div class="card">'
+     + '<input class="inp" type="text" id="fseg" value="'+esc(f.seg.join(", "))+'">'
+     + '<p class="note">左から順に使い、<b>最後の数字はそれ以降ずっと続きます</b>。いまの並びだと——<br>'
+     + '午前: '+segLabel("am")+'<br>午後: '+segLabel("pm")+'<br>夕方: '+segLabel("ev")+'<br><br>'
+     + '端数は最後の区切りに足して、細切れを作らないようにしています。</p></div>';
+  h += '<div class="sec">合図</div><div class="card">'
+     + '<div class="toggle"><b>音を鳴らす</b>'
+     + '<button class="sw'+(f.sound?' on':'')+'" onclick="focusSave();DB.focus.sound=!DB.focus.sound;save();render()"><i></i></button></div>'
+     + '<p class="note">既定はオフです（アプリを前面で開いているときの音の話です）。オフでも、区切りのときは画面の色が変わります。</p>'
+     + '<div class="toggle" style="margin-top:8px"><b>開始時にiPhoneのタイマーへ渡す</b>'
+     + '<button class="sw'+(f.native?' on':'')+'" onclick="focusSave();DB.focus.native=!DB.focus.native;save();render()"><i></i></button></div>'
+     + '<p class="note">ショートカット「'+esc(DB.scName)+'」を使います（名前はホーム画面の設定で変えられます）。<br>'
+     + '<b>閉じていても鳴らせるのは、これだけです。</b>Webページからは通知を出せません。</p></div>';
+  h += '<div class="warn"><b>音を消したときの弱点も書いておきます。</b>没頭を切るのが目的の道具なので、無音にすると、いちばん気づきたいときに気づけません。'
+     + 'オフィスでの事情と、どちらを取るかはご本人の判断です。</div>';
+  h += '<button class="btn save" onclick="focusSave();go(\'focusStart\')">保存して戻る</button>';
+  h += '<button class="btn link" onclick="focusSave();go(\'home\')">ホームへ</button>';
   return h;
 }
 
