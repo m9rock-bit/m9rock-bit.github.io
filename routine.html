@@ -451,7 +451,7 @@ function defaults(){ return [
           「まず短時間から、乗ってきたら伸ばす」を素直に形にしたもの。
    すべて集中の設定画面から変えられます。 */
 var FOCUS_DEF = { len:{am:120,pm:90,ev:50}, from:{pm:12,ev:16}, seg:[15,25,40], sound:false, native:true, notify:true, lastBreak:"" };
-var DB = { v:13, sets:null, chime:true, voice:true, spotifyUrl:"", scName:"ルーティンタイマー", log:[], count:0, focus:null, notes:[], times:[] };
+var DB = { v:13, sets:null, chime:true, voice:true, spotifyUrl:"", scName:"ルーティンタイマー", log:[], count:0, focus:null, notes:[], times:[], sleep:null };
 try{
   var raw = localStorage.getItem(KEY);
   if(raw){
@@ -465,6 +465,7 @@ try{
     if(Array.isArray(p.times)) DB.times = p.times;
     if(typeof p.count==="number" && p.count>=0) DB.count = p.count;
     if(p.focus && typeof p.focus==="object") DB.focus = p.focus;
+    if(p.sleep && typeof p.sleep==="object") DB.sleep = p.sleep;
     if(p.mig_dinner===true) DB.mig_dinner = true;
     if(p.mig_breath478===true) DB.mig_breath478 = true;
     if(DB.count < DB.log.length) DB.count = DB.log.length;
@@ -494,6 +495,11 @@ try{
   if(typeof f.lastBreak !== "string") f.lastBreak = "";
   DB.focus = f;
 })();
+/* v16: 就寝・中途覚醒対応。DB.focusと同じ「無ければ既定で埋める」方式
+   （DB.setsのようなマイグレーション旗は不要＝ステップ型のセットではないため）。 */
+if(!DB.sleep || typeof DB.sleep!=="object") DB.sleep = {active:false, start:0};
+if(typeof DB.sleep.active!=="boolean") DB.sleep.active = false;
+if(typeof DB.sleep.start!=="number") DB.sleep.start = 0;
 if(!DB.sets || !DB.sets.length) DB.sets = defaults();
 if(!DB.sets.some(function(s){return s.rescue})) DB.sets.push(defaults().filter(function(s){return s.rescue})[0]);
 /* 2026-08-15追加：🍽 夕食の準備前。★一度だけ入れる。
@@ -660,6 +666,7 @@ function closeInput(){ inputOpen = null; render(); }
    （render() 自体は止めない。ボタンから呼ぶ描き直しは通す）。 */
 function tickRender(){
   if(inputOpen && view==="run") return;
+  if(wakeInputOpen && view==="wakeTimer") return;   /* v16: 「気になること」入力中は打ち込みを消さない */
   render();
 }
 function ioVal(){ var el = document.getElementById("io_text"); return el ? el.value : ""; }
@@ -1103,9 +1110,36 @@ function toggleStep(i){
     render();
   }
 }
+
+/* v15: タップ式に「スキップ」を追加（自動進行の「次へ」と役割をそろえた）。
+   実際にやっていないので DB.times には記録しない（「順番どおりに進めた項目だけ記録」の線を守る）。
+   もう一度その行をタップすれば toggleStep() の取り消し分岐が効いて、スキップ前の状態に戻せる。 */
+function skipStep(i){
+  var s = setOf(curId);
+  doneSet[i] = "skip";
+  stepAt = Date.now();
+  var next = -1;
+  for(var j=0;j<s.steps.length;j++){ if(!doneSet[j]){ next=j; break; } }
+  curStep = next<0 ? s.steps.length : next;
+  if(allDone()){ chimeDone(); enterDone(); }
+  else {
+    chimeStep();
+    if(s.voice){ var nx = stepsOf(s)[curStep]; if(nx) speak(sayOf(nx)); }
+    render();
+  }
+}
 function enterDone(){
   if(tick) clearInterval(tick); tick=null;
   logRun();          /* 終わりまで来た回は、0ステップでも「押した」事実として残す */
+  /* v16: 中途覚醒対応から自動で始めた呼吸法は、通常の完了画面ではなく
+     🛌就寝の見守り画面へ戻す（呼吸が終わったらまた睡眠モード、というご指示）。 */
+  if(fromWake){
+    fromWake = false;
+    if(tick) clearInterval(tick);
+    tick = setInterval(tickRender, 250);
+    view = "sleep"; render();
+    return;
+  }
   view="done"; render();
 }
 function finishNow(){ enterDone(); }
@@ -1151,6 +1185,12 @@ function render(){
   else if(view==="about") h = viewAbout();
   else if(view==="scale") h = viewScale();
   else if(view==="backup") h = viewBackup();
+  else if(view==="sleep") h = viewSleep();
+  else if(view==="wake") h = viewWake();
+  else if(view==="wakeTimer"){
+    wakeTick();   /* 3分たつと内部で view="run"（呼吸法）に変わることがある */
+    h = (view==="wakeTimer") ? viewWakeTimer() : viewRun();
+  }
   document.getElementById("app").innerHTML = h;
 }
 
@@ -1185,6 +1225,15 @@ function viewHome(){
      + '<small>いまは '+SLOTN[slotAt(Date.now())]+' ・ 休憩まで '+durLabel(DB.focus.len[slotAt(Date.now())]*60)
      + '<br>区切り： '+segLabel(slotAt(Date.now()))
      + '<br>没頭して他のプロジェクトが止まるのを防ぐための、締め切りのタイマーです。</small></button>';
+  h += '<div class="sec">夜</div>';
+  if(DB.sleep.active){
+    h += '<button class="setb" style="border-color:#7ea8c9;background:#181d21" onclick="go(\'sleep\')">🛌 就寝にもどる'
+       + '<small>経過 '+durLabel(sleepElapsed())+'</small></button>';
+  }else{
+    h += '<button class="setb" onclick="sleepGo()">🛌 就寝'
+       + '<small>ベッドに入るタイミングで押します。経過時間の表示と、途中で起きたときのボタンが出ます。'
+       + '<br>プレイリストを再生し、あおむけで楽な姿勢になってから押してください。</small></button>';
+  }
   h += '<div class="sec">崩れてしまったとき</div>';
   rescues().forEach(function(s){
     h += '<button class="setb rescue" onclick="start(\''+s.id+'\')">'+esc(s.icon)+' '+esc(s.name)
@@ -1341,11 +1390,13 @@ function viewRun(){
   h += '<div class="bar"><i style="width:'+spct+'%"></i></div>';
   h += '<p class="note" style="text-align:center;margin-top:9px">この項目に使った時間 <b>'+mmss(stepUsed())+'</b>'
      + (stepExtra[curStep] ? '（延長 +'+durLabel(stepExtra[curStep])+'）' : '')
-     + '<br>ルーティン全体： 経過 '+mmss(elapsed())+' ／ 目安 '+durLabel(lim)+'</p>';
+     + '<br>ルーティン全体： 経過 '+mmss(elapsed())+' ／ 目安 '+durLabel(lim)
+     + '<br>完了予定 約'+hhmm(Date.now()+Math.max(0,l)*1000)+'</p>';
   h += '</div>';
   /* いまの項目を、大きく押せる形で進める */
   if(curStep < st.length){
     h += '<button class="btn big" onclick="toggleStep('+curStep+')">✓ できた — 次へ</button>';
+    h += '<button class="btn ghost" style="margin-top:9px" onclick="skipStep('+curStep+')">↷ この項目をスキップ</button>';
     h += '<div class="row" style="margin-top:9px">'
        + '<button class="btn ghost" style="margin-top:0" onclick="extendStep(60)">＋1分 延長</button>'
        + '<button class="btn ghost" style="margin-top:0" onclick="extendStep(300)">＋5分 延長</button>'
@@ -1471,12 +1522,13 @@ function viewRunAuto(s){
   /* 文言が長いセット（休憩ルーティン等）でも1〜2行に収まるよう字を小さくする */
   var fs = curText.length>26 ? 20 : (curText.length>13 ? 26 : 34);
   h += '<div class="big" style="font-size:'+fs+'px;line-height:1.4;margin:2px 0 8px">'+esc(curText)+'</div>';
-  h += '<div class="big'+(autoPaused?' over':'')+'">'+remainInStep+'</div>';
-  h += '<div class="bigsub">'+(autoPaused ? '一時停止中' : 'このステップの残り秒数')+'</div>';
+  h += '<div class="big'+(autoPaused?' over':'')+'">'+mmss(remainInStep)+'</div>';
+  h += '<div class="bigsub">'+(autoPaused ? '一時停止中' : 'このステップの残り時間')+'</div>';
   h += '<div class="bar"><i style="width:'+Math.max(0,Math.min(100,(e/limitOf(s))*100))+'%"></i></div>';
   h += '<p class="note" style="text-align:center;margin-top:8px">'
      + (nx ? '次： '+esc(nx.text)+'<br>' : '次でおしまいです<br>')
-     + '全体の経過 '+mmss(e)+' ／ 目安 '+durLabel(limitOf(s))+'</p>';
+     + '全体の経過 '+mmss(e)+' ／ 目安 '+durLabel(limitOf(s))
+     + '<br>完了予定 約'+hhmm(Date.now()+Math.max(0,limitOf(s)-e)*1000)+'</p>';
   h += '</div>';
   h += '<p class="note">タップして進める必要はありません。'+(s.voice?'合図（音・声）':'合図（音）')+'に合わせて進めてください。<br>合わない長さのときは「次へ」で先に進めます。</p>';
   h += '<div class="row">';
@@ -1633,6 +1685,11 @@ var fromFocus=false, fShift=0;
 /* v12: 休憩の画面から選んで始めたルーティンかどうか。
    これが立っているセットの完了画面には「次の集中ブロックへ」を出す。 */
 var fromBreak=false;
+/* v16: 中途覚醒対応から呼吸法(breath478)へ自動で入ったかどうか。
+   これが立っているときの完了は、通常の「done」画面ではなく
+   🛌就寝の見守り画面（sleep）へ戻す。 */
+var fromWake=false;
+var wakeKind=null, wakeStart=0, wakeNoteDraft="", wakeInputOpen=false;
 
 /* 呼吸法のセットを探す。idが残っていればそれを、無ければ最初の自動進行セット。
    どちらも無ければ null（ボタン自体を出さない）。 */
@@ -1661,6 +1718,131 @@ function fChime(end){
   play(0);
   play(end ? 900 : 750);
 }
+
+/* ============================================================
+   v16: 🛌 就寝 ＋ 🌃 中途覚醒対応（2026-08-23 ご依頼・回答）
+   ------------------------------------------------------------
+   計画書_2026-08-23_中途覚醒と就寝ルーティンの詳細設計、および
+   Manamiさんの回答（同ファイル✍️回答欄）どおりの流れ:
+
+   1. 🛌 就寝 を押す → 押した瞬間から経過時間を表示する見守り画面
+      （viewSleep）になる。途中で起きたときに押すボタンが常に出る。
+   2. そのボタンを押すと3つの選択肢（炭酸水を飲む／気になることを書く
+      〈自由入力欄つき〉／ストレッチ〈あおむけのみ〉）。
+   3. どれを選んでも3分固定のタイマーが動く。
+   4. 3分たったら合図（音＋画面フラッシュ。iOS Safariは
+      navigator.vibrate 非対応なのでバイブレーションの代わり。
+      §0で既知の制約として明記済み）を出し、そのまま既存の
+      🫁4-7-8呼吸法（breath478）へ自動で入る（fromWake フラグ）。
+   5. 呼吸法が終わったら、また1の見守り画面（sleep）に戻る。
+      経過時間は sleepStart からの通し時間で、中断中も止めない
+      （「経過時間」であって「睡眠時間」ではないための単純化。
+      違う挙動をご希望の場合はお知らせください）。
+
+   記録は「実施したこと」だけ（DB.times に就寝・中途覚醒対応の1行、
+   気になることの内容は addNote 経由で DB.notes）。成功・失敗の判定は
+   一切持たない（8/8の安全4条件）。
+   ============================================================ */
+function sleepGo(){
+  unlockAudio();
+  DB.sleep.active = true;
+  DB.sleep.start = Date.now();
+  save();
+  go("sleep");
+}
+function sleepElapsed(){ return DB.sleep.start ? Math.max(0, Math.floor((Date.now()-DB.sleep.start)/1000)) : 0; }
+function sleepEnd(){
+  if(DB.sleep.active && DB.sleep.start){
+    DB.times.push({ t:DB.sleep.start, sid:"sleep", step:"就寝", plan:null, act:sleepElapsed() });
+    if(DB.times.length > TIMEMAX) DB.times = DB.times.slice(DB.times.length - TIMEMAX);
+  }
+  DB.sleep.active = false; DB.sleep.start = 0;
+  save();
+  go("home");
+}
+function wakeGo(){ go("wake"); }
+var WAKE_LABEL = { soda:"🥤 炭酸水を飲む", write:"✏️ 気になることを書く", stretch:"🧘 ストレッチ（あおむけ）" };
+function wakeChoose(kind){
+  unlockAudio();
+  wakeKind = kind; wakeStart = Date.now(); wakeNoteDraft = ""; wakeInputOpen = false;
+  if(tick) clearInterval(tick);
+  tick = setInterval(tickRender, 250);
+  view = "wakeTimer"; render();
+}
+function wakeInputFocus(){ wakeInputOpen = true; }
+function wakeInputBlur(){ wakeInputOpen = false; render(); }
+function wakeCancel(){
+  if(tick) clearInterval(tick); tick=null;
+  wakeKind = null; wakeStart = 0; wakeNoteDraft = ""; wakeInputOpen = false;
+  go("sleep");
+}
+/* 気づきやすい合図（v11のfChimeと同じ「上がっていく3音を2回」の考え方）。
+   DB.chime の設定に関わらず鳴らす＝force。夜中に気づけないと本末転倒のため。 */
+function wakeChime(){
+  var tones = [660,880,1175];
+  function play(off){
+    tones.forEach(function(f,i){
+      var d = off + i*170;
+      if(d<=0) beep(f,.26,true); else setTimeout(function(){ beep(f,.26,true); }, d);
+    });
+  }
+  play(0); play(750);
+  flashScreen();
+}
+function wakeTick(){
+  if(!wakeStart) return;
+  var left = 180 - Math.floor((Date.now()-wakeStart)/1000);
+  if(left <= 0) wakeFinish();
+}
+function wakeFinish(){
+  if(tick) clearInterval(tick); tick=null;
+  var label = WAKE_LABEL[wakeKind] || "中途覚醒対応";
+  DB.times.push({ t:wakeStart, sid:"sleep", step:"中途覚醒対応（"+label+"）", plan:180, act:180 });
+  if(DB.times.length > TIMEMAX) DB.times = DB.times.slice(DB.times.length - TIMEMAX);
+  if(wakeKind==="write") addNote("sleep", "気になること", wakeNoteDraft);
+  save();
+  wakeKind = null; wakeStart = 0; wakeNoteDraft = ""; wakeInputOpen = false;
+  wakeChime();
+  fromWake = true;
+  start("breath478");
+}
+function viewSleep(){
+  var h = '<h1>🛌 就寝</h1>'
+    + '<p class="sub">'+esc(dayLabel(DB.sleep.start))+' '+hhmm(DB.sleep.start)+' に押しました。おやすみなさい。</p>';
+  h += '<div class="card" style="text-align:center">'
+     + '<div style="font-size:2.4em;font-weight:700">'+durLabel(sleepElapsed())+'</div>'
+     + '<div class="sub" style="margin-top:4px">経過時間</div></div>';
+  h += '<button class="btn" style="margin-top:16px" onclick="wakeGo()">🌃 途中で起きてしまった</button>';
+  h += '<button class="btn ghost" onclick="sleepEnd()">🌅 起床する（終了）</button>';
+  return h;
+}
+function viewWake(){
+  var h = '<h1>🌃 途中で起きたとき</h1>'
+    + '<p class="sub">どれか1つ押してください。3分のタイマーが動きます。</p>';
+  Object.keys(WAKE_LABEL).forEach(function(k){
+    h += '<button class="setb" onclick="wakeChoose(\''+k+'\')">'+esc(WAKE_LABEL[k])+'</button>';
+  });
+  h += '<button class="btn link" onclick="go(\'sleep\')">戻る</button>';
+  return h;
+}
+function viewWakeTimer(){
+  var left = Math.max(0, 180 - Math.floor((Date.now()-wakeStart)/1000));
+  var h = '<h1>'+esc(WAKE_LABEL[wakeKind]||"")+'</h1>';
+  h += '<div class="card" style="text-align:center">'
+     + '<div style="font-size:2.4em;font-weight:700">'+mmss(left)+'</div>'
+     + '<div class="sub" style="margin-top:4px">終わったら自動で4-7-8呼吸法に入ります</div></div>';
+  if(wakeKind==="stretch"){
+    h += '<div class="card"><p class="note">あおむけのまま、無理のない範囲で：<br>'
+       + '①両ひざを抱えて10秒　②片脚ずつ胸に引き寄せて左右5秒ずつ　③両腕を頭上に伸ばして全身伸び10秒</p></div>';
+  }
+  if(wakeKind==="write"){
+    h += '<textarea class="inp" id="wk_text" rows="4" placeholder="解決しようとしなくて大丈夫です。出すだけで構いません。"'
+       + ' onfocus="wakeInputFocus()" onblur="wakeInputBlur()" oninput="wakeNoteDraft=this.value">'+esc(wakeNoteDraft)+'</textarea>';
+  }
+  h += '<button class="btn ghost" style="margin-top:12px" onclick="wakeCancel()">やめてベッドに戻る</button>';
+  return h;
+}
+
 /* v11: 画面全体を2回光らせる。#app の中に入れるとタイマーの再描画で
    消えてしまうので、body直下に置いて時間で片づける（alertLessと同じ手）。 */
 function flashScreen(){
