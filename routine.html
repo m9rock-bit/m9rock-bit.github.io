@@ -441,6 +441,20 @@ function defaults(){ return [
     steps:[
       "60|口をゆすぐ（または歯を磨く）＝今日の食事はここで終わり",
       "120|座って、水か炭酸水を1杯飲み切る"
+    ]},
+  { id:"presleep", icon:"🛌", name:"就寝前のストレッチ", hidden:true, auto:true, voice:true,
+    note:"🛌就寝 を押すと自動で始まります。終わると経過時間の見守り画面に切り替わります。ホームには出しません。",
+    steps:[
+      "30|睡眠用イヤフォンに切り替えてください",
+      "30|寝る前のストレッチを始めます",
+      "30|ポール：内ももローリング（右）。うつ伏せで片脚を横に開き、内ももをポールに乗せて往復",
+      "30|ポール：内ももローリング（左）。反対側も同じ",
+      "60|カエルストレッチ。四つ這いから両膝を左右に開き、すねを床に、つま先は外向き。お尻を後ろに引く",
+      "60|合蹠前屈（バッダコナーサナ）。足裏を合わせて座り、背すじを伸ばしたまま股関節から前に倒す",
+      "30|仰向けフィギュア4（右足首を左膝へ）。下の太ももを両手で胸に引き寄せる",
+      "30|仰向けフィギュア4（左足首を右膝へ）。反対側も同じ",
+      "60|開脚前屈。開ける角度で開脚し、背すじを伸ばしたまま前傾",
+      "30|音声プレイリストに切り替えてください"
     ]}
 ]; }
 
@@ -524,6 +538,19 @@ if(!DB.mig_breath478){
     var at2 = DB.sets.length;
     DB.sets.forEach(function(s,i){ if(s.rescue && i<at2) at2 = i; });
     DB.sets.splice(at2, 0, br);
+  }
+  save();
+}
+/* v16: 🛌 就寝前のストレッチ。同じ原則＝一度だけ差し込み、以後は編集済みの
+   内容（削除・書き換え）を正として扱う。hidden:true なのでホーム一覧には
+   出ない（🛌就寝ボタンから自動で始まる専用の中身）。 */
+if(!DB.mig_presleep){
+  DB.mig_presleep = true;
+  if(!DB.sets.some(function(s){return s.id==="presleep"})){
+    var ps = defaults().filter(function(s){return s.id==="presleep"})[0];
+    var at3 = DB.sets.length;
+    DB.sets.forEach(function(s,i){ if(s.rescue && i<at3) at3 = i; });
+    DB.sets.splice(at3, 0, ps);
   }
   save();
 }
@@ -780,6 +807,18 @@ function beep(f,d,force){
 }
 function chimeStep(){ beep(660,.18); }
 function chimeDone(){ beep(587,.22); setTimeout(function(){beep(880,.45);},200); }
+/* v17: 4-7-8呼吸法の「吸う・止める・吐く」を音のかたちで区別する
+   （2026-08-23ご指摘：声〈TTS〉だけでは違いが分かりにくい）。
+   吸う＝上がる2音（広がるイメージ）／止める＝1音だけ（動かない）／
+   吐く＝下がる2音（縮むイメージ）。文言にこれらの語が無いセットは
+   従来どおり chimeStep() の単音のまま（他のセットの音は変えない）。 */
+function phaseChime(text){
+  var t = String(text||"");
+  if(t.indexOf("吸う")>=0){ beep(523,.14); setTimeout(function(){beep(784,.16);},110); }
+  else if(t.indexOf("止める")>=0){ beep(660,.22); }
+  else if(t.indexOf("吐く")>=0){ beep(784,.14); setTimeout(function(){beep(440,.2);},110); }
+  else chimeStep();
+}
 
 /* --- v4: 音声案内（Web Speech API） -----------------------------
    未対応環境・発話エンジン取得失敗時は、何もせず無音で終わる
@@ -835,16 +874,20 @@ function autoTick(s){
     /* 最後まで来た */
     for(var k=0;k<st.length;k++) doneSet[k] = "done";
     autoFinished = true;
-    if(tick){ clearInterval(tick); tick = null; }
     chimeDone();
-    logRun();
-    view = "done";
+    /* v17: 以前はここで view="done" を直接セットしていたが、それだと
+       enterDone() を経由しないため fromWake / fromPreSleep の分岐
+       （呼吸法→就寝画面へ戻す／就寝前ストレッチ→見守り画面を開始する）が
+       自動進行セットの完了時には効かなかった（タップ式は toggleStep() 経由で
+       enterDone() を呼ぶため効いていた）。enterDone() に一本化する。
+       tick停止・logRun() は enterDone() 側で行う（二重に呼ばない）。 */
+    enterDone();
     return;
   }
   if(idx !== curStep){
     for(var j=curStep; j<idx && j<st.length; j++){ if(!doneSet[j]) doneSet[j] = "done"; }
     curStep = idx;
-    chimeStep();
+    phaseChime(st[idx].text);   /* v17: 呼吸法は吸う/止める/吐くで音を変える。他は従来どおり */
     if(s.voice) speak(sayOf(st[idx]));  /* 3列目があればそれを、無ければ（…）を外した文言を読む */
   }
 }
@@ -928,7 +971,7 @@ function cyclePeriod(st){
 }
 function setOf(id){ for(var i=0;i<DB.sets.length;i++){ if(DB.sets[i].id===id) return DB.sets[i]; } return null; }
 function idxOf(id){ for(var i=0;i<DB.sets.length;i++){ if(DB.sets[i].id===id) return i; } return -1; }
-function normals(){ return DB.sets.filter(function(s){return !s.rescue}); }
+function normals(){ return DB.sets.filter(function(s){return !s.rescue && !s.hidden}); }
 function rescues(){ return DB.sets.filter(function(s){return s.rescue}); }
 function stepsOf(s){ return s.steps.map(parseStep); }
 function sumSec(s){ return stepsOf(s).reduce(function(a,b){return a+b.sec;},0); }
@@ -1033,6 +1076,7 @@ function bkSummary(){ try{ return "セット "+(DB.sets?DB.sets.length:0)+"個 �
 function start(id, fromIndex){
   unlockAudio();   /* v11: 押した操作の中で音を開通させる（自動進行のチャイム対策） */
   fromBreak = false;   /* v12: 休憩から始めた場合は breakStart() が押し直す */
+  fromPreSleep = false;   /* v16: 就寝前ストレッチから始めた場合は sleepGo() が押し直す */
   curId = id; doneSet = {}; curStep = fromIndex||0;
   for(var i=0;i<curStep;i++) doneSet[i] = "skip";
   startAt = Date.now();
@@ -1052,7 +1096,14 @@ function start(id, fromIndex){
   if(s && s.timer && limitOf(s)>0) nativeTimer(limitOf(s));
   else openSpotify(s);   /* set.spotify が入っているセットだけ開く（中で判定） */
 }
-function stop(){ if(tick) clearInterval(tick); tick=null; startAt=0; curId=null; doneSet={}; curStep=0; runIdx=null; autoPaused=false; pauseAt=0; autoFinished=false; stepAt=0; stepExtra={}; runTimes={}; inputOpen=null; }
+function stop(){
+  if(tick) clearInterval(tick); tick=null; startAt=0; curId=null; doneSet={}; curStep=0; runIdx=null; autoPaused=false; pauseAt=0; autoFinished=false; stepAt=0; stepExtra={}; runTimes={}; inputOpen=null;
+  /* v17: 中途覚醒対応／就寝前ストレッチの呼吸法・自動セットを「やめて最初に戻る」
+     等で途中終了したとき、fromWake/fromPreSleepが立ったまま残ると、
+     後日まったく無関係にbreath478等を完了させたときに誤って就寝画面へ
+     飛ばされてしまう（起きたときだけ立てる一時フラグのため、ここで必ず落とす）。 */
+  fromWake=false; fromPreSleep=false;
+}
 /* v14: いまの項目に許された秒数（この回の延長を足したもの）と、その残り */
 function stepSec(i){
   var s = setOf(curId); if(!s) return 60;
@@ -1140,6 +1191,18 @@ function enterDone(){
     view = "sleep"; render();
     return;
   }
+  /* v17: 就寝前のストレッチ(presleep)が終わったら、ここで初めて
+     就寝の経過時間の計測を始める（ストレッチ中の時間は「経過時間」に含めない）。 */
+  if(fromPreSleep){
+    fromPreSleep = false;
+    DB.sleep.active = true;
+    DB.sleep.start = Date.now();
+    save();
+    if(tick) clearInterval(tick);
+    tick = setInterval(tickRender, 250);
+    view = "sleep"; render();
+    return;
+  }
   view="done"; render();
 }
 function finishNow(){ enterDone(); }
@@ -1167,8 +1230,12 @@ function render(){
   if(view==="home") h = viewHome();
   else if(view==="run"){
     var _s = setOf(curId);
-    if(_s && _s.auto) autoTick(_s);   /* 完了すると内部で view="done" に変わることがある */
-    h = (view==="run") ? viewRun() : viewDone();
+    if(_s && _s.auto) autoTick(_s);   /* 完了すると内部でenterDone()経由でview="done"や
+                                          "sleep"（fromWake/fromPreSleep）に変わることがある */
+    if(view==="run") h = viewRun();
+    else if(view==="done") h = viewDone();
+    else return;   /* v17: sleep等、上記以外に変わった場合はenterDone()内のrender()が
+                       既に描画済みなので、ここで重ねて描かない（上書き防止） */
   }
   else if(view==="done") h = viewDone();
   else if(view==="focusStart") h = viewFocusStart();
@@ -1231,8 +1298,8 @@ function viewHome(){
        + '<small>経過 '+durLabel(sleepElapsed())+'</small></button>';
   }else{
     h += '<button class="setb" onclick="sleepGo()">🛌 就寝'
-       + '<small>ベッドに入るタイミングで押します。経過時間の表示と、途中で起きたときのボタンが出ます。'
-       + '<br>プレイリストを再生し、あおむけで楽な姿勢になってから押してください。</small></button>';
+       + '<small>ベッドに入るタイミングで押します。イヤホン切替→寝る前ストレッチ（5分）→プレイリスト切替を案内したあと、'
+       + '経過時間の見守り画面になります。途中で起きたときのボタンもそこに出ます。</small></button>';
   }
   h += '<div class="sec">崩れてしまったとき</div>';
   rescues().forEach(function(s){
@@ -1690,6 +1757,10 @@ var fromBreak=false;
    🛌就寝の見守り画面（sleep）へ戻す。 */
 var fromWake=false;
 var wakeKind=null, wakeStart=0, wakeNoteDraft="", wakeInputOpen=false;
+/* v16: 🛌就寝 を押した直後、就寝前のストレッチ(presleep)を自動実行している間だけ立てる。
+   完了すると（fromWakeと同じ考え方で）通常の「done」ではなく、
+   就寝の見守り画面（sleep）を開始する。 */
+var fromPreSleep=false;
 
 /* 呼吸法のセットを探す。idが残っていればそれを、無ければ最初の自動進行セット。
    どちらも無ければ null（ボタン自体を出さない）。 */
@@ -1743,12 +1814,23 @@ function fChime(end){
    気になることの内容は addNote 経由で DB.notes）。成功・失敗の判定は
    一切持たない（8/8の安全4条件）。
    ============================================================ */
+/* v16→v17: 🛌就寝 は、まず「就寝前のストレッチ」(presleep) を自動実行してから
+   見守り画面(sleep)に入る（2026-08-23ご依頼：イヤホン切替→ストレッチ開始の
+   合図→5分ストレッチ→プレイリスト切替→就寝画面、の順）。
+   presleepセットが見つからない（削除された等）場合は、従来どおり
+   ストレッチを飛ばして直接、見守り画面から始める（壊れないための保険）。 */
 function sleepGo(){
   unlockAudio();
-  DB.sleep.active = true;
-  DB.sleep.start = Date.now();
-  save();
-  go("sleep");
+  if(setOf("presleep")){
+    start("presleep");
+    fromPreSleep = true;
+    render();
+  }else{
+    DB.sleep.active = true;
+    DB.sleep.start = Date.now();
+    save();
+    go("sleep");
+  }
 }
 function sleepElapsed(){ return DB.sleep.start ? Math.max(0, Math.floor((Date.now()-DB.sleep.start)/1000)) : 0; }
 function sleepEnd(){
