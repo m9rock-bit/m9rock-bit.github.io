@@ -217,6 +217,20 @@ label{display:block;font-size:12.5px;color:#8a94a6;margin:12px 0 5px}
      時間の欄は出しません）。ステップを増減したときに総時間だけ古いまま
      残る事故を防ぐためです。
 
+   v15: 2026-08-19（チャットでの追加ご依頼）
+     「仕事に集中する」を休日にも使いたい／休日は細切れにしか動けないので、
+     一区切りごとに次にやることを入力してから始めたい
+     - 名前を **🎯 集中ブロック** に変更（ご選択）。中の用語（ブロック＝
+       休憩まで、区切り＝その中の単位）とそのまま揃う。
+     - 3つめの始め方 **「その都度、決めて始める」**（fMode="ask"）を新設。
+       区切りは先に決めず、1つずつその場で決める。長さもその都度。
+       区切りが終わるたびに**時計を止めて**「次に何をしますか」と聞く
+       （考えているあいだを数えない。fUnpause(false) で「ずれ」にも足さない）。
+       上限（休憩まで）は時間帯から決まり、それを超える長さを入れても
+       休憩までで止まる。
+     - その都度決めた中身は記録に残す（rec.items）。記録画面に「A → B → C」
+       と並ぶ。
+
    v14: 2026-08-19（チャットでの追加ご依頼・まとめて8点）
      1. タップ式の数字を「その項目の残り時間」に（全体は下に小さく添える）
      2. 項目ごとの**実績時間**を記録（DB.times。延長した分も含む実測）
@@ -441,20 +455,6 @@ function defaults(){ return [
     steps:[
       "60|口をゆすぐ（または歯を磨く）＝今日の食事はここで終わり",
       "120|座って、水か炭酸水を1杯飲み切る"
-    ]},
-  { id:"presleep", icon:"🛌", name:"就寝前のストレッチ", hidden:true, auto:true, voice:true,
-    note:"🛌就寝 を押すと自動で始まります。終わると経過時間の見守り画面に切り替わります。ホームには出しません。",
-    steps:[
-      "30|睡眠用イヤフォンに切り替えてください",
-      "30|寝る前のストレッチを始めます",
-      "30|ポール：内ももローリング（右）。うつ伏せで片脚を横に開き、内ももをポールに乗せて往復",
-      "30|ポール：内ももローリング（左）。反対側も同じ",
-      "60|カエルストレッチ。四つ這いから両膝を左右に開き、すねを床に、つま先は外向き。お尻を後ろに引く",
-      "60|合蹠前屈（バッダコナーサナ）。足裏を合わせて座り、背すじを伸ばしたまま股関節から前に倒す",
-      "30|仰向けフィギュア4（右足首を左膝へ）。下の太ももを両手で胸に引き寄せる",
-      "30|仰向けフィギュア4（左足首を右膝へ）。反対側も同じ",
-      "60|開脚前屈。開ける角度で開脚し、背すじを伸ばしたまま前傾",
-      "30|音声プレイリストに切り替えてください"
     ]}
 ]; }
 
@@ -465,7 +465,7 @@ function defaults(){ return [
           「まず短時間から、乗ってきたら伸ばす」を素直に形にしたもの。
    すべて集中の設定画面から変えられます。 */
 var FOCUS_DEF = { len:{am:120,pm:90,ev:50}, from:{pm:12,ev:16}, seg:[15,25,40], sound:false, native:true, notify:true, lastBreak:"" };
-var DB = { v:13, sets:null, chime:true, voice:true, spotifyUrl:"", scName:"ルーティンタイマー", log:[], count:0, focus:null, notes:[], times:[], sleep:null };
+var DB = { v:14, sets:null, chime:true, voice:true, spotifyUrl:"", scName:"ルーティンタイマー", log:[], count:0, focus:null, notes:[], times:[] };
 try{
   var raw = localStorage.getItem(KEY);
   if(raw){
@@ -479,7 +479,6 @@ try{
     if(Array.isArray(p.times)) DB.times = p.times;
     if(typeof p.count==="number" && p.count>=0) DB.count = p.count;
     if(p.focus && typeof p.focus==="object") DB.focus = p.focus;
-    if(p.sleep && typeof p.sleep==="object") DB.sleep = p.sleep;
     if(p.mig_dinner===true) DB.mig_dinner = true;
     if(p.mig_breath478===true) DB.mig_breath478 = true;
     if(DB.count < DB.log.length) DB.count = DB.log.length;
@@ -509,11 +508,6 @@ try{
   if(typeof f.lastBreak !== "string") f.lastBreak = "";
   DB.focus = f;
 })();
-/* v16: 就寝・中途覚醒対応。DB.focusと同じ「無ければ既定で埋める」方式
-   （DB.setsのようなマイグレーション旗は不要＝ステップ型のセットではないため）。 */
-if(!DB.sleep || typeof DB.sleep!=="object") DB.sleep = {active:false, start:0};
-if(typeof DB.sleep.active!=="boolean") DB.sleep.active = false;
-if(typeof DB.sleep.start!=="number") DB.sleep.start = 0;
 if(!DB.sets || !DB.sets.length) DB.sets = defaults();
 if(!DB.sets.some(function(s){return s.rescue})) DB.sets.push(defaults().filter(function(s){return s.rescue})[0]);
 /* 2026-08-15追加：🍽 夕食の準備前。★一度だけ入れる。
@@ -538,19 +532,6 @@ if(!DB.mig_breath478){
     var at2 = DB.sets.length;
     DB.sets.forEach(function(s,i){ if(s.rescue && i<at2) at2 = i; });
     DB.sets.splice(at2, 0, br);
-  }
-  save();
-}
-/* v16: 🛌 就寝前のストレッチ。同じ原則＝一度だけ差し込み、以後は編集済みの
-   内容（削除・書き換え）を正として扱う。hidden:true なのでホーム一覧には
-   出ない（🛌就寝ボタンから自動で始まる専用の中身）。 */
-if(!DB.mig_presleep){
-  DB.mig_presleep = true;
-  if(!DB.sets.some(function(s){return s.id==="presleep"})){
-    var ps = defaults().filter(function(s){return s.id==="presleep"})[0];
-    var at3 = DB.sets.length;
-    DB.sets.forEach(function(s,i){ if(s.rescue && i<at3) at3 = i; });
-    DB.sets.splice(at3, 0, ps);
   }
   save();
 }
@@ -693,7 +674,9 @@ function closeInput(){ inputOpen = null; render(); }
    （render() 自体は止めない。ボタンから呼ぶ描き直しは通す）。 */
 function tickRender(){
   if(inputOpen && view==="run") return;
-  if(wakeInputOpen && view==="wakeTimer") return;   /* v16: 「気になること」入力中は打ち込みを消さない */
+  /* v15: 「次に何をしますか」の入力待ちも同じ。描き直すと打ち込んだ文字が消える。
+     このあいだ時計は止めてあるので、描き直さなくても表示はずれない。 */
+  if(fAsking && view==="focus") return;
   render();
 }
 function ioVal(){ var el = document.getElementById("io_text"); return el ? el.value : ""; }
@@ -807,18 +790,6 @@ function beep(f,d,force){
 }
 function chimeStep(){ beep(660,.18); }
 function chimeDone(){ beep(587,.22); setTimeout(function(){beep(880,.45);},200); }
-/* v17: 4-7-8呼吸法の「吸う・止める・吐く」を音のかたちで区別する
-   （2026-08-23ご指摘：声〈TTS〉だけでは違いが分かりにくい）。
-   吸う＝上がる2音（広がるイメージ）／止める＝1音だけ（動かない）／
-   吐く＝下がる2音（縮むイメージ）。文言にこれらの語が無いセットは
-   従来どおり chimeStep() の単音のまま（他のセットの音は変えない）。 */
-function phaseChime(text){
-  var t = String(text||"");
-  if(t.indexOf("吸う")>=0){ beep(523,.14); setTimeout(function(){beep(784,.16);},110); }
-  else if(t.indexOf("止める")>=0){ beep(660,.22); }
-  else if(t.indexOf("吐く")>=0){ beep(784,.14); setTimeout(function(){beep(440,.2);},110); }
-  else chimeStep();
-}
 
 /* --- v4: 音声案内（Web Speech API） -----------------------------
    未対応環境・発話エンジン取得失敗時は、何もせず無音で終わる
@@ -874,20 +845,16 @@ function autoTick(s){
     /* 最後まで来た */
     for(var k=0;k<st.length;k++) doneSet[k] = "done";
     autoFinished = true;
+    if(tick){ clearInterval(tick); tick = null; }
     chimeDone();
-    /* v17: 以前はここで view="done" を直接セットしていたが、それだと
-       enterDone() を経由しないため fromWake / fromPreSleep の分岐
-       （呼吸法→就寝画面へ戻す／就寝前ストレッチ→見守り画面を開始する）が
-       自動進行セットの完了時には効かなかった（タップ式は toggleStep() 経由で
-       enterDone() を呼ぶため効いていた）。enterDone() に一本化する。
-       tick停止・logRun() は enterDone() 側で行う（二重に呼ばない）。 */
-    enterDone();
+    logRun();
+    view = "done";
     return;
   }
   if(idx !== curStep){
     for(var j=curStep; j<idx && j<st.length; j++){ if(!doneSet[j]) doneSet[j] = "done"; }
     curStep = idx;
-    phaseChime(st[idx].text);   /* v17: 呼吸法は吸う/止める/吐くで音を変える。他は従来どおり */
+    chimeStep();
     if(s.voice) speak(sayOf(st[idx]));  /* 3列目があればそれを、無ければ（…）を外した文言を読む */
   }
 }
@@ -971,7 +938,7 @@ function cyclePeriod(st){
 }
 function setOf(id){ for(var i=0;i<DB.sets.length;i++){ if(DB.sets[i].id===id) return DB.sets[i]; } return null; }
 function idxOf(id){ for(var i=0;i<DB.sets.length;i++){ if(DB.sets[i].id===id) return i; } return -1; }
-function normals(){ return DB.sets.filter(function(s){return !s.rescue && !s.hidden}); }
+function normals(){ return DB.sets.filter(function(s){return !s.rescue}); }
 function rescues(){ return DB.sets.filter(function(s){return s.rescue}); }
 function stepsOf(s){ return s.steps.map(parseStep); }
 function sumSec(s){ return stepsOf(s).reduce(function(a,b){return a+b.sec;},0); }
@@ -1076,7 +1043,6 @@ function bkSummary(){ try{ return "セット "+(DB.sets?DB.sets.length:0)+"個 �
 function start(id, fromIndex){
   unlockAudio();   /* v11: 押した操作の中で音を開通させる（自動進行のチャイム対策） */
   fromBreak = false;   /* v12: 休憩から始めた場合は breakStart() が押し直す */
-  fromPreSleep = false;   /* v16: 就寝前ストレッチから始めた場合は sleepGo() が押し直す */
   curId = id; doneSet = {}; curStep = fromIndex||0;
   for(var i=0;i<curStep;i++) doneSet[i] = "skip";
   startAt = Date.now();
@@ -1096,14 +1062,7 @@ function start(id, fromIndex){
   if(s && s.timer && limitOf(s)>0) nativeTimer(limitOf(s));
   else openSpotify(s);   /* set.spotify が入っているセットだけ開く（中で判定） */
 }
-function stop(){
-  if(tick) clearInterval(tick); tick=null; startAt=0; curId=null; doneSet={}; curStep=0; runIdx=null; autoPaused=false; pauseAt=0; autoFinished=false; stepAt=0; stepExtra={}; runTimes={}; inputOpen=null;
-  /* v17: 中途覚醒対応／就寝前ストレッチの呼吸法・自動セットを「やめて最初に戻る」
-     等で途中終了したとき、fromWake/fromPreSleepが立ったまま残ると、
-     後日まったく無関係にbreath478等を完了させたときに誤って就寝画面へ
-     飛ばされてしまう（起きたときだけ立てる一時フラグのため、ここで必ず落とす）。 */
-  fromWake=false; fromPreSleep=false;
-}
+function stop(){ if(tick) clearInterval(tick); tick=null; startAt=0; curId=null; doneSet={}; curStep=0; runIdx=null; autoPaused=false; pauseAt=0; autoFinished=false; stepAt=0; stepExtra={}; runTimes={}; inputOpen=null; }
 /* v14: いまの項目に許された秒数（この回の延長を足したもの）と、その残り */
 function stepSec(i){
   var s = setOf(curId); if(!s) return 60;
@@ -1161,48 +1120,9 @@ function toggleStep(i){
     render();
   }
 }
-
-/* v15: タップ式に「スキップ」を追加（自動進行の「次へ」と役割をそろえた）。
-   実際にやっていないので DB.times には記録しない（「順番どおりに進めた項目だけ記録」の線を守る）。
-   もう一度その行をタップすれば toggleStep() の取り消し分岐が効いて、スキップ前の状態に戻せる。 */
-function skipStep(i){
-  var s = setOf(curId);
-  doneSet[i] = "skip";
-  stepAt = Date.now();
-  var next = -1;
-  for(var j=0;j<s.steps.length;j++){ if(!doneSet[j]){ next=j; break; } }
-  curStep = next<0 ? s.steps.length : next;
-  if(allDone()){ chimeDone(); enterDone(); }
-  else {
-    chimeStep();
-    if(s.voice){ var nx = stepsOf(s)[curStep]; if(nx) speak(sayOf(nx)); }
-    render();
-  }
-}
 function enterDone(){
   if(tick) clearInterval(tick); tick=null;
   logRun();          /* 終わりまで来た回は、0ステップでも「押した」事実として残す */
-  /* v16: 中途覚醒対応から自動で始めた呼吸法は、通常の完了画面ではなく
-     🛌就寝の見守り画面へ戻す（呼吸が終わったらまた睡眠モード、というご指示）。 */
-  if(fromWake){
-    fromWake = false;
-    if(tick) clearInterval(tick);
-    tick = setInterval(tickRender, 250);
-    view = "sleep"; render();
-    return;
-  }
-  /* v17: 就寝前のストレッチ(presleep)が終わったら、ここで初めて
-     就寝の経過時間の計測を始める（ストレッチ中の時間は「経過時間」に含めない）。 */
-  if(fromPreSleep){
-    fromPreSleep = false;
-    DB.sleep.active = true;
-    DB.sleep.start = Date.now();
-    save();
-    if(tick) clearInterval(tick);
-    tick = setInterval(tickRender, 250);
-    view = "sleep"; render();
-    return;
-  }
   view="done"; render();
 }
 function finishNow(){ enterDone(); }
@@ -1230,12 +1150,8 @@ function render(){
   if(view==="home") h = viewHome();
   else if(view==="run"){
     var _s = setOf(curId);
-    if(_s && _s.auto) autoTick(_s);   /* 完了すると内部でenterDone()経由でview="done"や
-                                          "sleep"（fromWake/fromPreSleep）に変わることがある */
-    if(view==="run") h = viewRun();
-    else if(view==="done") h = viewDone();
-    else return;   /* v17: sleep等、上記以外に変わった場合はenterDone()内のrender()が
-                       既に描画済みなので、ここで重ねて描かない（上書き防止） */
+    if(_s && _s.auto) autoTick(_s);   /* 完了すると内部で view="done" に変わることがある */
+    h = (view==="run") ? viewRun() : viewDone();
   }
   else if(view==="done") h = viewDone();
   else if(view==="focusStart") h = viewFocusStart();
@@ -1252,12 +1168,6 @@ function render(){
   else if(view==="about") h = viewAbout();
   else if(view==="scale") h = viewScale();
   else if(view==="backup") h = viewBackup();
-  else if(view==="sleep") h = viewSleep();
-  else if(view==="wake") h = viewWake();
-  else if(view==="wakeTimer"){
-    wakeTick();   /* 3分たつと内部で view="run"（呼吸法）に変わることがある */
-    h = (view==="wakeTimer") ? viewWakeTimer() : viewRun();
-  }
   document.getElementById("app").innerHTML = h;
 }
 
@@ -1287,20 +1197,11 @@ function viewHome(){
        + '<small>'+durLabel(limitOf(s))+' ・ '+countLabel(s)
        + (s.note ? '<br>'+esc(s.note) : '')+'</small></button>';
   });
-  h += '<div class="sec">仕事</div>';
-  h += '<button class="setb" onclick="focusGo()">🎯 仕事に集中する'
+  h += '<div class="sec">時間を区切って進める</div>';
+  h += '<button class="setb" onclick="focusGo()">🎯 集中ブロック'
      + '<small>いまは '+SLOTN[slotAt(Date.now())]+' ・ 休憩まで '+durLabel(DB.focus.len[slotAt(Date.now())]*60)
      + '<br>区切り： '+segLabel(slotAt(Date.now()))
-     + '<br>没頭して他のプロジェクトが止まるのを防ぐための、締め切りのタイマーです。</small></button>';
-  h += '<div class="sec">夜</div>';
-  if(DB.sleep.active){
-    h += '<button class="setb" style="border-color:#7ea8c9;background:#181d21" onclick="go(\'sleep\')">🛌 就寝にもどる'
-       + '<small>経過 '+durLabel(sleepElapsed())+'</small></button>';
-  }else{
-    h += '<button class="setb" onclick="sleepGo()">🛌 就寝'
-       + '<small>ベッドに入るタイミングで押します。イヤホン切替→寝る前ストレッチ（5分）→プレイリスト切替を案内したあと、'
-       + '経過時間の見守り画面になります。途中で起きたときのボタンもそこに出ます。</small></button>';
-  }
+     + '<br>時間を区切って進めるためのタイマーです。仕事の日にも、休日にも。</small></button>';
   h += '<div class="sec">崩れてしまったとき</div>';
   rescues().forEach(function(s){
     h += '<button class="setb rescue" onclick="start(\''+s.id+'\')">'+esc(s.icon)+' '+esc(s.name)
@@ -1414,6 +1315,7 @@ function viewLog(){
         var what = r.d>0 ? (r.d+' / '+r.n) : '押しました';
         s += '<div class="lrow"><span class="lt">'+hhmm(r.t)+'</span>'
            + '<span class="ln">'+esc(r.icon)+' '+esc(r.name)
+           + (r.items && r.items.length ? '<em style="display:block;font-style:normal;color:#8a94a6;font-size:12.5px;margin-top:3px">'+esc(r.items.join(' → '))+'</em>' : '')
            + (r.memo ? '<em style="display:block;font-style:normal;color:#8a94a6;font-size:12.5px;margin-top:3px">'+esc(r.memo)+'</em>' : '')
            + '</span>'
            + '<span class="ld">'+what+'</span></div>';
@@ -1457,13 +1359,11 @@ function viewRun(){
   h += '<div class="bar"><i style="width:'+spct+'%"></i></div>';
   h += '<p class="note" style="text-align:center;margin-top:9px">この項目に使った時間 <b>'+mmss(stepUsed())+'</b>'
      + (stepExtra[curStep] ? '（延長 +'+durLabel(stepExtra[curStep])+'）' : '')
-     + '<br>ルーティン全体： 経過 '+mmss(elapsed())+' ／ 目安 '+durLabel(lim)
-     + '<br>完了予定 約'+hhmm(Date.now()+Math.max(0,l)*1000)+'</p>';
+     + '<br>ルーティン全体： 経過 '+mmss(elapsed())+' ／ 目安 '+durLabel(lim)+'</p>';
   h += '</div>';
   /* いまの項目を、大きく押せる形で進める */
   if(curStep < st.length){
     h += '<button class="btn big" onclick="toggleStep('+curStep+')">✓ できた — 次へ</button>';
-    h += '<button class="btn ghost" style="margin-top:9px" onclick="skipStep('+curStep+')">↷ この項目をスキップ</button>';
     h += '<div class="row" style="margin-top:9px">'
        + '<button class="btn ghost" style="margin-top:0" onclick="extendStep(60)">＋1分 延長</button>'
        + '<button class="btn ghost" style="margin-top:0" onclick="extendStep(300)">＋5分 延長</button>'
@@ -1589,13 +1489,12 @@ function viewRunAuto(s){
   /* 文言が長いセット（休憩ルーティン等）でも1〜2行に収まるよう字を小さくする */
   var fs = curText.length>26 ? 20 : (curText.length>13 ? 26 : 34);
   h += '<div class="big" style="font-size:'+fs+'px;line-height:1.4;margin:2px 0 8px">'+esc(curText)+'</div>';
-  h += '<div class="big'+(autoPaused?' over':'')+'">'+mmss(remainInStep)+'</div>';
-  h += '<div class="bigsub">'+(autoPaused ? '一時停止中' : 'このステップの残り時間')+'</div>';
+  h += '<div class="big'+(autoPaused?' over':'')+'">'+remainInStep+'</div>';
+  h += '<div class="bigsub">'+(autoPaused ? '一時停止中' : 'このステップの残り秒数')+'</div>';
   h += '<div class="bar"><i style="width:'+Math.max(0,Math.min(100,(e/limitOf(s))*100))+'%"></i></div>';
   h += '<p class="note" style="text-align:center;margin-top:8px">'
      + (nx ? '次： '+esc(nx.text)+'<br>' : '次でおしまいです<br>')
-     + '全体の経過 '+mmss(e)+' ／ 目安 '+durLabel(limitOf(s))
-     + '<br>完了予定 約'+hhmm(Date.now()+Math.max(0,limitOf(s)-e)*1000)+'</p>';
+     + '全体の経過 '+mmss(e)+' ／ 目安 '+durLabel(limitOf(s))+'</p>';
   h += '</div>';
   h += '<p class="note">タップして進める必要はありません。'+(s.voice?'合図（音・声）':'合図（音）')+'に合わせて進めてください。<br>合わない長さのときは「次へ」で先に進めます。</p>';
   h += '<div class="row">';
@@ -1749,18 +1648,14 @@ var fPaused=false, fPauseAt=0, fFlash=0, fDone=false, fIdx=null, fMemo="";
    fShift    … 集中の時計を止めていた合計秒数。休憩の終わりが何秒うしろへずれたか。
                iPhone標準タイマーは止まらないので、このズレは画面に正直に出す。 */
 var fromFocus=false, fShift=0;
+/* v15: 「その都度決める」モード（休日の細切れ用）の状態
+   fCap    … このブロックの上限（秒）。ふつうのモードでは fTotal() と同じ。
+   fLabels … 区切りごとに、そのとき決めた「やること」
+   fAsking … いま「次は何をしますか」の入力待ちか（このあいだ時計は止める） */
+var fCap = 0, fLabels = [], fAsking = false;
 /* v12: 休憩の画面から選んで始めたルーティンかどうか。
    これが立っているセットの完了画面には「次の集中ブロックへ」を出す。 */
 var fromBreak=false;
-/* v16: 中途覚醒対応から呼吸法(breath478)へ自動で入ったかどうか。
-   これが立っているときの完了は、通常の「done」画面ではなく
-   🛌就寝の見守り画面（sleep）へ戻す。 */
-var fromWake=false;
-var wakeKind=null, wakeStart=0, wakeNoteDraft="", wakeInputOpen=false;
-/* v16: 🛌就寝 を押した直後、就寝前のストレッチ(presleep)を自動実行している間だけ立てる。
-   完了すると（fromWakeと同じ考え方で）通常の「done」ではなく、
-   就寝の見守り画面（sleep）を開始する。 */
-var fromPreSleep=false;
 
 /* 呼吸法のセットを探す。idが残っていればそれを、無ければ最初の自動進行セット。
    どちらも無ければ null（ボタン自体を出さない）。 */
@@ -1789,142 +1684,6 @@ function fChime(end){
   play(0);
   play(end ? 900 : 750);
 }
-
-/* ============================================================
-   v16: 🛌 就寝 ＋ 🌃 中途覚醒対応（2026-08-23 ご依頼・回答）
-   ------------------------------------------------------------
-   計画書_2026-08-23_中途覚醒と就寝ルーティンの詳細設計、および
-   Manamiさんの回答（同ファイル✍️回答欄）どおりの流れ:
-
-   1. 🛌 就寝 を押す → 押した瞬間から経過時間を表示する見守り画面
-      （viewSleep）になる。途中で起きたときに押すボタンが常に出る。
-   2. そのボタンを押すと3つの選択肢（炭酸水を飲む／気になることを書く
-      〈自由入力欄つき〉／ストレッチ〈あおむけのみ〉）。
-   3. どれを選んでも3分固定のタイマーが動く。
-   4. 3分たったら合図（音＋画面フラッシュ。iOS Safariは
-      navigator.vibrate 非対応なのでバイブレーションの代わり。
-      §0で既知の制約として明記済み）を出し、そのまま既存の
-      🫁4-7-8呼吸法（breath478）へ自動で入る（fromWake フラグ）。
-   5. 呼吸法が終わったら、また1の見守り画面（sleep）に戻る。
-      経過時間は sleepStart からの通し時間で、中断中も止めない
-      （「経過時間」であって「睡眠時間」ではないための単純化。
-      違う挙動をご希望の場合はお知らせください）。
-
-   記録は「実施したこと」だけ（DB.times に就寝・中途覚醒対応の1行、
-   気になることの内容は addNote 経由で DB.notes）。成功・失敗の判定は
-   一切持たない（8/8の安全4条件）。
-   ============================================================ */
-/* v16→v17: 🛌就寝 は、まず「就寝前のストレッチ」(presleep) を自動実行してから
-   見守り画面(sleep)に入る（2026-08-23ご依頼：イヤホン切替→ストレッチ開始の
-   合図→5分ストレッチ→プレイリスト切替→就寝画面、の順）。
-   presleepセットが見つからない（削除された等）場合は、従来どおり
-   ストレッチを飛ばして直接、見守り画面から始める（壊れないための保険）。 */
-function sleepGo(){
-  unlockAudio();
-  if(setOf("presleep")){
-    start("presleep");
-    fromPreSleep = true;
-    render();
-  }else{
-    DB.sleep.active = true;
-    DB.sleep.start = Date.now();
-    save();
-    go("sleep");
-  }
-}
-function sleepElapsed(){ return DB.sleep.start ? Math.max(0, Math.floor((Date.now()-DB.sleep.start)/1000)) : 0; }
-function sleepEnd(){
-  if(DB.sleep.active && DB.sleep.start){
-    DB.times.push({ t:DB.sleep.start, sid:"sleep", step:"就寝", plan:null, act:sleepElapsed() });
-    if(DB.times.length > TIMEMAX) DB.times = DB.times.slice(DB.times.length - TIMEMAX);
-  }
-  DB.sleep.active = false; DB.sleep.start = 0;
-  save();
-  go("home");
-}
-function wakeGo(){ go("wake"); }
-var WAKE_LABEL = { soda:"🥤 炭酸水を飲む", write:"✏️ 気になることを書く", stretch:"🧘 ストレッチ（あおむけ）" };
-function wakeChoose(kind){
-  unlockAudio();
-  wakeKind = kind; wakeStart = Date.now(); wakeNoteDraft = ""; wakeInputOpen = false;
-  if(tick) clearInterval(tick);
-  tick = setInterval(tickRender, 250);
-  view = "wakeTimer"; render();
-}
-function wakeInputFocus(){ wakeInputOpen = true; }
-function wakeInputBlur(){ wakeInputOpen = false; render(); }
-function wakeCancel(){
-  if(tick) clearInterval(tick); tick=null;
-  wakeKind = null; wakeStart = 0; wakeNoteDraft = ""; wakeInputOpen = false;
-  go("sleep");
-}
-/* 気づきやすい合図（v11のfChimeと同じ「上がっていく3音を2回」の考え方）。
-   DB.chime の設定に関わらず鳴らす＝force。夜中に気づけないと本末転倒のため。 */
-function wakeChime(){
-  var tones = [660,880,1175];
-  function play(off){
-    tones.forEach(function(f,i){
-      var d = off + i*170;
-      if(d<=0) beep(f,.26,true); else setTimeout(function(){ beep(f,.26,true); }, d);
-    });
-  }
-  play(0); play(750);
-  flashScreen();
-}
-function wakeTick(){
-  if(!wakeStart) return;
-  var left = 180 - Math.floor((Date.now()-wakeStart)/1000);
-  if(left <= 0) wakeFinish();
-}
-function wakeFinish(){
-  if(tick) clearInterval(tick); tick=null;
-  var label = WAKE_LABEL[wakeKind] || "中途覚醒対応";
-  DB.times.push({ t:wakeStart, sid:"sleep", step:"中途覚醒対応（"+label+"）", plan:180, act:180 });
-  if(DB.times.length > TIMEMAX) DB.times = DB.times.slice(DB.times.length - TIMEMAX);
-  if(wakeKind==="write") addNote("sleep", "気になること", wakeNoteDraft);
-  save();
-  wakeKind = null; wakeStart = 0; wakeNoteDraft = ""; wakeInputOpen = false;
-  wakeChime();
-  fromWake = true;
-  start("breath478");
-}
-function viewSleep(){
-  var h = '<h1>🛌 就寝</h1>'
-    + '<p class="sub">'+esc(dayLabel(DB.sleep.start))+' '+hhmm(DB.sleep.start)+' に押しました。おやすみなさい。</p>';
-  h += '<div class="card" style="text-align:center">'
-     + '<div style="font-size:2.4em;font-weight:700">'+durLabel(sleepElapsed())+'</div>'
-     + '<div class="sub" style="margin-top:4px">経過時間</div></div>';
-  h += '<button class="btn" style="margin-top:16px" onclick="wakeGo()">🌃 途中で起きてしまった</button>';
-  h += '<button class="btn ghost" onclick="sleepEnd()">🌅 起床する（終了）</button>';
-  return h;
-}
-function viewWake(){
-  var h = '<h1>🌃 途中で起きたとき</h1>'
-    + '<p class="sub">どれか1つ押してください。3分のタイマーが動きます。</p>';
-  Object.keys(WAKE_LABEL).forEach(function(k){
-    h += '<button class="setb" onclick="wakeChoose(\''+k+'\')">'+esc(WAKE_LABEL[k])+'</button>';
-  });
-  h += '<button class="btn link" onclick="go(\'sleep\')">戻る</button>';
-  return h;
-}
-function viewWakeTimer(){
-  var left = Math.max(0, 180 - Math.floor((Date.now()-wakeStart)/1000));
-  var h = '<h1>'+esc(WAKE_LABEL[wakeKind]||"")+'</h1>';
-  h += '<div class="card" style="text-align:center">'
-     + '<div style="font-size:2.4em;font-weight:700">'+mmss(left)+'</div>'
-     + '<div class="sub" style="margin-top:4px">終わったら自動で4-7-8呼吸法に入ります</div></div>';
-  if(wakeKind==="stretch"){
-    h += '<div class="card"><p class="note">あおむけのまま、無理のない範囲で：<br>'
-       + '①両ひざを抱えて10秒　②片脚ずつ胸に引き寄せて左右5秒ずつ　③両腕を頭上に伸ばして全身伸び10秒</p></div>';
-  }
-  if(wakeKind==="write"){
-    h += '<textarea class="inp" id="wk_text" rows="4" placeholder="解決しようとしなくて大丈夫です。出すだけで構いません。"'
-       + ' onfocus="wakeInputFocus()" onblur="wakeInputBlur()" oninput="wakeNoteDraft=this.value">'+esc(wakeNoteDraft)+'</textarea>';
-  }
-  h += '<button class="btn ghost" style="margin-top:12px" onclick="wakeCancel()">やめてベッドに戻る</button>';
-  return h;
-}
-
 /* v11: 画面全体を2回光らせる。#app の中に入れるとタイマーの再描画で
    消えてしまうので、body直下に置いて時間で片づける（alertLessと同じ手）。 */
 function flashScreen(){
@@ -1992,28 +1751,67 @@ function focusBegin(mode){
   if(DB.focus.notify && notifyState()==="default") askNotify();
   fMode = mode;
   fSlot = fSlotNow();
-  fSegs = segsFor(fSlot);
+  fLabels = []; fAsking = false;
+  if(mode === "ask"){
+    /* v15: 区切りは先に決めない。1つずつ、そのときに決める。
+       上限（休憩まで）だけ時間帯から決めておく。 */
+    fSegs = [];
+    fCap = Math.max(60, (DB.focus.len[fSlot]||60)*60);
+  }else{
+    fSegs = segsFor(fSlot);
+    fCap = fTotal();
+  }
   fStart = Date.now(); fSeg = 0; fPaused = false; fPauseAt = 0;
   fDone = false; fIdx = null; fMemo = ""; fFlash = Date.now();
   fromFocus = false; fShift = 0;
+  if(mode === "ask"){ fAsking = true; fPauseAt = Date.now(); fPaused = true; }
   if(tick) clearInterval(tick);
   tick = setInterval(tickRender, 250);
   view = "focus"; render();
-  if(DB.focus.native) nativeTimer(fTotal());   /* 休憩までの1本だけ渡す（画面遷移を伴うので最後） */
+  if(DB.focus.native) nativeTimer(fBlockSec());   /* 休憩までの1本だけ渡す（画面遷移を伴うので最後） */
 }
+/* v15: 入力された「次にやること」と長さで、次の区切りを始める。 */
+function askStart(){
+  var t = "", m = 0;
+  var e1 = document.getElementById("ask_text"), e2 = document.getElementById("ask_min");
+  if(e1) t = String(e1.value||"").trim();
+  if(e2) m = parseInt(e2.value,10);
+  if(!(m>0)) m = 15;
+  var sec = Math.min(m*60, Math.max(60, fCap - fElapsed()));   /* 休憩までを超えない */
+  fSegs.push(sec);
+  fLabels.push(t || "（決めずに始めた）");
+  fSeg = fSegs.length - 1;
+  fAsking = false;
+  fUnpause(false);        /* 考えていた時間は「ずれ」に数えない */
+  fFlash = Date.now();
+  render();
+}
+/* いま何分にするかのボタン（入力欄に書き込むだけ） */
+function askMin(m){ var e = document.getElementById("ask_min"); if(e){ e.value = m; } }
 /* 自動セットと同じ考え方：経過秒から、いま何番目の区切りにいるべきかを毎回逆算する。
    setTimeoutの連鎖にすると、iOSでバックグラウンドに回った瞬間に止まって戻らない。 */
 function focusTick(){
-  if(fPaused || fDone) return;
+  if(fPaused || fDone || fAsking) return;
   var e = fElapsed(), cum = 0, idx = -1;
   for(var i=0;i<fSegs.length;i++){ cum += fSegs[i]; if(e < cum){ idx = i; break; } }
+  /* v15: その都度モードは、区切りが終わるたびに止めて次を聞く。
+     上限（休憩まで）に届いたときだけ、ふつうに終わる。 */
+  if(fMode==="ask" && idx < 0 && e < fCap){
+    fSeg = fSegs.length;
+    fAsking = true; fPauseAt = Date.now(); fPaused = true;
+    fFlash = Date.now();
+    fChime(false); flashScreen();
+    notifyNow("▶ ひと区切り",
+      (fLabels.length ? "「"+fLabels[fLabels.length-1]+"」が終わりました。" : "") + "次に何をするか決めてください。");
+    return;   /* 描き直しは呼び出し元の render() に任せる（二重に描かない） */
+  }
   if(idx < 0){
     fSeg = fSegs.length; fDone = true;
     if(tick){ clearInterval(tick); tick = null; }
     fChime(true);
     flashScreen();
     notifyNow("休憩です（" + SLOTN[fSlotNow()] + "）",
-              durLabel(fTotal()) + "たちました。ここで一度離れてください。");
+              durLabel(fBlockSec()) + "たちました。ここで一度離れてください。");
     setTitle("");
     logFocus();
     view = "focusDone";
@@ -2035,15 +1833,19 @@ var TITLE0 = "B.M.C. 切り替えルーティン";
 function setTitle(t){ try{ document.title = t ? t : TITLE0; }catch(e){} }
 function focusTitle(){
   if(!fStart || fDone){ setTitle(""); return; }
-  if((Date.now() - fFlash) < 8000){ setTitle("▶ 切り替え！ — 集中"); return; }
+  if(fAsking){ setTitle("▶ 次を決める — 集中ブロック"); return; }
+  if((Date.now() - fFlash) < 8000){ setTitle("▶ 切り替え！ — 集中ブロック"); return; }
   setTitle(mmss(fLeftAll()) + (fPaused ? " ⏸" : "") + " — 休憩まで");
 }
 /* 止めていた分だけ開始時刻を後ろへずらす＝経過秒はそのまま、終わりが遅くなる。
    ずらした合計（fShift）を持っておき、画面に出す。 */
-function fUnpause(){
+function fUnpause(count){
   if(!fPaused) return 0;
   var d = Date.now() - fPauseAt;
-  fStart += d; fShift += Math.floor(d/1000);
+  fStart += d;
+  /* v15: 「その都度決める」の入力待ちは、そもそも数えない前提の間なので
+     「うしろへずれた分」には足さない（毎回警告が出ても意味がないため）。 */
+  if(count !== false) fShift += Math.floor(d/1000);
   fPaused = false; fPauseAt = 0;
   return d;
 }
@@ -2079,7 +1881,9 @@ function focusBack(){
   tick = setInterval(tickRender, 250);
   view = "focus"; render();
 }
-function fLeftAll(){ return Math.max(0, fTotal() - fElapsed()); }
+/* v15: ブロックの上限。ふつうのモードは区切りの合計、その都度モードは fCap。 */
+function fBlockSec(){ return (fMode==="ask") ? fCap : fTotal(); }
+function fLeftAll(){ return Math.max(0, fBlockSec() - fElapsed()); }
 function focusSkip(){
   var base = fPaused ? fPauseAt : Date.now();
   fStart = base - (fSegEnd(fSeg)+0.05)*1000;
@@ -2102,11 +1906,13 @@ function focusReset(){
   if(tick){ clearInterval(tick); tick = null; }
   setTitle("");
   fStart=0; fSegs=[]; fSeg=0; fPaused=false; fPauseAt=0; fDone=false; fIdx=null; fList=[]; fMemo="";
-  fromFocus=false; fShift=0;
+  fromFocus=false; fShift=0; fCap=0; fLabels=[]; fAsking=false;
 }
 function logFocus(){
-  var rec = { t:fStart, id:"focus", icon:"🎯", name:"仕事に集中（"+SLOTN[fSlotNow()]+"）",
-              d:Math.min(fSeg, fSegs.length), n:fSegs.length, sec:fElapsed(), memo:fMemo||"" };
+  var rec = { t:fStart, id:"focus", icon:"🎯",
+              name:"集中ブロック（"+SLOTN[fSlotNow()]+(fMode==="ask"?"・その都度":"")+"）",
+              d:Math.min(fSeg, fSegs.length), n:fSegs.length, sec:fElapsed(), memo:fMemo||"",
+              items: fMode==="ask" ? fLabels.slice(0) : [] };   /* v15: その都度決めた中身を残す */
   if(fIdx===null){
     DB.log.push(rec); DB.count++;
     if(DB.log.length > LOGMAX) DB.log = DB.log.slice(DB.log.length - LOGMAX);
@@ -2138,8 +1944,8 @@ function focusMemo(){
 /* --------- 集中：始める前の画面 --------- */
 function viewFocusStart(){
   var sl = fSlotNow(), segs = segsFor(sl);
-  var h = '<h1>🎯 仕事に集中する</h1>'
-    + '<p class="sub">押した瞬間から、休憩までの時間を数えます。<br>途中の区切りは「別のところへ移る合図」です。</p>';
+  var h = '<h1>🎯 集中ブロック</h1>'
+    + '<p class="sub">押した瞬間から、休憩までの時間を数えます。<br>途中の区切りは「次へ移る合図」です。仕事の日にも、休日にも使えます。</p>';
   h += '<div class="card"><div class="big ok" style="font-size:40px">'+durLabel(DB.focus.len[sl]*60)+'</div>'
      + '<div class="bigsub">'+SLOTN[sl]+' ・ 休憩まで</div>'
      + '<div class="row" style="margin-top:10px">'
@@ -2151,12 +1957,19 @@ function viewFocusStart(){
   h += '<label>このブロックで手をつけること（1行に1つ）</label>'
      + '<textarea id="f_list" style="min-height:96px;font-family:inherit;font-size:14px" placeholder="空のままでも始められます。&#10;例）A案件の企画書のたたき&#10;例）B案件の見積もり確認">'
      + esc(fList.join("\n"))+'</textarea>'
-     + '<p class="note">書いておくと、区切りのたびに「次はこれ」と出ます。<br><b>書かなくても始められます。</b>先に決めた行き先があると、漂流しにくくなります。</p>';
+     + '<p class="note">書いておくと、区切りのたびに「次はこれ」と出ます。<br><b>書かなくても始められます。</b>先に決めた行き先があると、漂流しにくくなります。<br>'
+     + '<b>「その都度、決めて始める」を選ぶときは、ここは空のままで構いません。</b></p>';
   h += '<div class="sec">始める</div>';
   h += '<button class="btn" onclick="focusBegin(\'rotate\')">順に回して始める</button>';
-  h += '<p class="note">区切りのたびに、書いた行き先を上から順に案内します。没頭して他が止まるのを防ぎたいとき。</p>';
+  h += '<p class="note">区切りのたびに、上に書いた行き先を順に案内します。没頭して他が止まるのを防ぎたいとき。</p>';
   h += '<button class="btn ghost" onclick="focusBegin(\'one\')">1つに集中して始める</button>';
   h += '<p class="note">区切りは「いま何分経ったか」を知らせるだけ。続けるか移るかは、その場で決めます。</p>';
+  /* v15: 休日など、先にまとめて決められないとき用 */
+  h += '<button class="btn ghost" onclick="focusBegin(\'ask\')">その都度、決めて始める</button>';
+  h += '<p class="note"><b>上の欄は使いません。</b>区切りが終わるたびに「次に何をしますか」と聞き、'
+     + '入力してから次が始まります。長さもその都度決められます。<br>'
+     + '<b>先にまとめて決められないとき</b>（休日など、細切れにしか動けないとき）はこちらです。'
+     + '考えているあいだ、時計は止まります。</p>';
   if(notifyState()==="granted" && DB.focus.notify){
     h += '<div class="hint">このブラウザでは<b>区切りと休憩のたびにPCの通知</b>が出ます。タブを裏にしていても届きます（裏タブだと最大1分ほど遅れることがあります）。</div>';
   }else if(notifyState()==="default" && DB.focus.notify){
@@ -2175,16 +1988,48 @@ function viewFocusStart(){
 
 /* --------- 集中：実行中 --------- */
 function viewFocus(){
-  var e = fElapsed(), total = fTotal(), leftAll = Math.max(0, total - e);
+  var e = fElapsed(), total = fBlockSec(), leftAll = Math.max(0, total - e);
   var segLeft = focusSegLeft(), flash = (Date.now() - fFlash) < 8000;
-  var h = '<h1>🎯 集中（'+SLOTN[fSlotNow()]+'）</h1>';
+  var h = '<h1>🎯 集中ブロック（'+SLOTN[fSlotNow()]+'）</h1>';
+  /* v15: その都度モードの「次は何をしますか」。ここで時計は止まっている。 */
+  if(fAsking){
+    var doneN = fSegs.length;
+    h += '<div class="card"><div class="big ok" style="font-size:40px">'+durLabel(leftAll)+'</div>'
+       + '<div class="bigsub">休憩まで（時計は止まっています）</div></div>';
+    if(doneN){
+      h += '<div class="hint"><b>ひと区切り終わりました。</b>ここまで： '
+         + esc(fLabels.join(" → "))+'</div>';
+    }
+    h += '<label>次に何をしますか</label>'
+       + '<input class="inp" type="text" id="ask_text" placeholder="例）洗濯を畳む／本を読む／メールを片づける">'
+       + '<label>どれくらい</label>'
+       + '<div class="row" style="margin-bottom:8px">'
+       + [10,15,25,40].map(function(m){ return '<button class="btn ghost" style="margin-top:0" onclick="askMin('+m+')">'+m+'分</button>'; }).join('')
+       + '</div>'
+       + '<div class="stline"><input class="inp stsec" type="number" inputmode="numeric" id="ask_min" value="15"><span class="stunit">分</span>'
+       + '<button class="btn" style="margin-top:0;flex:1" onclick="askStart()">これで始める</button></div>'
+       + '<p class="note">書かずに始めても構いません。<b>1つずつ決めるほうが、動き出しやすいときのための形です。</b><br>'
+       + '休憩までの残りを超える長さを入れても、休憩までで止まります。</p>';
+    h += '<button class="btn ghost" onclick="focusFinish()">ここで終える</button>';
+    h += '<button class="btn link" onclick="focusLeave()">やめて最初に戻る</button>';
+    return h;
+  }
   h += '<div class="card"'+(flash?' style="border-color:#e0a86a;background:#211d18"':'')+'>';
   h += '<div class="big'+(fPaused?' over':'')+'">'+mmss(leftAll)+'</div>';
   h += '<div class="bigsub">'+(fPaused?'一時停止中':'休憩まで')+'</div>';
-  h += '<div class="bar"><i style="width:'+Math.max(0,Math.min(100,(e/total)*100))+'%"></i></div>';
-  h += '<p class="note" style="text-align:center;margin-top:9px">区切り '+Math.min(fSeg+1,fSegs.length)+' / '+fSegs.length
+  h += '<div class="bar"><i style="width:'+Math.max(0,Math.min(100,(e/Math.max(1,total))*100))+'%"></i></div>';
+  h += '<p class="note" style="text-align:center;margin-top:9px">'
+     + (fMode==="ask" ? '区切り '+fSegs.length+'つめ' : '区切り '+Math.min(fSeg+1,fSegs.length)+' / '+fSegs.length)
      + ' ・ この区切りの残り <b>'+mmss(segLeft)+'</b></p>';
   h += '</div>';
+  if(fMode==="ask"){
+    h += '<div class="card"'+(flash?' style="border-color:#e0a86a"':'')+'>'
+       + '<p class="note" style="margin:0">いま</p>'
+       + '<div style="font-size:19px;font-weight:700;margin:3px 0 9px;line-height:1.5">'+esc(fLabels[fSeg]||"（決めずに始めた）")+'</div>'
+       + '<p class="note" style="margin:0">終わったら、次に何をするかをまた聞きます。</p>'
+       + (fLabels.length>1 ? '<p class="note" style="margin:7px 0 0">ここまで： '+esc(fLabels.slice(0,-1).join(" → "))+'</p>' : '')
+       + '</div>';
+  }
   if(fMode==="rotate" && fList.length){
     h += '<div class="card"'+(flash?' style="border-color:#e0a86a"':'')+'>'
        + '<p class="note" style="margin:0">いま</p>'
@@ -2197,7 +2042,7 @@ function viewFocus(){
   }else if(fMode==="rotate"){
     h += '<div class="card"><p class="note" style="margin:0">行き先を書かずに始めました。区切りの合図だけ出します。</p></div>';
   }
-  if(flash){
+  if(flash && fMode!=="ask"){
     h += '<div class="hint"><b>▶ 切り替えの合図です。</b>'
        + (fMode==="rotate" && fList.length ? '「'+esc(fItem(fSeg))+'」へ移ってください。' : 'いま'+Math.round(fSegEnd(fSeg-1)/60)+'分たちました。続けるか移るか、ここで一度決めてください。')
        + '</div>';
@@ -2232,7 +2077,7 @@ function viewFocusDone(){
   var h = '<h1>'+(full ? '休憩です' : 'ここまで')+'</h1>';
   h += '<div class="card"><div class="big ok">'+mmss(fElapsed())+'</div>'
      + '<div class="bigsub">'+SLOTN[fSlotNow()]+' ・ 区切り '+Math.min(fSeg,fSegs.length)+' / '+fSegs.length+'</div></div>';
-  if(full) h += '<div class="hint">'+durLabel(fTotal())+'たちました。<b>ここで一度離れてください。</b>次のブロックは、戻ってきてからまた押せます。</div>';
+  if(full) h += '<div class="hint">'+durLabel(fBlockSec())+'たちました。<b>ここで一度離れてください。</b>次のブロックは、戻ってきてからまた押せます。</div>';
   else h += '<div class="hint">途中で終えました。<b>0か1かではありません。</b>次の合図でまた押せます。</div>';
   h += '<label>このブロックで出せたもの（任意・1行）</label>'
      + '<input class="inp" type="text" id="f_memo" value="'+esc(fMemo)+'" placeholder="例）企画書の骨子まで" onchange="focusMemo()">'
