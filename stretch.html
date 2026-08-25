@@ -86,6 +86,18 @@ textarea{width:100%;height:150px;background:#12161d;color:#a8b4c6;border:1px sol
 .warnbox{background:#2a1d18;border:1px solid #4a3226;border-radius:12px;padding:14px;font-size:13px;line-height:1.75;color:#f0c9b4;margin-bottom:14px}
 .warnbox b{color:#ffb995}
 .hide{display:none}
+.badge.imp{background:#2a2438;color:#c3aef0}
+.pv{border-bottom:1px solid #232b38;padding:9px 0;font-size:13.5px;line-height:1.6;color:#e8ecf2}
+.pv i{font-style:normal;color:#7fd1c1;font-weight:600;font-size:12.5px}
+.pv small{display:block;color:#8a94a6;font-size:12px;margin-top:3px;line-height:1.65}
+.errbox{background:#2a1d18;border:1px solid #4a3226;border-radius:12px;padding:13px;font-size:12.5px;line-height:1.85;color:#f0c9b4;margin-bottom:12px}
+.errbox b{color:#ffb995;display:block;margin-bottom:5px}
+.skipbox{background:#191d26;border:1px solid #2c3441;border-radius:12px;padding:13px;font-size:12px;line-height:1.85;color:#8a94a6;margin-bottom:12px}
+.skipbox b{color:#c8d2e0;display:block;margin-bottom:5px}
+textarea.big{height:240px;font-size:12px;color:#e8ecf2}
+.spec{white-space:pre-wrap;font-family:ui-monospace,Menlo,monospace;font-size:11.5px;line-height:1.75;color:#a8b4c6;
+  background:#12161d;border:1px solid #2c3441;border-radius:10px;padding:12px;max-height:340px;overflow:auto;
+  -webkit-user-select:text;user-select:text}
 </style>
 </head>
 <body>
@@ -195,6 +207,120 @@ const CHECKS=[
  {k:"forward",label:"前屈",type:"select",opts:["0：指先が床","1：手のひらが床","2：拳が床"]}
 ];
 
+/* ===================== 取り込みフォーマット v1 ===================== */
+const FMT_SAMPLE = [
+"#BMC-STRETCH v1",
+"プログラム名: 肩まわりリセット",
+"タグ: デスクワーク後",
+"説明: 肩と胸を開いて、丸まった背中を戻す。",
+"---",
+"種目名 | 秒数 | 左右 | やり方 | できないときは",
+"胸を開く（ドアフレーム） | 30 | 右 | ドア枠に前腕をつけ、足を一歩前に出して体重を移す。胸の前側が伸びる。肩をすくめない。 | 肘の高さを肩より下げる。壁の角でもよい。",
+"胸を開く（ドアフレーム） | 30 | 左 | 反対側も同じ。 | 肘の高さを下げる。",
+"首の側屈 | 20 |  | 座って片手で反対側の頭を軽く倒す。引っ張らず、頭の重みだけ。 | 手を添えず、頭の重みだけで倒す。"
+].join("\n");
+
+const FMT = [
+"【B.M.C. ストレッチアプリ 取り込みフォーマット v1】",
+"",
+"次の書式でストレッチプログラムを出力してください。このテキストをそのままアプリに貼り付けると、プログラムとして取り込まれます。",
+"",
+FMT_SAMPLE,
+"",
+"■ 書き方の決まり",
+"1. はじめに「プログラム名:」「タグ:」「説明:」を書く。タグは「就寝前」「デスクワーク後」のような、いつ・どこでやるかの短い言葉。",
+"2. 開始前に警告を出したいとき（サウナ室内・入浴後など）だけ「注意: 〜」の行を足す。不要なら行ごと省く。",
+"3. 区切り線（---）の下は1行が1種目。縦棒 | で5つに区切り、順番は必ず「種目名 | 秒数 | 左右 | やり方 | できないときは」。",
+"4. 左右がある種目は「右」「左」を書き、左右を別々の2行に分ける（アプリは1行ずつ順に進むため）。左右のない種目は3つめを空欄にする。",
+"5. 秒数は 30 ／ 30秒 ／ 1分30秒 のどれでもよい。1種目あたり10〜120秒を目安に。",
+"6. 「やり方」は実施中に画面に出る手順。1〜3文で、体の位置・どこが伸びるか・注意点を入れる。",
+"7. 「できないときは」は緩和策（タオルを使う／可動域を半分にする／膝の下にクッション等）。全種目に必ず書く。",
+"8. 種目名・やり方・緩和策の中では縦棒 | と全角の ｜ を使わない。",
+"9. プログラム全体の所要時間は秒数の合計からアプリが自動計算するので、書かなくてよい。",
+"10. 複数のプログラムを一度に出すときは、2つめ以降も「プログラム名:」の行から続けて書けばよい。",
+"11. コードブロックで囲んで出力しても構わない（アプリ側で無視する）。",
+"",
+"■ 作るときの前提（このアプリの持ち主）",
+"・目標は「180度開脚」「合蹠で膝を床につける」「牛の顔のポーズ」。股関節まわりと肩の柔軟性が中心。",
+"・iPhoneで再生し、種目名・左右・秒数を音声で読み上げる。種目名は聞いて分かる長さにする。",
+"・痛みを我慢させる指示は書かない。「痛気持ちいいの手前で止める」方針。"
+].join("\n");
+
+function parseSec(t){
+  t=String(t==null?"":t).trim().replace(/[０-９]/g,function(c){return String.fromCharCode(c.charCodeAt(0)-0xFEE0);});
+  if(!t) return null;
+  var m=t.match(/^(?:(\d+)\s*(?:分|min|m))?\s*(?:(\d+)\s*(?:秒|sec|s))?$/i);
+  if(m&&(m[1]||m[2])) return (+(m[1]||0))*60+(+(m[2]||0));
+  m=t.match(/^(\d+(?:\.\d+)?)$/);
+  if(m) return Math.round(+m[1]);
+  return null;
+}
+
+const FKEY={"プログラム名":"name","名前":"name","プログラム":"name","タイトル":"name","program":"name",
+  "タグ":"tag","場面":"tag","いつ":"tag",
+  "説明":"desc","概要":"desc","ねらい":"desc","目的":"desc",
+  "注意":"warn","警告":"warn",
+  "時間":"_","所要時間":"_","合計":"_","合計時間":"_","目安":"_"};
+
+function parseImport(text){
+  const progs=[],errs=[],skips=[];
+  const lines=String(text||"").replace(/\r/g,"").split("\n");
+  let p=null;
+  lines.forEach(function(raw,i){
+    const ln=i+1;
+    let s=raw.replace(/　/g," ").trim();
+    if(!s) return;
+    if(s.slice(0,3)==="```") return;
+    if(/^[-=—ー─＝]{3,}$/.test(s)) return;
+    if(s.charAt(0)==="#") return;
+    s=s.replace(/^[・･]\s*/,"").replace(/^[-*]\s+/,"").replace(/^\d+[.)]\s+/,"");
+    const t=s.replace(/｜/g,"|");
+    const k=s.match(/^([^:：|｜]{1,8})\s*[:：]\s*(.*)$/);
+    if(k && FKEY[k[1].trim()]!==undefined && t.indexOf("|")<0){
+      const f=FKEY[k[1].trim()], v=k[2].trim();
+      if(f==="_") return;
+      if(f==="name"){
+        if(!v){ errs.push(ln+"行目：プログラム名が空です"); return; }
+        p={name:v,tag:"",desc:"",warn:"",steps:[],line:ln}; progs.push(p); return;
+      }
+      if(!p){ errs.push(ln+"行目：「プログラム名:」より前に「"+k[1]+"」があります"); return; }
+      p[f]=v; return;
+    }
+    if(t.indexOf("|")>=0){
+      const c=t.split("|").map(function(x){return x.trim();});
+      if(/^(種目名?|名前|ポーズ名?)$/.test(c[0])&&/^(秒数?|時間)$/.test(c[1]||"")) return;
+      if(/^[-–—:：\s]*$/.test(c.join(""))) return;
+      if(!p){ errs.push(ln+"行目：「プログラム名:」がまだ書かれていません"); return; }
+      if(!c[0]){ errs.push(ln+"行目：種目名が空です"); return; }
+      const sec=parseSec(c[1]||"");
+      if(sec===null||sec<=0){ errs.push(ln+"行目：秒数が読み取れません（"+(c[1]?c[1]:"空欄")+"）"); return; }
+      if(sec>1800){ errs.push(ln+"行目：秒数が長すぎます（"+sec+"秒）"); return; }
+      let side=(c[2]||"").trim();
+      if(/^([-–—ー]|なし|無し|none)$/i.test(side)) side="";
+      p.steps.push({n:c[0],s:sec,side:side||null,how:(c[3]||"").trim(),ease:(c[4]||"").trim()});
+      return;
+    }
+    skips.push(ln+"行目：" + (s.length>26?s.slice(0,26)+"…":s));
+  });
+  progs.forEach(function(q){
+    if(!q.steps.length) errs.push(q.line+"行目：「"+q.name+"」に種目が1つもありません");
+  });
+  if(!progs.length) errs.push("プログラムが見つかりません。「プログラム名: 〜」の行が必要です。");
+  return {progs:progs,errs:errs,skips:skips};
+}
+
+function progToText(p){
+  const L=["#BMC-STRETCH v1","プログラム名: "+p.name];
+  if(p.tag) L.push("タグ: "+p.tag);
+  if(p.desc) L.push("説明: "+p.desc);
+  if(typeof p.warn==="string"&&p.warn) L.push("注意: "+p.warn);
+  L.push("---","種目名 | 秒数 | 左右 | やり方 | できないときは");
+  p.steps.forEach(function(s){
+    L.push([s.n,s.s+"秒",s.side||"",s.how||"",s.ease||""].join(" | "));
+  });
+  return L.join("\n");
+}
+
 /* ===================== 保存 ===================== */
 const KEY="bmc_stretch_v1";
 const DEF={prep:5,voice:1,beep:1};
@@ -202,11 +328,26 @@ let DB={sessions:[],checks:[],settings:{}};
 try{const r=localStorage.getItem(KEY); if(r) DB=JSON.parse(r);}catch(e){}
 if(!DB.sessions) DB.sessions=[];
 if(!DB.checks) DB.checks=[];
+if(!DB.progs) DB.progs=[];      /* v5: 取り込んだプログラム */
 DB.settings=Object.assign({},DEF,DB.settings||{});
 const S=()=>DB.settings;
 function save(){try{localStorage.setItem(KEY,JSON.stringify(DB));}catch(e){alert("端末に保存できませんでした。記録画面から書き出して保管してください。");}}
 const today=()=>new Date().toLocaleDateString("sv-SE");
 const fmt=s=>Math.floor(s/60)+":"+String(Math.floor(s%60)).padStart(2,"0");
+const esc=t=>String(t==null?"":t).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const sumSec=p=>p.steps.reduce((a,s)=>a+(s.s||0),0);
+function durLabel(sec){
+  sec=Math.max(0,Math.round(sec));
+  const h=Math.floor(sec/3600),m=Math.floor(sec%3600/60),s=sec%60;
+  if(h) return h+"時間"+(m?m+"分":"");
+  if(!m) return s+"秒";
+  return m+"分"+(s?s+"秒":"");
+}
+function getProg(k){
+  if(!k) return null;
+  if(P[k]) return P[k];
+  return DB.progs.filter(x=>x.id===k)[0]||null;
+}
 
 function streak(){
   const days=[...new Set(DB.sessions.map(s=>s.date))].sort().reverse();
@@ -229,8 +370,19 @@ function render(){
   if(view==="check") return check();
   if(view==="log") return log();
   if(view==="set") return settings();
+  if(view==="imp") return impView();
+  if(view==="impc") return impConfirm();
+  if(view==="impt") return impTextView();
+  if(view==="spec") return specView();
 }
 
+function pcard(k,p,imported){
+  return `
+      <button class="card" onclick="start('${k}')">
+        <div class="t">${esc(p.name)}<span class="badge ${p.cls||""}">${durLabel(sumSec(p))}</span>${p.tag?`<span class="badge">${esc(p.tag)}</span>`:""}${imported?`<span class="badge imp">取り込み</span>`:""}</div>
+        ${p.desc?`<div class="d">${esc(p.desc)}</div>`:""}
+      </button>`;
+}
 function home(){
   const n=DB.sessions.filter(s=>s.date===today()).length;
   app.innerHTML=`
@@ -238,11 +390,11 @@ function home(){
     <p class="sub">目標：180度開脚 ／ 合蹠で膝を床へ ／ 牛の顔のポーズ<br>
     連続 <b style="color:#7fd1c1">${streak()}</b> 日 ・ 今日 ${n} 回実施</p>
     <div class="sec">プログラム</div>
-    ${Object.keys(P).map(k=>{const p=P[k];return `
-      <button class="card" onclick="start('${k}')">
-        <div class="t">${p.name}<span class="badge ${p.cls}">${p.time}</span><span class="badge">${p.tag}</span></div>
-        <div class="d">${p.desc}</div>
-      </button>`}).join("")}
+    ${Object.keys(P).map(k=>pcard(k,P[k],false)).join("")}
+    ${DB.progs.length?`<div class="sec">取り込んだプログラム</div>`+DB.progs.map(p=>pcard(p.id,p,true)).join(""):""}
+    <div class="sec">プログラムを増やす</div>
+    <button class="card" onclick="go('imp')"><div class="t">AIが書いたプログラムを取り込む</div>
+      <div class="d">AIに渡すフォーマットをコピーして、書いてもらったテキストを貼り付けるだけです${DB.progs.length?" ／ 取り込み済み "+DB.progs.length+"件":""}</div></button>
     <div class="sec">記録</div>
     <button class="card" onclick="go('check')"><div class="t">週1回のセルフチェック</div>
       <div class="d">${DB.checks.length?"前回："+DB.checks[DB.checks.length-1].date:"まだ記録がありません"} ・ 日曜の夜、体が冷えているときに測る</div></button>
@@ -265,7 +417,8 @@ function settings(){
     <label>カウントダウン音<small>残り3秒からのビープ音</small></label>${sw("s_beep",s.beep)}
     <button class="btn" onclick="saveSet()">保存する</button>
     <button class="btn ghost" onclick="go('home')">戻る</button>
-    <p class="note">バージョン：v4（2026-08-08）／この表示が出ていれば更新版です。<br>
+    <p class="note">バージョン：v5（2026-08-25）／この表示が出ていれば更新版です。<br>
+    v5でAIが書いたプログラムの取り込みに対応し、所要時間を秒数の合計から自動計算するようにしました。<br>
     v3で姿勢の線画イラストを削除しました（分かりづらいとのご指摘のため）。フォームは各種目の説明文と「できない・つらいときは」を参照してください。</p>`;
 }
 function saveSet(){
@@ -296,6 +449,120 @@ function saveCheck(){
     v[c.k]=c.type==="number"?(e.value===""?null:parseFloat(e.value)):parseInt(e.value);});
   DB.checks.push({date:today(),v,memo:document.getElementById("c_memo").value});
   save(); alert("保存しました"); go("home");
+}
+
+/* ===================== 取り込み ===================== */
+let impText="", impBuf=null;
+
+function impView(){
+  app.innerHTML=`
+    <h1>プログラムの取り込み</h1>
+    <p class="sub">AIに書いてもらったストレッチプログラムを、テキストのまま貼り付けて取り込みます。
+    はじめに下の「AIに渡すフォーマット」をコピーしてAIに見せ、その書式で書いてもらってください。</p>
+    <button class="btn ghost" onclick="go('spec')">AIに渡すフォーマットを見る・コピーする</button>
+    <label>プログラムのテキスト<small>AIの回答をそのまま貼り付けてください。前後に余計な文章やコードブロックが付いていても取り込めます。</small></label>
+    <textarea id="imp_t" class="big" placeholder="プログラム名: 〜">${esc(impText)}</textarea>
+    <button class="btn" onclick="impCheck()">内容を確認する</button>
+    <button class="btn ghost" onclick="go('home')">戻る</button>
+    ${DB.progs.length?`<div class="sec">取り込み済み</div>`+DB.progs.map(p=>`
+      <div class="log"><b>${esc(p.name)}</b> ・ ${p.steps.length}種目 ・ ${durLabel(sumSec(p))}${p.at?" ・ "+p.at+"取り込み":""}
+        <div class="row" style="margin-top:8px">
+          <button class="btn sm ghost" onclick="showText('${p.id}')">テキストを見る</button>
+          <button class="btn sm ghost" onclick="delProg('${p.id}')">削除</button>
+        </div></div>`).join(""):""}
+    <p class="note">取り込んだプログラムは記録と同じくこの端末のブラウザ内に保存されます。内容を直したいときは「テキストを見る」でコピーして直し、取り込み直してください（同じプログラム名なら上書きされます）。</p>`;
+}
+function impCheck(){
+  impText=document.getElementById("imp_t").value;
+  impBuf=parseImport(impText);
+  go("impc");
+}
+const dupName=n=>DB.progs.some(p=>p.name===n);
+
+function impConfirm(){
+  const b=impBuf||{progs:[],errs:["テキストがありません"],skips:[]};
+  const ok=b.progs.filter(p=>p.name&&p.steps.length);
+  app.innerHTML=`
+    <h1>取り込みの確認</h1>
+    ${b.errs.length?`<div class="errbox"><b>取り込めなかった行があります</b>${b.errs.map(esc).join("<br>")}</div>`:""}
+    ${(b.skips&&b.skips.length)?`<div class="skipbox"><b>次の行は読み飛ばしました</b>${b.skips.map(esc).join("<br>")}<br><span style="color:#6f7a8c">あいさつ文や見出しなら問題ありません。種目のつもりの行がここに出ていたら、縦棒 | での区切りを直してください。</span></div>`:""}
+    ${ok.map(p=>`
+      <div class="sec">${esc(p.name)}</div>
+      <p class="sub">${p.tag?esc(p.tag)+" ・ ":""}${p.steps.length}種目 ・ ${durLabel(sumSec(p))}
+      ${p.desc?"<br>"+esc(p.desc):""}
+      ${dupName(p.name)?`<br><b style="color:#f0a68a">同じ名前のプログラムが既にあります。取り込むと上書きされます。</b>`:""}</p>
+      ${typeof p.warn==="string"&&p.warn?`<div class="warnbox"><b>開始前の注意：</b>${esc(p.warn)}</div>`:""}
+      ${p.steps.map((s,i)=>`<div class="pv">${i+1}. ${esc(s.n)}${s.side?"（"+esc(s.side)+"）":""} <i>${durLabel(s.s)}</i>
+        <small>${s.how?esc(s.how):"⚠ やり方の説明がありません"}</small>
+        <small>できないときは：${s.ease?esc(s.ease):"⚠ 記載がありません"}</small></div>`).join("")}`).join("")}
+    ${ok.length?`<button class="btn" onclick="impSave()">${ok.length>1?ok.length+"件を取り込む":"このプログラムを取り込む"}</button>`
+               :`<p class="sub">取り込めるプログラムがありませんでした。</p>`}
+    <button class="btn ghost" onclick="go('imp')">戻ってテキストを直す</button>`;
+}
+function impSave(){
+  const ok=(impBuf&&impBuf.progs||[]).filter(p=>p.name&&p.steps.length);
+  if(!ok.length) return;
+  ok.forEach(p=>{
+    const ex=DB.progs.filter(x=>x.name===p.name)[0];
+    const rec={
+      id: ex?ex.id:("u"+Date.now().toString(36)+Math.floor(Math.random()*1296).toString(36)),
+      name:p.name, tag:p.tag||"", desc:p.desc||"", warn:p.warn||"",
+      steps:p.steps, at:today()
+    };
+    if(ex) DB.progs[DB.progs.indexOf(ex)]=rec; else DB.progs.push(rec);
+  });
+  save();
+  impBuf=null; impText="";
+  alert(ok.length+"件のプログラムを取り込みました");
+  go("home");
+}
+function delProg(id){
+  const p=DB.progs.filter(x=>x.id===id)[0];
+  if(!p) return;
+  if(!confirm("「"+p.name+"」を削除しますか？\n（実施ログは残ります）")) return;
+  DB.progs.splice(DB.progs.indexOf(p),1);
+  save(); render();
+}
+let textBuf="";
+function showText(id){
+  const p=DB.progs.filter(x=>x.id===id)[0];
+  if(!p) return;
+  textBuf=progToText(p);
+  go("impt");
+}
+function impTextView(){
+  app.innerHTML=`
+    <h1>プログラムのテキスト</h1>
+    <p class="sub">この形式のままAIに渡して直してもらえます。直したテキストを取り込み画面に貼り付けると、同じ名前のまま上書きされます。</p>
+    <textarea id="ptext" class="big" readonly>${esc(textBuf)}</textarea>
+    <div class="row">
+      <button class="btn sm" onclick="copyBox('ptext')">コピー</button>
+      <button class="btn sm ghost" onclick="go('imp')">戻る</button>
+    </div>`;
+}
+function specView(){
+  app.innerHTML=`
+    <h1>AIに渡すフォーマット</h1>
+    <p class="sub">下の文章をまるごとコピーしてAIに貼り付け、「この書式でストレッチプログラムを作って」と伝えてください。返ってきたテキストを取り込み画面に貼り付ければ完了です。</p>
+    <div class="spec">${esc(FMT)}</div>
+    <textarea id="spec_t" class="hide">${esc(FMT)}</textarea>
+    <button class="btn" onclick="copyBox('spec_t')">フォーマットをコピー</button>
+    <button class="btn ghost" onclick="go('imp')">戻る</button>`;
+}
+function copyBox(id){
+  const t=document.getElementById(id);
+  const wasHidden=t.classList.contains("hide");
+  if(wasHidden) t.classList.remove("hide");
+  t.removeAttribute("readonly");
+  t.select(); t.setSelectionRange(0,999999);
+  let ok=false;
+  try{ ok=document.execCommand("copy"); }catch(e){}
+  t.setAttribute("readonly","");
+  if(wasHidden) t.classList.add("hide");
+  const done=r=>alert(r?"コピーしました":"コピーできませんでした。テキストを長押しして選択・コピーしてください");
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(t.value).then(()=>done(true),()=>done(ok));
+  } else done(ok);
 }
 
 function log(){
@@ -342,21 +609,27 @@ function dl(){
 }
 
 /* ===================== タイマー ===================== */
-let cur=null,idx=0,left=0,tid=null,paused=false,startT=0,wake=null,phase="work";
+let cur=null,CP=null,idx=0,left=0,tid=null,paused=false,startT=0,wake=null,phase="work";
+const SAUNA=
+  "【サウナ内での注意】\n\n"+
+  "・最大の70%で止める（痛気持ちいいの手前）。熱で痛みを感じにくく、伸ばしすぎやすい\n"+
+  "・必ず下段に座り、入室してすぐの前半に行う\n"+
+  "・5分を超えて続けない\n"+
+  "・入る前に水分を摂る\n"+
+  "・めまい・吐き気・動悸・ふらつきが出たら即中止して退室\n\n"+
+  "確認して開始しますか？";
 const R=id=>document.getElementById(id);
 
 function start(k){
-  if(P[k].warn && !confirm(
-    "【サウナ内での注意】\n\n"+
-    "・最大の70%で止める（痛気持ちいいの手前）。熱で痛みを感じにくく、伸ばしすぎやすい\n"+
-    "・必ず下段に座り、入室してすぐの前半に行う\n"+
-    "・5分を超えて続けない\n"+
-    "・入る前に水分を摂る\n"+
-    "・めまい・吐き気・動悸・ふらつきが出たら即中止して退室\n\n"+
-    "確認して開始しますか？")) return;
-  cur=k; idx=0; paused=false; startT=Date.now();
+  const p=getProg(k);
+  if(!p||!p.steps||!p.steps.length){ alert("プログラムが見つかりませんでした"); return; }
+  if(p.warn===true){ if(!confirm(SAUNA)) return; }
+  else if(typeof p.warn==="string"&&p.warn){
+    if(!confirm("【開始前の注意】\n\n"+p.warn+"\n\n確認して開始しますか？")) return;
+  }
+  CP=p; cur=k; idx=0; paused=false; startT=Date.now();
   R("runner").style.display="block";
-  R("rname").textContent=P[k].name;
+  R("rname").textContent=p.name;
   R("rpause").textContent="一時停止";
   document.body.style.overflow="hidden";
   try{ speechSynthesis.cancel(); }catch(e){}
@@ -364,18 +637,18 @@ function start(k){
   step();
 }
 function paint(){
-  const st=P[cur].steps[idx];
+  const st=CP.steps[idx];
   R("rex").textContent=st.n;
   const sd=R("rside");
   if(st.side){sd.textContent=st.side;sd.className="side";}else{sd.className="side none";}
   R("rhow").textContent=st.how;
-  R("rease").textContent=st.ease;
-  R("rcount").textContent=(idx+1)+" / "+P[cur].steps.length;
-  const nx=P[cur].steps[idx+1];
+  R("rease").textContent=st.ease||"痛みが出ない手前まで戻し、可動範囲を半分にして行ってください。";
+  R("rcount").textContent=(idx+1)+" / "+CP.steps.length;
+  const nx=CP.steps[idx+1];
   R("rnext").textContent=nx?"次：" + nx.n + (nx.side?"（"+nx.side+"）":""):"最後の種目です";
 }
 function step(){
-  const st=P[cur].steps[idx];
+  const st=CP.steps[idx];
   paint();
   if(S().prep>0){
     phase="prep"; left=S().prep;
@@ -392,7 +665,7 @@ function step(){
   tid=setInterval(()=>{ if(!paused){ left--; tick(); } },1000);
 }
 function toWork(){
-  const st=P[cur].steps[idx];
+  const st=CP.steps[idx];
   phase="work"; left=st.s;
   R("rphase").className="phase hide";
   beep(880,.18);
@@ -400,11 +673,11 @@ function toWork(){
   tick(true);
 }
 function tick(init){
-  const st=P[cur].steps[idx];
+  const st=CP.steps[idx];
   R("rtimer").textContent=fmt(Math.max(left,0));
   R("rtimer").className="timer"+(phase==="prep"?" prep":(left<=3?" warn":""));
   const base=phase==="prep"?0:(1-left/st.s);
-  R("rbar").style.width=((idx+base)/P[cur].steps.length*100)+"%";
+  R("rbar").style.width=((idx+base)/CP.steps.length*100)+"%";
   if(init) return;
   if(S().beep&&(left===3||left===2||left===1)) beep(660,.09);
   if(left<=0){
@@ -414,14 +687,14 @@ function tick(init){
 }
 function next(){
   clearInterval(tid);
-  if(idx<P[cur].steps.length-1){ idx++; step(); } else finish();
+  if(idx<CP.steps.length-1){ idx++; step(); } else finish();
 }
 function jump(d){
   clearInterval(tid);
   try{ speechSynthesis.cancel(); }catch(e){}
   if(d>0&&phase==="prep"){ toWork(); startLoop(); return; }
   if(d<0&&idx===0){ step(); return; }
-  if(d>0&&idx===P[cur].steps.length-1){ finish(); return; }
+  if(d>0&&idx===CP.steps.length-1){ finish(); return; }
   idx+=d; step();
 }
 function startLoop(){
@@ -434,18 +707,18 @@ function togglePause(){
 }
 function finish(){
   const sec=Math.round((Date.now()-startT)/1000);
-  DB.sessions.push({date:today(),prog:P[cur].name,done:idx+1,total:P[cur].steps.length,sec});
+  DB.sessions.push({date:today(),prog:CP.name,done:idx+1,total:CP.steps.length,sec});
   save();
   close_(true);                 /* v4: 完了の読み上げを打ち切らない */
   chimeDone();                  /* v4: 完了チャイム（音声オフでも鳴る） */
   say("ストレッチ完了です。おつかれさまでした。");
-  setTimeout(()=>alert("完了：" + P[cur].name + "\n" + (idx+1) + "/" + P[cur].steps.length + "種目 ・ " + fmt(sec)),900);
+  setTimeout(()=>alert("完了：" + CP.name + "\n" + (idx+1) + "/" + CP.steps.length + "種目 ・ " + fmt(sec)),900);
 }
 function quit(){
   if(idx>0 && !confirm("中断しますか？（ここまでの分を記録します）")) return;
   if(idx>0){
     const sec=Math.round((Date.now()-startT)/1000);
-    DB.sessions.push({date:today(),prog:P[cur].name+"（途中）",done:idx,total:P[cur].steps.length,sec});
+    DB.sessions.push({date:today(),prog:CP.name+"（途中）",done:idx,total:CP.steps.length,sec});
     save();
   }
   close_();
