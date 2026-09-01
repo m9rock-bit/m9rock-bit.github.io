@@ -936,18 +936,7 @@ function chimeWake(){
     setTimeout(function(){beep(660,.13);},base+90);
     setTimeout(function(){beep(880,.18);},base+180);
   });
-  flashScreen();
-}
-function flashScreen(){
-  try{
-    var d=document.createElement("div");
-    d.style.position="fixed"; d.style.inset="0"; d.style.background="#fff";
-    d.style.opacity="0.85"; d.style.zIndex="99"; d.style.pointerEvents="none";
-    d.style.transition="opacity .5s";
-    document.body.appendChild(d);
-    setTimeout(function(){ d.style.opacity="0"; }, 80);
-    setTimeout(function(){ if(d.parentNode) d.parentNode.removeChild(d); }, 650);
-  }catch(e){}
+  flashScreen();   /* v11で作った既存の関数をそのまま使う（.flashのCSSアニメーション） */
 }
 
 /* --- v4: 音声案内（Web Speech API） -----------------------------
