@@ -37,6 +37,11 @@ h2{font-size:15px;margin:0 0 3px}
 
 .big{font-size:64px;font-weight:200;text-align:center;font-variant-numeric:tabular-nums;margin:6px 0 2px;letter-spacing:-.03em;line-height:1.1}
 .bigsub{text-align:center;color:#8a94a6;font-size:13px;margin-bottom:6px}
+/* v6 (2026-09-03): 休憩終わりの視覚の合図。音が鳴らない端末・状況のための保険。
+   赤や警告色は使わない（急かす合図にしないため）。 */
+.restdone{background:#243024;border-color:#4d6b4f;animation:rdpulse 1.1s ease-in-out 6}
+.restdone .big{color:#9ec8a4}
+@keyframes rdpulse{0%,100%{background:#243024}50%{background:#33472f}}
 
 .pill{display:inline-block;background:#232b38;border:1px solid #303a4a;border-radius:999px;padding:3px 10px;font-size:12px;color:#cbd5e3;margin-right:6px}
 .prev{color:#8a94a6;font-size:13px;margin-top:5px;line-height:1.6}
@@ -418,11 +423,37 @@ function progressReady(id, env){
 }
 function showProgress(){ return Date.now()>=PROG_FROM; }
 
-/* ---------- 音 ---------- */
+/* ---------- 音 ----------
+   v6 (2026-09-03): 「セット実施中、休憩終わりの音が鳴らない（Spotify再生中）」への対応。
+   ------------------------------------------------------------------
+   現物を読んで分かった原因（推測ではなく、コードの形として確かなもの）:
+   AudioContext を beep() の中で初めて作っており、その beep() を呼ぶのは
+   休憩タイマーの setInterval（＝操作ではない）だった。iOSでは操作の外で
+   作った AudioContext は suspended のまま始まり、resume() を呼ばない限り
+   永久に無音になる。routine.html には unlockAudio()（操作の中で無音の1音を
+   鳴らして開通させる）と beep() 内の resume() が入っているが、gym.html には
+   どちらも入っていなかった。その差がそのまま出ている。
+
+   ★Spotify再生中かどうかとは別の話である可能性が高い。ただし、
+     「他アプリが音声セッションを握っているときiOSが鳴らさない」場合は
+     Web側では直せない。そのため下の視覚の合図を保険として必ず併設する。
+     （実機で鳴るかどうかは、こちらでは判定できない。） */
 let ac=null;
+/* 操作の中で呼ぶ。ほぼ無音の1音を鳴らして再生を許可させる。 */
+function unlockAudio(){
+  try{
+    ac=ac||new (window.AudioContext||window.webkitAudioContext)();
+    if(ac.state==="suspended" && ac.resume) ac.resume();
+    const o=ac.createOscillator(),g=ac.createGain();
+    o.connect(g);g.connect(ac.destination);
+    g.gain.setValueAtTime(.0001,ac.currentTime);
+    o.start();o.stop(ac.currentTime+.03);
+  }catch(e){}
+}
 function beep(f,d){
   try{
     ac=ac||new (window.AudioContext||window.webkitAudioContext)();
+    if(ac.state==="suspended" && ac.resume) ac.resume();   /* v6: これが無かった */
     const o=ac.createOscillator(),g=ac.createGain();
     o.frequency.value=f;o.connect(g);g.connect(ac.destination);
     g.gain.setValueAtTime(.18,ac.currentTime);
@@ -443,17 +474,30 @@ function chimeMark(){ beep(587,.5); }
 
 /* ---------- 休憩タイマー（機能4／v2で既定20秒・その場で変更可） ---------- */
 let restEnd=0, restTimer=null;
+/* v6 (2026-09-03): 音が鳴らない環境でも休憩の終わりが分かるようにする。
+   音は「鳴れば助かる」もので、頼り切らない。終わった時刻を持っておき、
+   次に何か操作するまで画面に大きく出し続ける（消えると気づけないため）。
+   ★これは達成・未達の表示ではない。ただの合図なので、遅れても何も減らない。 */
+let restDoneAt=0;
+function restJustEnded(){ return restDoneAt>0; }
+function clearRestDone(){ restDoneAt=0; }
 function startRest(){
   restEnd=Date.now()+restSec()*1000;
+  restDoneAt=0;                    /* 新しい休憩に入ったら前回の合図は消す */
+  unlockAudio();                   /* v6: 記録ボタン（＝操作）の流れの中で音を開通させる */
   if(restTimer) clearInterval(restTimer);
   restTimer=setInterval(function(){
-    if(Date.now()>=restEnd){ clearInterval(restTimer); restTimer=null; restEnd=0; chimeDone(); }
+    if(Date.now()>=restEnd){
+      clearInterval(restTimer); restTimer=null; restEnd=0;
+      restDoneAt=Date.now();       /* v6: 音が鳴らなくても残る印 */
+      chimeDone();
+    }
     if(isTyping()) return;   /* v5: 入力中の画面は描き直さない */
     render();
   },1000);
   render();
 }
-function stopRest(){ if(restTimer) clearInterval(restTimer); restTimer=null; restEnd=0; render(); }
+function stopRest(){ if(restTimer) clearInterval(restTimer); restTimer=null; restEnd=0; restDoneAt=0; render(); }
 function restLeft(){ return restEnd ? Math.max(0,Math.ceil((restEnd-Date.now())/1000)) : 0; }
 
 /* 休憩の長さを変える。休憩中なら、いま動いているカウントダウンにも即反映する。
@@ -941,7 +985,17 @@ function viewEx(){
     <div class="bigsub">休憩</div>
     ${restStepper()}
     <button class="btn ghost" onclick="stopRest()">休憩を切り上げる</button>
-  </div>` : `<div class="card">${restStepper()}</div>`}
+  </div>`
+  /* v6 (2026-09-03): 音が鳴らなかったときのための、目で分かる合図。
+     押すまで消えない（音と違って、あとからでも気づける）。 */
+  : restJustEnded() ? `<div class="card restdone">
+    <div class="big">0:00</div>
+    <div class="bigsub">休憩おわり</div>
+    <p class="note" style="text-align:center;margin:2px 0 9px">音が鳴らない状態でも分かるように、この表示は押すまで消えません。<br><strong>急ぐ必要はありません。</strong>整ってから次のセットへ。</p>
+    <button class="btn ghost" onclick="clearRestDone();render()">確認しました</button>
+    ${restStepper()}
+  </div>`
+  : `<div class="card">${restStepper()}</div>`}
 
   ${dropHint(curId)}
 
@@ -1058,6 +1112,7 @@ function viewLog(){
 function startSession(r){
   /* v4: セッション開始時点の環境をそのまま記録に固定する（途中で環境設定を変えても、
      この回の記録・前回値の比較には影響しない）。 */
+  unlockAudio();   /* v6 (2026-09-03): いちばん最初のタップで音を開通させる */
   DB.active={date:Date.now(),routine:r,sets:[],marked:false,env:curEnv()};
   save(); tmpW=null; tmpR=null; tmpB=null; startSessionClock(); go("work");
 }
@@ -1065,7 +1120,9 @@ function setEnv(env){
   if(!ENVS.some(function(x){return x.id===env})) return;
   DB.settings.env=env; save(); render();
 }
-function openEx(id){ curId=id; tmpW=null; tmpR=null; tmpB=null; go("ex"); }
+/* v6 (2026-09-03): 種目を開くのは必ずタップなので、ここでも音を開通させておく。
+   休憩に入る前に1回通しておけば、あとで setInterval から鳴らしても止められない。 */
+function openEx(id){ unlockAudio(); curId=id; tmpW=null; tmpR=null; tmpB=null; go("ex"); }
 function bumpW(d){
   const e=def(curId,(DB.active&&DB.active.env)||"gym"); if(!e || !e.step) return;
   tmpW=Math.max(0, Math.round((tmpW + d*e.step)*100)/100); render();

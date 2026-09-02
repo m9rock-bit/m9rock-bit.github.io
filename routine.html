@@ -129,6 +129,14 @@ label{display:block;font-size:12.5px;color:#8a94a6;margin:12px 0 5px}
 .stline .inp{padding:10px}
 .stsec{width:72px;flex:none;text-align:center;padding:10px 4px}
 .stunit{flex:none;color:#6f7a8c;font-size:12px;width:16px}
+/* v20 (2026-09-03): 今週の実施状況の表（累計回数の表示のかわり） */
+.wk{overflow-x:auto;margin:8px 0 0}
+.wk table{width:100%;border-collapse:collapse;font-size:13px}
+.wk th{color:#6f7a8c;font-weight:500;font-size:11.5px;padding:3px 2px;text-align:center}
+.wk td{text-align:center;padding:6px 2px;border-top:1px solid #1c222c;color:#9ec8a4}
+.wk td.nm{text-align:left;color:#c9d1de;padding-right:8px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wk .td{background:#1a1f28}
+.wk .e{color:#39404d}
 .stbtns{display:flex;gap:6px;margin-top:8px}
 .stbtns button{
   flex:1;background:#232b38;border:1px solid #303a4a;color:#cbd5e3;border-radius:9px;
@@ -550,8 +558,12 @@ function defaults(){ return [
    seg  … ブロックの中の区切りの並び（分）。最後の値が以降ずっと続く。
           「まず短時間から、乗ってきたら伸ばす」を素直に形にしたもの。
    すべて集中の設定画面から変えられます。 */
-var FOCUS_DEF = { len:{am:120,pm:90,ev:50}, from:{pm:12,ev:16}, seg:[15,25,40], sound:false, native:true, notify:true, lastBreak:"" };
-var DB = { v:18, sets:null, chime:true, voice:true, spotifyUrl:"", scName:"ルーティンタイマー", log:[], count:0, focus:null, notes:[], times:[], sleepActive:false, sleepStartAt:0 };
+var FOCUS_DEF = { len:{am:120,pm:90,ev:50}, from:{pm:12,ev:16}, seg:[15,25,40], sound:false, native:true, notify:true, lastBreak:"",
+  /* v20 (2026-09-03): 集中ブロックのプレイリスト。spMode は "default"（既定URL）か "own"（専用URL）。 */
+  spotify:false, spMode:"default", spotifyUrl:"" };
+var DB = { v:19, sets:null, chime:true, voice:true, spotifyUrl:"", scName:"ルーティンタイマー", log:[], count:0, focus:null, notes:[], times:[], sleepActive:false, sleepStartAt:0,
+  /* v20 (2026-09-03): 就寝のプレイリスト。spMode は "default"（既定URL）か "own"（専用URL）。 */
+  sleepSpotify:false, sleepSpMode:"default", sleepSpotifyUrl:"" };
 try{
   var raw = localStorage.getItem(KEY);
   if(raw){
@@ -572,6 +584,10 @@ try{
        開始時刻そのものを保存し、毎回いまの時刻から計算し直す。 */
     if(typeof p.sleepActive==="boolean") DB.sleepActive = p.sleepActive;
     if(typeof p.sleepStartAt==="number") DB.sleepStartAt = p.sleepStartAt;
+    /* v20: 就寝のプレイリスト（無い保存データはそのまま既定＝オフのまま） */
+    if(typeof p.sleepSpotify==="boolean") DB.sleepSpotify = p.sleepSpotify;
+    if(p.sleepSpMode==="own" || p.sleepSpMode==="default") DB.sleepSpMode = p.sleepSpMode;
+    if(typeof p.sleepSpotifyUrl==="string") DB.sleepSpotifyUrl = p.sleepSpotifyUrl;
     if(DB.count < DB.log.length) DB.count = DB.log.length;
     if(Array.isArray(p.sets)) DB.sets = p.sets;
     else if(p.sets && typeof p.sets==="object"){
@@ -597,6 +613,10 @@ try{
   if(typeof f.native !== "boolean") f.native = FOCUS_DEF.native;
   if(typeof f.notify !== "boolean") f.notify = FOCUS_DEF.notify;
   if(typeof f.lastBreak !== "string") f.lastBreak = "";
+  /* v20: 集中のプレイリスト（保存済みの設定は上書きしない） */
+  if(typeof f.spotify !== "boolean") f.spotify = FOCUS_DEF.spotify;
+  if(f.spMode !== "own" && f.spMode !== "default") f.spMode = FOCUS_DEF.spMode;
+  if(typeof f.spotifyUrl !== "string") f.spotifyUrl = "";
   DB.focus = f;
 })();
 if(!DB.sets || !DB.sets.length) DB.sets = defaults();
@@ -806,7 +826,8 @@ function tickRender(){
   render();
 }
 function ioVal(){ var el = document.getElementById("io_text"); return el ? el.value : ""; }
-function ioSec(){ var el = document.getElementById("io_sec"); var n = el ? parseInt(el.value,10) : 0; return n>0 ? n : 60; }
+/* v20 (2026-09-03): 実行中に足すときの長さも「分・秒」の2欄で受ける。 */
+function ioSec(){ return msRead("io_min", "io_sec2", 60); }
 
 /* 実行中に項目を足す。pos の位置へ差し込み、済み・未済の印もずらす。 */
 function runAdd(pos){
@@ -1021,6 +1042,18 @@ function autoSkip(){
   render();
 }
 /* v4: 一時停止・再開 */
+/* v20 (2026-09-03 ご依頼): 自動で進むセットの「＋1分／＋5分」。
+   自動セットは経過秒から位置を逆算しているので、開始時刻を後ろへずらすと
+   いまの項目がそのぶん延び、あとの項目は長さを変えずに後ろへずれる。
+   autoSkip が開始時刻を前へ動かすのと、まったく同じ仕組みの逆向き。 */
+var autoShift = 0;
+function autoExtend(sec){
+  if(autoFinished) return;
+  startAt += sec*1000;
+  autoShift += sec;
+  render();
+}
+/* v4: 一時停止・再開 */
 function autoPauseToggle(){
   if(autoPaused){ startAt += (Date.now()-pauseAt); autoPaused = false; }
   else { pauseAt = Date.now(); autoPaused = true; }
@@ -1113,12 +1146,117 @@ function durLabel(sec){
   if(s2 && !h) out += s2+"秒";
   return out || "0秒";
 }
+/* ============================================================
+   v20 (2026-09-03 ご依頼・回答欄 Q1〜Q3 のご回答を受けて実装)
+   ------------------------------------------------------------
+   ①秒数の入力を「分・秒」の2欄にする（保存の形は今までどおり“秒”のまま。
+     データの形は変えないので、古いバックアップもそのまま読める）
+   ②今週（月〜日）の実施状況を出す（累計回数の表示のかわり）
+   ③集中ブロック・就寝でも、既定のURLか専用のURLかを選べるようにする
+   ============================================================ */
+function minOf(sec){ return Math.floor(Math.max(0, sec||0)/60); }
+function secOf(sec){ return Math.max(0, sec||0)%60; }
+/* 分と秒の2欄を組み立てる。oninput は文字列で渡す（空なら付けない）。 */
+function msInputs(idm, ids, sec, oninput){
+  var oi = oninput ? ' oninput="'+oninput+'"' : '';
+  return '<input class="inp stsec" type="number" inputmode="numeric" min="0" id="'+idm+'" value="'+minOf(sec)+'"'+oi+'>'
+       + '<span class="stunit">分</span>'
+       + '<input class="inp stsec" type="number" inputmode="numeric" min="0" max="59" id="'+ids+'" value="'+secOf(sec)+'"'+oi+'>'
+       + '<span class="stunit">秒</span>';
+}
+/* 2欄から秒数を読む。両方とも空・0・マイナスなら def を返す
+   （＝「変更なし」。1欄だったころの決まりをそのまま引き継いでいる）。 */
+function msRead(idm, ids, def){
+  var em = document.getElementById(idm), es = document.getElementById(ids);
+  if(!em && !es) return def;
+  var m = em ? parseInt(em.value,10) : 0;
+  var x = es ? parseInt(es.value,10) : 0;
+  if(!(m>0)) m = 0;
+  if(!(x>0)) x = 0;
+  var t = m*60 + x;
+  return t>0 ? t : def;
+}
+/* --- 今週の実施状況 -------------------------------------------
+   出すのは「起きた事実」だけ。やらなかった日は「・」になるだけで、
+   ×も赤字も付けない（v1からの線引きをそのまま守る）。
+   連続日数・達成率は、ここでも数えない。 */
+function weekStart(t){
+  var d = new Date(t); d.setHours(0,0,0,0);
+  d.setDate(d.getDate() - ((d.getDay()+6)%7));   /* 月曜へ寄せる */
+  return d.getTime();
+}
+function weekGrid(){
+  var ws = weekStart(Date.now()), days = [], i;
+  for(i=0;i<7;i++) days.push(ws + i*86400000);
+  var todayK = dayKey(Date.now());
+  var rows = {}, order = [];
+  DB.log.forEach(function(r){
+    if(r.t < ws || r.t >= ws + 7*86400000) return;
+    var k = r.id || r.name;
+    if(!rows[k]){ rows[k] = { icon:r.icon, name:r.name, d:{} }; order.push(k); }
+    rows[k].icon = r.icon; rows[k].name = r.name;
+    var dk = dayKey(r.t);
+    rows[k].d[dk] = (rows[k].d[dk]||0) + 1;
+  });
+  var h = '<div class="wk"><table><tr><th></th>';
+  days.forEach(function(t){
+    h += '<th'+(dayKey(t)===todayK?' class="td"':'')+'>'+WD[new Date(t).getDay()]+'</th>';
+  });
+  h += '</tr>';
+  if(!order.length){
+    h += '<tr><td class="nm" colspan="8" style="color:#6f7a8c">今週はまだ押していません。押すと、ここに印が付きます。</td></tr>';
+  }else{
+    order.forEach(function(k){
+      var r = rows[k];
+      h += '<tr><td class="nm">'+esc(r.icon)+' '+esc(r.name)+'</td>';
+      days.forEach(function(t){
+        var n = r.d[dayKey(t)] || 0;
+        h += '<td'+(dayKey(t)===todayK?' class="td"':'')+'>'
+           + (n ? '<b>'+(n>1 ? n : '✓')+'</b>' : '<span class="e">・</span>')+'</td>';
+      });
+      h += '</tr>';
+    });
+  }
+  h += '</table></div>';
+  return h;
+}
+/* --- 集中ブロック・就寝のプレイリスト ---------------------------
+   セットの場合は「専用URLが空なら既定URL」という暗黙の決まりだったが、
+   ここは 既定を使う／専用を使う のどちらかを明示的に選ぶ形にした
+   （2026-09-03 Q3 のご回答「選べるようにしてください。就寝も同様です」）。 */
+function spPick(mode, own){
+  if(mode==="own") return String(own||"").trim();
+  return String(DB.spotifyUrl||"").trim();
+}
+function focusSpUrl(){ var f = DB.focus; return (f && f.spotify) ? spPick(f.spMode, f.spotifyUrl) : ""; }
+function sleepSpUrl(){ return DB.sleepSpotify ? spPick(DB.sleepSpMode, DB.sleepSpotifyUrl) : ""; }
+function openUrl(u){ if(!u) return; try{ window.open(u, "_blank"); }catch(e){} }
+/* 既定／専用の選択欄。集中と就寝で同じものを使う。 */
+function spBlock(on, mode, url, fnOn, fnMode, inputId){
+  var h = '<div class="toggle"><b>プレイリストを使う</b>'
+        + '<button class="sw'+(on?' on':'')+'" onclick="'+fnOn+'"><i></i></button></div>';
+  if(!on) return h + '<p class="note" style="margin-top:4px">オンにすると、画面に「🎵 プレイリストを開く」が出ます。</p>';
+  h += '<div class="row" style="margin-top:8px">'
+     + '<button class="btn '+(mode==="own"?'ghost':'save')+'" style="margin-top:0" onclick="'+fnMode+'(\'default\')">既定のURLを使う</button>'
+     + '<button class="btn '+(mode==="own"?'save':'ghost')+'" style="margin-top:0" onclick="'+fnMode+'(\'own\')">専用のURLを使う</button>'
+     + '</div>';
+  if(mode==="own"){
+    h += '<input class="inp" type="text" style="margin-top:7px" id="'+inputId+'" placeholder="https://open.spotify.com/playlist/..." value="'+esc(url||"")+'">'
+       + '<p class="note" style="margin-top:4px">'
+       + (String(url||"").trim() ? 'このURLを開きます。' : '<b>まだURLがありません。</b>入れるまでは何も開きません。')+'</p>';
+  }else{
+    h += '<p class="note" style="margin-top:7px">'
+       + (String(DB.spotifyUrl||"").trim() ? 'ホーム画面の「設定」にある既定のURLを開きます。'
+          : '<b>既定のURLがまだ空です。</b>ホーム画面の「設定」で入れてください。')+'</p>';
+  }
+  return h;
+}
 function elapsed(){ return startAt ? Math.floor((Date.now()-startAt)/1000) : 0; }
 function left(){ var s = setOf(curId); return s ? limitOf(s) - elapsed() : 0; }
 function allDone(){ var s=setOf(curId); for(var i=0;i<s.steps.length;i++){ if(!doneSet[i]) return false; } return true; }
 function newId(){ return "s" + Date.now().toString(36) + Math.floor(Math.random()*900+100); }
 
-function go(v){ armed = null; clearArmed = false; view = v; render(); }
+function go(v){ armed = null; clearArmed = false; if(v==="edit") editId = null; view = v; render(); }
 
 /* ===== バックアップ（書き出し・読み込み）　2026-08-15追加 =====================
    記録はこの端末のブラウザの中だけにあります。ここのテキストを控えておけば、
@@ -1217,7 +1355,7 @@ function start(id, fromIndex){
   if(s && s.timer && limitOf(s)>0) nativeTimer(limitOf(s));
   else openSpotify(s);   /* set.spotify が入っているセットだけ開く（中で判定） */
 }
-function stop(){ if(tick) clearInterval(tick); tick=null; startAt=0; curId=null; doneSet={}; curStep=0; runIdx=null; autoPaused=false; pauseAt=0; autoFinished=false; stepAt=0; stepExtra={}; runTimes={}; inputOpen=null; }
+function stop(){ if(tick) clearInterval(tick); tick=null; startAt=0; curId=null; doneSet={}; curStep=0; runIdx=null; autoPaused=false; pauseAt=0; autoFinished=false; stepAt=0; stepExtra={}; runTimes={}; inputOpen=null; autoShift=0; }
 
 /* ============================================================
    v16: 🛌就寝＋🌃中途覚醒対応
@@ -1315,6 +1453,20 @@ function stepSec(i){
 }
 function stepUsed(){ return stepAt ? Math.floor((Date.now()-stepAt)/1000) : 0; }
 function stepLeft(){ return stepSec(curStep) - stepUsed(); }
+/* v19: 完了予定時刻（2026-09-02追加）。
+   8/22にv15として「実装した」と記録していたが、実際のファイルには保存されて
+   いなかった（9/2の巡回で発覚。9/1に見つかった同種の取りこぼしと同じ形）。
+   残り＝いまの項目の残り（予定を過ぎている分は0とみなす）＋まだ終わっていない
+   後続の項目の目安。自動進行のセットは全体の目安から経過を引くだけでよい。 */
+function etaSec(){
+  var s = setOf(curId); if(!s) return 0;
+  if(s.auto) return Math.max(0, limitOf(s) - curElapsed());
+  var st = stepsOf(s);
+  var r = (curStep < st.length) ? Math.max(0, stepLeft()) : 0;
+  for(var i=curStep+1;i<st.length;i++){ if(!doneSet[i]) r += stepSec(i); }
+  return r;
+}
+function etaLabel(){ return hhmm(Date.now() + etaSec()*1000); }
 /* v14: その場で延長する。**この回だけ**の延長で、セットの秒数は変えない
    （セット側を直すのは編集画面と、振り返りの「平均に合わせる」の役目）。
    実績には延長した分もそのまま入る。 */
@@ -1323,6 +1475,35 @@ function extendStep(sec){
   stepExtra[curStep] = (stepExtra[curStep]||0) + sec;
   render();
 }
+/* v20 (2026-09-03 ご依頼): 行のタップは「そのステップへ移る」だけにした。
+   完了は「✓ できた — 次へ」の1本に絞る。従来はタップ＝即完了で、
+   切り替え・完了・スキップ（↷）の3つが1つの操作に混ざっていた。
+   移るだけなので、済み・未済の印は一切変えない（実績も足さない）。 */
+function gotoStep(i){
+  var s = setOf(curId); if(!s) return;
+  if(i<0 || i>=s.steps.length) return;
+  curStep = i;
+  stepAt = Date.now();
+  render();
+}
+/* v20: 済みにした項目を元に戻す。中身は従来 toggleStep の中にあった
+   取り消しの処理をそのまま出したもの（この回に足した実績も一緒に消す）。 */
+function undoStep(i){
+  var s = setOf(curId); if(!s) return;
+  if(!doneSet[i]) return;
+  if(runTimes[i]){
+    var k = DB.times.indexOf(runTimes[i]);
+    if(k>=0) DB.times.splice(k,1);
+    delete runTimes[i];
+    save();
+  }
+  delete doneSet[i];
+  curStep = i;
+  stepAt = Date.now();
+  render();
+}
+/* v20: 主ボタン（✓ できた — 次へ）専用になった。行のタップからは呼ばれない。
+   取り消しの分岐は undoStep へ出したが、念のためここにも残してある。 */
 function toggleStep(i){
   var s = setOf(curId);
   if(doneSet[i]){
@@ -1359,6 +1540,28 @@ function toggleStep(i){
   else {
     chimeStep();
     /* v5: タップ式のセットでも、音声がオンなら次のステップを読み上げる */
+    if(s.voice){ var nx = stepsOf(s)[curStep]; if(nx) speak(sayOf(nx)); }
+    render();
+  }
+}
+/* v19: タップ式のセットで、いまの項目を飛ばして次へ進む（2026-09-02追加）。
+   これも8/22にv15として記録だけが残っていた分の入れ直し。自動進行には
+   もともと「次へ ▶」（autoSkip）があるが、タップ式には無かった。
+   飛ばした項目は実行時間を記録しない（「順番どおりに進めた項目だけ記録する」
+   という既存の線を崩さないため）。押し間違えたら、その行をもう一度タップ
+   すれば元に戻る（既存の toggleStep の取り消しがそのまま効く）。 */
+function skipStep(){
+  var s = setOf(curId); if(!s) return;
+  var st = stepsOf(s);
+  if(curStep >= st.length) return;
+  doneSet[curStep] = "skip";
+  stepAt = Date.now();
+  var next = -1;
+  for(var j=0;j<s.steps.length;j++){ if(!doneSet[j]){ next=j; break; } }
+  curStep = next<0 ? s.steps.length : next;
+  if(allDone()){ chimeDone(); enterDone(); }
+  else {
+    chimeStep();
     if(s.voice){ var nx = stepsOf(s)[curStep]; if(nx) speak(sayOf(nx)); }
     render();
   }
@@ -1440,6 +1643,11 @@ function viewSleepWatch(){
   h += '<button class="btn big" onclick="sleepWake()">🌃 途中で起きてしまった</button>';
   h += '<button class="btn ghost" style="margin-top:14px" onclick="sleepEnd()">🌅 起きた（ここで終える）</button>';
   h += '<p class="note">合図の音（上がる3音・2回）と画面のフラッシュで気づけるか、実際に試してみてください。気づきにくければ音の高さ・回数を調整します。<br>バイブレーションはiOS Safariでは技術的に使えません。</p>';
+  /* v20 (2026-09-03 ご依頼): 就寝の見守り画面からプレイリストを開く */
+  if(DB.sleepSpotify){
+    h += '<button class="btn ghost" onclick="openUrl(sleepSpUrl())">🎵 プレイリストを開く'+(sleepSpUrl()?'':'（未設定）')+'</button>';
+    if(!sleepSpUrl()) h += '<p class="note">ホーム画面の「設定」でURLを入れると、次回からここで開けます。</p>';
+  }
   h += '<button class="btn link" onclick="go(\'home\')">ホームへ戻る（見守りはそのまま続きます）</button>';
   return h;
 }
@@ -1491,10 +1699,14 @@ function viewHome(){
     h += '<button class="setb" style="border-color:#7aa0c4;background:#161c24" onclick="go(\'sleepWatch\')">🛌 就寝を見守り中（経過 '+durLabel(sleepElapsed())+'）'
        + '<small>タップして見守り画面に戻る</small></button>';
   }
+  /* v20 (2026-09-03 ご依頼): 累計回数の表示をやめ、今週（月〜日）の実施状況にした。
+     DB.count そのものは消していない（「記録を消す操作以外では減らない」という
+     既存の約束を崩さないため）。画面に出さないだけ。 */
   var lr = lastRun();
-  if(DB.count>0){
-    h += '<div class="past">これまで <b>'+DB.count+'</b> 回押しました'
-       + (lr ? '<br>前回は '+dayLabel(lr.t)+' '+esc(lr.icon)+' '+esc(lr.name) : '')
+  if(DB.log.length){
+    h += '<div class="past"><b>今週</b>'
+       + (lr ? '　<span style="opacity:.75">前回は '+dayLabel(lr.t)+' '+esc(lr.icon)+' '+esc(lr.name)+'</span>' : '')
+       + weekGrid()
        + '</div>';
   }
   normals().forEach(function(s){
@@ -1530,6 +1742,12 @@ function viewHome(){
      + '<p class="note"><b>セットごとにURLを入れていないとき</b>に、ここのURLを使います。'
      + '「開始時にプレイリストを開く」がオンのセットを始めると、新規タブで開こうとします。'
      + '<br>Spotifyアプリが前面に出ると、この画面はバックグラウンドになり一時停止します。戻れば秒数はズレずに続きます。</p></div>';
+  /* v20 (2026-09-03 Q3「就寝も同様です」): 就寝のプレイリストも、
+     既定のURLか専用のURLかを選べるようにした。 */
+  h += '<div class="card"><label>🛌 就寝のプレイリスト</label>'
+     + spBlock(DB.sleepSpotify, DB.sleepSpMode, DB.sleepSpotifyUrl, "sleepSpOn()", "sleepSpMode", "ssp_url")
+     + '<p class="note" style="margin-top:7px">就寝の見守り画面に「🎵 プレイリストを開く」が出ます。'
+     + '「就寝前のストレッチ」の最後は<b>音声プレイリストに切り替えて、目を閉じる</b>で終わるので、そこから押せます。</p></div>';
   h += '<div class="card"><label>ショートカットの名前（iPhone標準タイマーを起動するもの）</label>'
      + '<input class="inp" type="text" id="scn" value="'+esc(DB.scName)+'" onchange="DB.scName=this.value;save()">'
      + '<p class="note">作り方は <b>行動計画_2026-08-14 §10</b> にあります。未作成でも、このアプリ自体は使えます。</p></div>';
@@ -1599,10 +1817,11 @@ function viewLog(){
     h += '<button class="btn ghost" onclick="go(\'home\')">戻る</button>';
     return h;
   }
-  h += '<div class="card"><div class="big ok">'+DB.count+'</div>'
-     + '<div class="bigsub">これまでに押した回数</div></div>';
-  h += '<p class="note">この数は減りません。空いた日は行が出ないだけで、'
-     + '×も赤字も付きません。<b>連続日数と達成率は数えていません。</b></p>';
+  /* v20 (2026-09-03 ご依頼): 累計回数の大きな数字をやめ、今週の実施状況にした。 */
+  h += '<div class="sec" style="color:#e0a86a">今週（月〜日）</div>';
+  h += '<div class="card">'+weekGrid()+'</div>';
+  h += '<p class="note">やった日に印が付きます（同じ日に2回以上なら回数が出ます）。'
+     + '空いた日は「・」のままで、×も赤字も付きません。<b>連続日数と達成率は数えていません。</b></p>';
 
   /* 新しい順に、日ごとにまとめる */
   var byDay = {}, order = [];
@@ -1670,15 +1889,24 @@ function viewRun(){
   h += '<div class="bar"><i style="width:'+spct+'%"></i></div>';
   h += '<p class="note" style="text-align:center;margin-top:9px">この項目に使った時間 <b>'+mmss(stepUsed())+'</b>'
      + (stepExtra[curStep] ? '（延長 +'+durLabel(stepExtra[curStep])+'）' : '')
-     + '<br>ルーティン全体： 経過 '+mmss(elapsed())+' ／ 目安 '+durLabel(lim)+'</p>';
+     + '<br>ルーティン全体： 経過 '+mmss(elapsed())+' ／ 目安 '+durLabel(lim)
+     + '<br>このまま進むと <b>'+etaLabel()+'</b> ごろ終わります</p>';
   h += '</div>';
   /* いまの項目を、大きく押せる形で進める */
   if(curStep < st.length){
-    h += '<button class="btn big" onclick="toggleStep('+curStep+')">✓ できた — 次へ</button>';
+    /* v20: いま見ている項目が済みなら、主ボタンは取り消しに変わる
+       （行のタップで済みの項目へ移れるようになったため） */
+    if(doneSet[curStep]){
+      h += '<button class="btn big" onclick="undoStep('+curStep+')">↩ この項目の「'
+         + (doneSet[curStep]==="skip" ? 'スキップ' : 'できた') + '」を取り消す</button>';
+    }else{
+      h += '<button class="btn big" onclick="toggleStep('+curStep+')">✓ できた — 次へ</button>';
+    }
     h += '<div class="row" style="margin-top:9px">'
        + '<button class="btn ghost" style="margin-top:0" onclick="extendStep(60)">＋1分 延長</button>'
        + '<button class="btn ghost" style="margin-top:0" onclick="extendStep(300)">＋5分 延長</button>'
        + '</div>';
+    h += '<button class="btn ghost" onclick="skipStep()">↷ この項目をスキップ</button>';
     var ap = appOf(cur);
     if(ap) h += '<button class="btn ghost" onclick="openApp(\''+esc(cur.app)+'\')">'+ap.icon+' '+esc(ap.name)+'を開く</button>';
     h += '<p class="note">延長は<b>この回だけ</b>です。セットの秒数は変わりません（実際にかかった時間は、延長した分もそのまま記録されます）。</p>';
@@ -1687,12 +1915,14 @@ function viewRun(){
     var cls = doneSet[i] ? "step done" : (i===curStep ? "step cur" : "step");
     var mark = doneSet[i]==="done" ? "✓" : (doneSet[i]==="skip" ? "–" : (i+1));
     var ap0 = appOf(x);
-    h += '<div class="'+cls+'" onclick="toggleStep('+i+')"><div class="n">'+mark+'</div>'
+    h += '<div class="'+cls+'" onclick="gotoStep('+i+')"><div class="n">'+mark+'</div>'
        + '<div class="t">'+(doneSet[i]==="skip"?'<s>'+esc(x.text)+'</s>':esc(x.text))
        + (ap0 ? ' <span class="tag">'+ap0.icon+' '+esc(ap0.name)+'</span>' : '')
        + '<em>目安 '+durLabel(x.sec)+(stepExtra[i]?'（延長 +'+durLabel(stepExtra[i])+'）':'')+'</em></div></div>';
     /* v13: いまの項目にだけ、メモと「次に足す」を出す。
-       全部の行に出すと、行そのもののタップ（＝完了）と取り合いになるため。 */
+       全部の行に出すと、行そのもののタップと取り合いになるため。
+       v20: 行のタップは「移る」だけになったが、ボタンを全行に出すと
+       画面が長くなるだけなので、いまの項目にだけ出す形は変えていない。 */
     if(i===curStep && !doneSet[i]){
       var prev = notesFor(s.id, x.text);
       if(inputOpen === "name:"+i){
@@ -1716,8 +1946,7 @@ function viewRun(){
       }else if(inputOpen === "add:"+(i+1)){
         h += '<div class="iobox">'
            + '<label style="margin-top:0">ここに1つ足す（この項目の次）</label>'
-           + '<div class="stline"><input class="inp stsec" type="number" inputmode="numeric" id="io_sec" value="60">'
-           + '<span class="stunit">秒</span>'
+           + '<div class="stline">' + msInputs("io_min","io_sec2",60)
            + '<input class="inp" type="text" id="io_text" placeholder="やること"></div>'
            + '<div class="row" style="margin-top:8px">'
            + '<button class="btn ghost" style="margin-top:0" onclick="closeInput()">やめる</button>'
@@ -1737,21 +1966,23 @@ function viewRun(){
       }
     }
   });
-  /* いちばん下に足す（いま思いついたことを、順番を気にせず置く） */
+  /* v20 (2026-09-03 ご依頼): 末尾ではなく「いま実行している項目の次」へ入れる。
+     思いついたことをその場で足したとき、そのまま次にやれるようにするため。
+     いちばん下に置きたいときは、編集画面の「＋ ステップを追加する」で足せる。 */
   if(inputOpen === "add:end"){
     h += '<div class="iobox">'
-       + '<label style="margin-top:0">いちばん下に1つ足す</label>'
-       + '<div class="stline"><input class="inp stsec" type="number" inputmode="numeric" id="io_sec" value="60">'
-       + '<span class="stunit">秒</span>'
+       + '<label style="margin-top:0">いまの項目の次に1つ足す</label>'
+       + '<div class="stline">' + msInputs("io_min","io_sec2",60)
        + '<input class="inp" type="text" id="io_text" placeholder="やること"></div>'
        + '<div class="row" style="margin-top:8px">'
        + '<button class="btn ghost" style="margin-top:0" onclick="closeInput()">やめる</button>'
-       + '<button class="btn save" style="margin-top:0" onclick="runAdd(null)">足す</button>'
+       + '<button class="btn save" style="margin-top:0" onclick="runAdd('+(curStep+1)+')">足す</button>'
        + '</div></div>';
   }else{
-    h += '<button class="btn ghost" onclick="openInput(\'add:end\')">＋ いちばん下に1つ足す</button>';
+    h += '<button class="btn ghost" onclick="openInput(\'add:end\')">＋ いまの項目の次に1つ足す</button>';
   }
-  h += '<p class="note">タップで完了。もう一度タップで戻せます。<br>下の行から始めても構いません（上は「–」になるだけで、失敗にはなりません）。<br>'
+  h += '<p class="note"><b>行をタップすると、その項目へ移ります（完了にはなりません）。</b>完了は上の「✓ できた — 次へ」です。<br>'
+     + '下の行から始めても構いません（上は「–」になるだけで、失敗にはなりません）。<br>'
      + '<b>足したものは、このセットにそのまま残ります。</b>やりながら形を作っていって構いません。</p>';
   h += '<button class="btn ghost" onclick="nativeTimer()">⏱ iPhoneのタイマーにも残り'+Math.max(1,Math.round(left()/60))+'分を渡す</button>';
   h += '<p class="note">この画面は他のアプリを開くと止まります（戻れば時刻から計算し直すのでズレません）。<br><b>画面の上に残り時間を出したいときは、上のボタンでiPhone標準のタイマーへ渡してください。</b></p>';
@@ -1805,7 +2036,8 @@ function viewRunAuto(s){
   h += '<div class="bar"><i style="width:'+Math.max(0,Math.min(100,(e/limitOf(s))*100))+'%"></i></div>';
   h += '<p class="note" style="text-align:center;margin-top:8px">'
      + (nx ? '次： '+esc(nx.text)+'<br>' : '次でおしまいです<br>')
-     + '全体の経過 '+mmss(e)+' ／ 目安 '+durLabel(limitOf(s))+'</p>';
+     + '全体の経過 '+mmss(e)+' ／ 目安 '+durLabel(limitOf(s))
+     + '<br>このまま進むと '+etaLabel()+' ごろ終わります</p>';
   h += '</div>';
   h += '<p class="note">タップして進める必要はありません。'+(s.voice?'合図（音・声）':'合図（音）')+'に合わせて進めてください。<br>合わない長さのときは、下の「次へ」で先に進めます。</p>';
   /* v18: 「次へ▶」を操作しやすくした（2026-09-01ご依頼）。
@@ -1816,13 +2048,21 @@ function viewRunAuto(s){
      退けた。押す機能そのもの（autoSkip）は変えていない。 */
   h += '<button class="btn big" onclick="autoSkip()">次へ ▶</button>';
   h += '<button class="btn ghost" style="margin-top:9px" onclick="autoPauseToggle()">'+(autoPaused?'▶ 再開する':'⏸ 一時停止する')+'</button>';
+  /* v20 (2026-09-03 ご依頼): 自動で進むセットにも延長を付けた
+     （タップ式には v14 から入っていたが、こちらには無かった） */
+  h += '<div class="row" style="margin-top:9px">'
+     + '<button class="btn ghost" style="margin-top:0" onclick="autoExtend(60)">＋1分 延長</button>'
+     + '<button class="btn ghost" style="margin-top:0" onclick="autoExtend(300)">＋5分 延長</button>'
+     + '</div>';
+  h += '<p class="note">延長するのは<b>いまのステップだけ</b>です。あとのステップの長さは変わらず、終わる時刻がそのぶん後ろへずれます。'
+     + (autoShift ? '<br>この回はここまでに <b>'+durLabel(autoShift)+'</b> 延ばしています。' : '')
+     + '</p>';
   /* v13: 自動で進むセットは、いちばん下にだけ足せる
      （途中に差し込むと、経過秒から逆算しているいまの位置が巻き戻るため） */
   if(inputOpen === "add:end"){
     h += '<div class="iobox">'
        + '<label style="margin-top:0">いちばん下に1つ足す</label>'
-       + '<div class="stline"><input class="inp stsec" type="number" inputmode="numeric" id="io_sec" value="60">'
-       + '<span class="stunit">秒</span>'
+       + '<div class="stline">' + msInputs("io_min","io_sec2",60)
        + '<input class="inp" type="text" id="io_text" placeholder="やること"></div>'
        + '<div class="row" style="margin-top:8px">'
        + '<button class="btn ghost" style="margin-top:0" onclick="closeInput()">やめる</button>'
@@ -1855,7 +2095,7 @@ function viewDone(){
   else if(d===n) h += '<div class="hint">全部やれました。時間は超えましたが、見ているのは順番ではなく「やったかどうか」です。</div>';
   else if(d>0) h += '<div class="hint">'+d+'つやれました。<b>0か1かではありません。</b>次の合図でまた押せます。</div>';
   else h += '<div class="hint">今日はここまで。押したこと自体は残っています。次の合図でまた押してください。</div>';
-  h += '<div class="past">これで <b>'+DB.count+'</b> 回目です</div>';
+  /* v20 (2026-09-03 ご依頼): 「これで N 回目です」の累計表示は取りやめ。 */
   /* v13: 落ち着いて振り返れるのはここ。項目ごとに感じたことを残せる。 */
   h += '<div class="sec">やってみて、どう感じましたか（任意）</div>';
   stepsOf(s).forEach(function(x,i){
@@ -2084,6 +2324,9 @@ function focusBegin(mode){
   tick = setInterval(tickRender, 250);
   view = "focus"; render();
   if(DB.focus.native) nativeTimer(fBlockSec());   /* 休憩までの1本だけ渡す（画面遷移を伴うので最後） */
+  /* v20 (2026-09-03): タイマーを渡さないときだけ、プレイリストを自動で開く。
+     どちらも前面のアプリを切り替えるので、同時にはできない（セットと同じ扱い）。 */
+  else openUrl(focusSpUrl());
 }
 /* v15: 入力された「次にやること」と長さで、次の区切りを始める。 */
 function askStart(){
@@ -2381,6 +2624,11 @@ function viewFocus(){
     }
   }
   h += '<p class="note">この画面は他のアプリを開くと止まりますが、戻れば時刻から計算し直すので、残り時間はズレません。<br><b>途中の区切りの合図は、この画面を開いているときだけ出ます。</b>iPhoneのタイマーは1本しか持てないので、渡してあるのは「休憩まで」の1本です。</p>';
+  /* v20 (2026-09-03 ご依頼): 集中ブロックからプレイリストを開く */
+  if(DB.focus.spotify){
+    h += '<button class="btn ghost" onclick="openUrl(focusSpUrl())">🎵 プレイリストを開く'+(focusSpUrl()?'':'（未設定）')+'</button>';
+    if(!focusSpUrl()) h += '<p class="note">集中の設定でURLを入れると、次回からここで開けます。</p>';
+  }
   h += '<button class="btn" onclick="focusFinish()">ここで終える</button>';
   h += '<button class="btn link" onclick="focusLeave()">やめて最初に戻る</button>';
   return h;
@@ -2429,12 +2677,27 @@ function focusSave(){
     var el = document.getElementById("ff_"+k);
     if(el){ var v = parseInt(el.value,10); if(v>=0 && v<=23) f.from[k] = v; }
   });
+  /* v20 (2026-09-03): 集中ブロック専用のプレイリストURL */
+  var su = document.getElementById("fsp_url");
+  if(su) f.spotifyUrl = su.value.trim();
   var sg = document.getElementById("fseg");
   if(sg){
     var arr = sg.value.split(/[,、\s]+/).map(function(x){ return parseInt(x,10); })
                 .filter(function(x){ return x>0 && x<=600; });
     if(arr.length) f.seg = arr;
   }
+  save();
+}
+/* v20 (2026-09-03 Q3 のご回答): 集中ブロックのプレイリスト。
+   既定のURLを使うか、集中専用のURLを使うかを選べる。 */
+function focusSpOn(){ focusSave(); DB.focus.spotify = !DB.focus.spotify; save(); render(); }
+function focusSpMode(m){ focusSave(); DB.focus.spMode = m; save(); render(); }
+/* v20: 就寝のプレイリスト（同じ形） */
+function sleepSpOn(){ sleepSpSave(); DB.sleepSpotify = !DB.sleepSpotify; save(); render(); }
+function sleepSpMode(m){ sleepSpSave(); DB.sleepSpMode = m; save(); render(); }
+function sleepSpSave(){
+  var el = document.getElementById("ssp_url");
+  if(el) DB.sleepSpotifyUrl = el.value.trim();
   save();
 }
 function notifyNote(){
@@ -2476,6 +2739,14 @@ function viewFocusSet(){
      + (f.notify && notifyState()!=="granted"
         ? '<button class="btn ghost" style="margin-top:4px" onclick="askNotify()">通知を許可する</button>' : '')
      + '</div>';
+  /* v20 (2026-09-03 ご依頼): 集中ブロックにもプレイリストを持たせた。 */
+  h += '<div class="sec">プレイリスト</div><div class="card">'
+     + spBlock(f.spotify, f.spMode, f.spotifyUrl, "focusSpOn()", "focusSpMode", "fsp_url")
+     + '<p class="note" style="margin-top:7px">集中ブロックの画面に「🎵 プレイリストを開く」が出ます。'
+     + (f.native
+        ? '<br><b>「iPhoneのタイマーへ渡す」がオンなので、始めた瞬間に自動では開きません。</b>開始時に前面へ出せるのはどちらか一方だけで、いまはタイマーが優先です。画面のボタンから開いてください。'
+        : '<br>「iPhoneのタイマーへ渡す」がオフなので、<b>集中を始めた瞬間に自動で開きます。</b>')
+     + '<br>Spotifyが前面に出るとこの画面は止まりますが、戻れば時刻から計算し直すので残り時間はズレません。</p></div>';
   h += '<div class="hint"><b>いちばん届くのは、PCのブラウザで開いておくことです。</b>'
      + '仕事中はPCの前にいるので、タブを裏にしていても区切りごとに通知が出ます。'
      + 'タブの見出しにも残り時間を出しているので、'
@@ -2519,14 +2790,14 @@ function collectSteps(s){
     return;
   }
   var rows = [], i = 0, sc;
-  while((sc = document.getElementById("sc_"+s.id+"_"+i))){
+  while((sc = document.getElementById("scm_"+s.id+"_"+i))){
     var old = parseStep(s.steps[i]==null ? "" : s.steps[i]);
     var tt = document.getElementById("st_"+s.id+"_"+i);
     var yy = document.getElementById("sy_"+s.id+"_"+i);
     var aa = document.getElementById("ap_"+s.id+"_"+i);
-    var n = parseInt(sc.value,10);
-    /* 空欄・0・マイナスは「変更なし」として前の値を残す（うっかり消えないように） */
-    var sec = (n>0) ? n : old.sec;
+    /* v20: 分・秒の2欄から読む。両方とも空・0なら「変更なし」として
+       前の値を残す（1欄だったころの決まりをそのまま引き継いでいる）。 */
+    var sec = msRead("scm_"+s.id+"_"+i, "scs_"+s.id+"_"+i, old.sec);
     var txt = (tt && tt.value.trim()) ? tt.value.trim() : old.text;
     var say = yy ? yy.value.trim() : old.say;
     var app = aa ? String(aa.value||"").trim() : old.app;   /* 「なし」を選べるので空欄も取り込む */
@@ -2554,9 +2825,8 @@ function recalc(id){
     n = arr.length;
   }else{
     var i = 0, sc;
-    while((sc = document.getElementById("sc_"+id+"_"+i))){
-      var v = parseInt(sc.value,10);
-      t += (v>0) ? v : 0;
+    while((sc = document.getElementById("scm_"+id+"_"+i))){
+      t += msRead("scm_"+id+"_"+i, "scs_"+id+"_"+i, 0);
       n++; i++;
     }
   }
@@ -2643,8 +2913,9 @@ function stepRows(s){
     var showSay = s.voice || !!x.say;
     h += '<div class="strow">'
        + '<div class="stline">'
-       + '<input class="inp stsec" type="number" inputmode="numeric" id="sc_'+s.id+'_'+i+'" value="'+x.sec+'" oninput="recalc(\''+s.id+'\')">'
-       + '<span class="stunit">秒</span>'
+       /* v20 (2026-09-03 ご依頼): 秒だけの1欄から、分・秒の2欄にした。
+          保存の形は今までどおり「秒」1つのまま（データの形は変えていない）。 */
+       + msInputs("scm_"+s.id+"_"+i, "scs_"+s.id+"_"+i, x.sec, "recalc('"+s.id+"')")
        + '<input class="inp" type="text" id="st_'+s.id+'_'+i+'" value="'+esc(x.text)+'">'
        + '</div>'
        + (showSay
@@ -2798,12 +3069,21 @@ function setCardArchived(s){
 }
 var showArchived = false;
 function toggleShowArchived(){ collect(); showArchived = !showArchived; armed = null; save(); render(); }
-function viewEdit(){
-  var h = '<h1>セットを編集・追加・削除</h1><p class="sub">タイトル・説明文・ステップ、すべて変えられます。<br>実行中でも、名前を直したり項目を足したりできます。<br>ステップは1行に1つ、<b>秒数|文言</b> の形です。読み上げる言葉を画面の文言と変えたいときだけ、<b>秒数|文言|読み上げ</b> と3つめを足します。<br><b>全体の時間は、ステップの秒数から自動で出ます。</b></p>';
-  h += '<div class="hint"><b>ステップの書き方</b><br>'
-     + '<b>60|温かい飲み物をいれる</b> … 60秒。読み上げも同じ文言<br>'
-     + '<b>4|吸う（4秒）</b> … 読み上げは「吸う」（（　）の中は読みません）<br>'
-     + '<b>7|止める（7秒）|息を止めて</b> … 読み上げだけ別の言葉にしたいとき<br><br>'
+/* ============================================================
+   v20 (2026-09-03 ご依頼): 編集画面を「一覧 → 選んだ1つだけ詳細」にした。
+   ------------------------------------------------------------
+   従来は actives.forEach で全セットのカードを一度に展開しており、
+   セットが増えるほど縦に伸びて、直したいものまでスクロールが長かった。
+   一覧では名前と長さだけを出し、押したセットだけを開く。
+   editId が null なら一覧、入っていればそのセットの詳細。
+   ============================================================ */
+var editId = null;
+function editGo(id){ collect(); editId = id; armed = null; save(); render(); }
+function editBack(){ collect(); editId = null; armed = null; save(); render(); }
+var EDIT_HINT = '<div class="hint"><b>ステップの書き方</b><br>'
+     + '<b>1分00秒｜温かい飲み物をいれる</b> … 読み上げも同じ文言<br>'
+     + '<b>0分04秒｜吸う（4秒）</b> … 読み上げは「吸う」（（　）の中は読みません）<br>'
+     + '読み上げだけ別の言葉にしたいときは、下の「読み上げ」欄に書きます。<br><br>'
      + '<b>開くアプリ</b>を選ぶと、その項目で Gym・ストレッチ・断食・持ち物 のアプリへ移れます。'
      + '新しいタブで開くので、実行中のルーティンはそのまま残ります。<br><br>'
      + '<b>自動で進む</b>にすると、秒数どおりに数えて次のステップへ勝手に進みます（タップ不要）。'
@@ -2811,34 +3091,72 @@ function viewEdit(){
      + 'ばらばらの内容なら「ステップ ○/○」になります。設定は要りません。<br><br>'
      + '<b>読み上げ</b>は、ホーム画面の「音声で切り替えを案内する」がオフだと、ここがオンでも鳴りません。<br>'
      + '<b>iPhoneのタイマーへ渡す</b>と、アプリを閉じていても鳴ります。<b>ショートカット「'+esc(DB.scName)+'」が要ります</b>（未作成なら何も起きません）。<br><br>'
-     + '<b>全体の時間は、ステップの秒数を足して自動で出します。</b>打ち込んでいる途中でもその場で数え直すので、'
+     + '<b>全体の時間は、ステップの分・秒を足して自動で出します。</b>打ち込んでいる途中でもその場で数え直すので、'
      + '別に総時間を入力する欄はありません（ステップを直したのに総時間だけ古いまま、という食い違いが起きないようにするためです）。<br>'
      + '呼吸法のセットを土台に別のルーティンを組みたいときは、<b>複製</b>から始めるのが早いです。<br><br>'
      + '<b>アーカイブ</b>は、習慣化するまでの間、前のセットを消さずに一覧から外しておくためのものです。中身は消えず、いつでも「復元」できます。</div>';
+/* 一覧に出す1行。押すとそのセットだけが開く。 */
+function editRow(s, tag){
+  return '<button class="setb" onclick="editGo(\''+s.id+'\')">'+esc(s.icon)+' '+esc(s.name)
+       + (tag ? '<span class="tag">'+tag+'</span>' : '')
+       + '<small>'+durLabel(limitOf(s))+' ・ '+countLabel(s)
+       + (s.timer ? ' ・ ⏱' : '') + (s.spotify ? ' ・ 🎵' : '')
+       + '<br>押すと、このセットだけを開いて編集します。</small></button>';
+}
+function viewEdit(){
+  /* --- 選んだ1つだけを開く --- */
+  if(editId){
+    var s1 = setOf(editId);
+    if(!s1){ editId = null; return viewEdit(); }
+    var h1 = '<h1>'+esc(s1.icon)+' '+esc(s1.name)+'</h1>';
+    h1 += '<p class="sub">このセットだけを開いています。ほかのセットは一覧から選んでください。</p>';
+    h1 += '<button class="btn ghost" style="margin-top:0" onclick="editBack()">← セットの一覧へ戻る</button>';
+    if(s1.archived)    h1 += setCardArchived(s1);
+    else if(s1.hidden) h1 += setCardHidden(s1);
+    else               h1 += setCardActive(s1, idxOf(s1.id));
+    h1 += '<button class="btn save" onclick="collect();save();editBack()">保存して一覧へ戻る</button>';
+    h1 += '<p class="note">空にした欄は、変更なしとして扱います（うっかり消えないようにするためです）。説明文とプレイリストURLだけは空にできます。<br>並べ替え・複製・削除・追加・トグルの切り替え・アーカイブ・復元は、押した時点でその場で保存されます。</p>';
+    h1 += EDIT_HINT;
+    h1 += '<button class="btn ghost" onclick="collect();save();go(\'home\')">ホームへ</button>';
+    return h1;
+  }
+  /* --- 一覧 --- */
+  var h = '<h1>セットを編集・追加・削除</h1>';
+  h += '<p class="sub">直したいセットを1つ選んでください。<b>選んだものだけ</b>が開きます。</p>';
   var actives = [], hiddens = [], archiveds = [];
   DB.sets.forEach(function(s){
     if(s.archived) archiveds.push(s);
     else if(s.hidden) hiddens.push(s);
     else actives.push(s);
   });
-  actives.forEach(function(s){ h += setCardActive(s, idxOf(s.id)); });
+  h += '<div class="sec">ホーム画面に出るセット</div>';
+  actives.forEach(function(s){ h += editRow(s, s.rescue ? '崩れたとき用' : ''); });
+  h += '<button class="btn ghost" onclick="addSet()">＋ セットを追加する</button>';
   if(hiddens.length){
     h += '<div class="sec">🌙 非表示（自動でのみ使う下ごしらえ）</div>';
-    hiddens.forEach(function(s){ h += setCardHidden(s); });
+    hiddens.forEach(function(s){ h += editRow(s, '非表示'); });
+    h += '<p class="note">ホーム画面のボタンには出ませんが、<b>中身はここから直せます</b>（「🛌 就寝」を押したときに自動で始まるストレッチなど）。</p>';
   }
-  h += '<button class="btn ghost" onclick="addSet()">＋ セットを追加する</button>';
   if(archiveds.length){
     h += '<button class="btn ghost" onclick="toggleShowArchived()">'
        + (showArchived ? '📦 アーカイブ済みを隠す' : '📦 アーカイブ済みを表示する（'+archiveds.length+'件）')+'</button>';
     if(showArchived){
       h += '<div class="sec">📦 アーカイブ済み</div>';
-      archiveds.forEach(function(s){ h += setCardArchived(s); });
+      archiveds.forEach(function(s){ h += editRow(s, 'アーカイブ済み'); });
     }
   }
-  h += '<button class="btn save" onclick="collect();save();go(\'home\')">保存する</button>';
-  h += '<p class="note">空にした欄は、変更なしとして扱います（うっかり消えないようにするためです）。説明文とプレイリストURLだけは空にできます。<br>並べ替え・複製・削除・追加・トグルの切り替え・アーカイブ・復元は、押した時点でその場で保存されます。</p>';
+  /* v20: 「集中ブロックと睡眠が編集できないように見える」というご質問への答えを、
+     アプリの中に置いた（この一覧に出ないのは、どちらもセットではないため）。 */
+  h += '<div class="sec">この一覧に出ないもの</div>';
+  h += '<div class="card"><p class="note" style="margin:0">'
+     + '<b>🎯 集中ブロック</b>と<b>🛌 就寝の見守り</b>は「セット」ではないので、ここには出ません。<b>編集できないわけではありません。</b><br><br>'
+     + '・集中ブロックの長さ・区切り・合図・プレイリスト … ホーム →「🎯 集中ブロック」→ <b>⚙ 設定</b><br>'
+     + '・就寝のプレイリスト … ホーム画面の<b>「設定」</b><br>'
+     + '・就寝を押したときに流れるストレッチの中身 … 上の<b>🌙 非表示</b>にある「就寝前のストレッチ」'
+     + '</p></div>';
+  h += EDIT_HINT;
   h += '<button class="btn link" onclick="resetAll()">既定のセットに戻す</button>';
-  h += '<button class="btn ghost" onclick="collect();save();go(\'home\')">戻る</button>';
+  h += '<button class="btn ghost" onclick="go(\'home\')">ホームへ</button>';
   return h;
 }
 function move(id,d){
@@ -3028,8 +3346,8 @@ function viewAbout(){
   var h = '<h1>このアプリが持つもの・持たないもの</h1>';
   h += '<div class="card"><p class="sub" style="margin:0">'
     + '<b style="color:#e0a86a">持つもの（2026-08-15に足しました）</b><br>'
-    + '・押した回数の累計<br>'
     + '・押した日時と、どのセットを、いくつやれたか<br>'
+    + '・今週（月〜日）、どの日にどれをやったか<br>'
     + '　いずれも<b>起きた事実だけ</b>です。<b>崩れても減りません。</b><br>'
     + '　記録はこの端末の中だけに置きます。'
     + '</p></div>';
