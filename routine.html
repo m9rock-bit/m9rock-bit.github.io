@@ -137,7 +137,7 @@ label{display:block;font-size:12.5px;color:#8a94a6;margin:12px 0 5px}
 .wk td.nm{text-align:left;color:#c9d1de;padding-right:8px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .wk .td{background:#1a1f28}
 .wk .e{color:#39404d}
-.stbtns{display:flex;gap:6px;margin-top:8px}
+.stbtns{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
 .stbtns button{
   flex:1;background:#232b38;border:1px solid #303a4a;color:#cbd5e3;border-radius:9px;
   padding:9px 2px;font-size:12.5px;font-family:inherit;cursor:pointer;font-weight:600;
@@ -224,6 +224,40 @@ label{display:block;font-size:12.5px;color:#8a94a6;margin:12px 0 5px}
      【自動進行セットの全体時間】ステップの合計から毎回計算します（制限
      時間の欄は出しません）。ステップを増減したときに総時間だけ古いまま
      残る事故を防ぐためです。
+
+   v21: 2026-09-03（チャットでのご依頼・タップ式セットの時間の数え方）
+     ご依頼は5点。「セット中でも順番を入れ替えたい／タップして実施した分も
+     累計に入れたい／順番が前後して別のステップを押したら、そこまでを中断
+     扱いにして、戻ったら中断したところから再開したい／そのステップに計
+     どのくらいかかったかを記録に残したい／メモは実施中に書くので、セット
+     完了後のメモ書きは不要」。
+
+     【中断・再開できる時間の数え方】項目ごとに「これまでに使った合計秒数」
+     を持たせた（stepAcc）。従来は「いまの項目を始めた時刻（stepAt）からの
+     経過」だけを見ていたので、別の項目へ移った瞬間にそこまでの時間が消えて
+     いた。いまは項目を移る・飛ばす・完了する・終える、どの経路でも必ず
+     commitSeg() を通してそこまでの秒数を項目に足してから動く。戻ってくると
+     その続きから数え直す。実行画面では、いまの項目に「（中断前の 1:20 を
+     含む）」、他の行に「中断中 1:20 / 使用中 0:40 / 実際 2:10」と出る。
+     【次に触る人向け】項目の位置を動かす処理（moveStep・runAdd）を足す
+     ときは、doneSet だけでなく stepAcc・stepExtra・runTimes も一緒に
+     動かすこと（添字で持っているため）。swapK / shiftK がその係。
+
+     【実績の記録条件を変えた】従来は「順番どおりに進めた項目だけ（完了時に
+     i===curStep だったときだけ）」DB.times に残していたので、順番を前後
+     させると記録が残らなかった。いまは**その回にその項目へ使った合計時間**
+     を残す（act＝stepAcc の合計）。飛ばした項目（–）は従来どおり記録
+     しない。振り返り画面の文言もこれに合わせて直した。
+
+     【実行中の並べ替え】いま見ている項目に「↑ 上へ / ↓ 下へ」を足した
+     （moveStep）。**入れ替えた順番はセットにそのまま残る**（＝次回もこの
+     順番で始まる）。既存の「＋ 次に足す」がセットに残るのと同じ扱いに
+     揃えた。別の項目を動かしたいときは、その行をタップして移ってから押す。
+
+     【完了画面のメモ入力欄を廃止】「やってみて、どう感じましたか」の入力欄
+     （doneNote）を削除。メモは実行中の「💬 メモ」（runNote）から書く。
+     空いたところには、この回に項目ごとどれだけかかったかの一覧を置いた
+     （自動進行セットは stepAcc を使わないので出さない）。
 
    v18: 2026-09-01（チャットでのご依頼・自動進行の「次へ▶」を操作しやすく）
      「あるルーティンをスキップして次に進むボタンを操作しやすい形にしてほしい」
@@ -672,6 +706,10 @@ var armed = null;   /* 削除の1回目を押したセットid（2回押しで�
 var runIdx = null;  /* この回の履歴の位置。1回の実行で1件しか増やさないための目印 */
 /* v14: いまの項目を始めた時刻 / この回だけの延長（秒） / この回に足した実績の記録 */
 var stepAt = 0, stepExtra = {}, runTimes = {};
+/* v21 (2026-09-03 ご依頼): 項目ごとの「これまでに使った合計秒数」。
+   別の項目へ移った時点でそこまでを確定（＝中断）し、戻ったら続きから数える。
+   順番が前後しても、その項目に居た時間はすべてその項目に積まれる。 */
+var stepAcc = {};
 var clearArmed = false; /* 履歴の消去も2回押し */
 
 /* --- v4: auto セット（4-7-8呼吸法）の状態 ---------------------
@@ -837,12 +875,12 @@ function runAdd(pos){
   var line = ioSec() + "|" + txt;
   if(pos==null || pos<0 || pos>s.steps.length) pos = s.steps.length;
   s.steps.splice(pos, 0, line);
-  var nd = {};
-  Object.keys(doneSet).forEach(function(k){
-    var i = parseInt(k,10);
-    nd[i<pos ? i : i+1] = doneSet[k];
-  });
-  doneSet = nd;
+  /* v21: 済み・未済だけでなく、貯めた時間・延長・この回の実績も一緒にずらす
+     （従来は doneSet だけで、途中に差し込むと他がずれていた） */
+  doneSet   = shiftK(doneSet, pos);
+  stepAcc   = shiftK(stepAcc, pos);
+  stepExtra = shiftK(stepExtra, pos);
+  runTimes  = shiftK(runTimes, pos);
   if(curStep >= pos) curStep++;
   save();
   inputOpen = null; render();
@@ -862,13 +900,8 @@ function runNote(i){
   if(st[i]) addNote(s.id, st[i].text, ioVal());
   inputOpen = null; render();
 }
-/* 終わったあとの画面から書くとき（こちらは自動再描画が無いので素直に書ける） */
-function doneNote(i){
-  var s = setOf(curId); if(!s) return;
-  var st = stepsOf(s), el = document.getElementById("dn_"+i);
-  if(!el || !st[i]) return;
-  if(addNote(s.id, st[i].text, el.value)) render();
-}
+/* v21 (2026-09-03): 完了画面のメモ入力欄を廃止したため doneNote() は削除。
+   メモは実行画面の「💬 メモ」（runNote）と、編集画面から書く。 */
 function logRun(){
   var s = setOf(curId); if(!s) return;
   var n = s.steps.length, d = 0;
@@ -1339,7 +1372,7 @@ function start(id, fromIndex){
   curId = id; doneSet = {}; curStep = fromIndex||0;
   for(var i=0;i<curStep;i++) doneSet[i] = "skip";
   startAt = Date.now();
-  stepAt = startAt; stepExtra = {}; runTimes = {};
+  stepAt = startAt; stepExtra = {}; runTimes = {}; stepAcc = {};
   runIdx = null;
   autoPaused = false; pauseAt = 0; autoFinished = false;
   var s = setOf(id);
@@ -1355,7 +1388,7 @@ function start(id, fromIndex){
   if(s && s.timer && limitOf(s)>0) nativeTimer(limitOf(s));
   else openSpotify(s);   /* set.spotify が入っているセットだけ開く（中で判定） */
 }
-function stop(){ if(tick) clearInterval(tick); tick=null; startAt=0; curId=null; doneSet={}; curStep=0; runIdx=null; autoPaused=false; pauseAt=0; autoFinished=false; stepAt=0; stepExtra={}; runTimes={}; inputOpen=null; autoShift=0; }
+function stop(){ if(tick) clearInterval(tick); tick=null; startAt=0; curId=null; doneSet={}; curStep=0; runIdx=null; autoPaused=false; pauseAt=0; autoFinished=false; stepAt=0; stepExtra={}; runTimes={}; stepAcc={}; inputOpen=null; autoShift=0; }
 
 /* ============================================================
    v16: 🛌就寝＋🌃中途覚醒対応
@@ -1451,7 +1484,23 @@ function stepSec(i){
   if(!st[i]) return 60;
   return st[i].sec + (stepExtra[i]||0);
 }
-function stepUsed(){ return stepAt ? Math.floor((Date.now()-stepAt)/1000) : 0; }
+/* v21: いま数えている区間の秒数（中断中は0） */
+function segUsed(){ return stepAt ? Math.floor((Date.now()-stepAt)/1000) : 0; }
+function accOf(i){ return stepAcc[i]||0; }
+/* v21: いまの項目に使った合計＝これまで貯めた分＋いま数えている分 */
+function stepUsed(){ return accOf(curStep) + segUsed(); }
+/* v21: どの項目でも「合計どれだけ使ったか」を出せる（一覧・完了画面用） */
+function usedOf(i){ return accOf(i) + (i===curStep ? segUsed() : 0); }
+/* v21: いま数えている分をその項目に確定して、時計を止める（＝中断）。
+   項目を移る前・完了する前・終える前に必ず通す。二重に足さないよう
+   stepAt は0に落とす。自動で進むセットは経過秒から位置を逆算する方式なので
+   ここでは何もしない（stepAcc を使わない）。 */
+function commitSeg(){
+  var s = setOf(curId);
+  if(s && s.auto){ return; }
+  if(stepAt && curStep!=null && curStep>=0){ stepAcc[curStep] = accOf(curStep) + segUsed(); }
+  stepAt = 0;
+}
 function stepLeft(){ return stepSec(curStep) - stepUsed(); }
 /* v19: 完了予定時刻（2026-09-02追加）。
    8/22にv15として「実装した」と記録していたが、実際のファイルには保存されて
@@ -1463,7 +1512,8 @@ function etaSec(){
   if(s.auto) return Math.max(0, limitOf(s) - curElapsed());
   var st = stepsOf(s);
   var r = (curStep < st.length) ? Math.max(0, stepLeft()) : 0;
-  for(var i=curStep+1;i<st.length;i++){ if(!doneSet[i]) r += stepSec(i); }
+  /* v21: 途中まで進めて中断してある項目は、残りだけを足す */
+  for(var i=curStep+1;i<st.length;i++){ if(!doneSet[i]) r += Math.max(0, stepSec(i) - accOf(i)); }
   return r;
 }
 function etaLabel(){ return hhmm(Date.now() + etaSec()*1000); }
@@ -1482,9 +1532,42 @@ function extendStep(sec){
 function gotoStep(i){
   var s = setOf(curId); if(!s) return;
   if(i<0 || i>=s.steps.length) return;
+  if(i===curStep){ render(); return; }
+  /* v21: いまの項目はここで中断する。そこまでに使った時間はその項目に残り、
+     戻ってきたときは続きから数え直す（0に戻さない）。 */
+  commitSeg();
   curStep = i;
   stepAt = Date.now();
   render();
+}
+/* v21 (2026-09-03 ご依頼): 実行中に項目の順番を入れ替える。
+   並べ替えは**セットにそのまま残る**（次回も この順番で始まる）。既存の
+   「＋ 次に足す」がセットに残るのと同じ扱い。済み・未済の印、貯めた時間、
+   この回の延長・実績も一緒に動かす（添字で持っているため）。 */
+function moveStep(i, d){
+  var s = setOf(curId); if(!s) return;
+  var j = i + d;
+  if(i<0 || i>=s.steps.length || j<0 || j>=s.steps.length) return;
+  var wasRunning = !!stepAt;
+  commitSeg();
+  var tmp = s.steps[i]; s.steps[i] = s.steps[j]; s.steps[j] = tmp;
+  swapK(doneSet,i,j); swapK(stepAcc,i,j); swapK(stepExtra,i,j); swapK(runTimes,i,j);
+  if(curStep===i) curStep = j; else if(curStep===j) curStep = i;
+  if(wasRunning) stepAt = Date.now();
+  save();
+  render();
+}
+function swapK(o,i,j){
+  var a = o[i], b = o[j];
+  if(b===undefined) delete o[i]; else o[i] = b;
+  if(a===undefined) delete o[j]; else o[j] = a;
+}
+/* v21: 途中に1つ差し込んだときに、添字で持っている印を全部ずらす。
+   従来は doneSet だけをずらしていて、延長・実績・貯めた時間がずれていた。 */
+function shiftK(o, pos){
+  var n = {};
+  Object.keys(o).forEach(function(k){ var i = parseInt(k,10); n[i<pos ? i : i+1] = o[k]; });
+  return n;
 }
 /* v20: 済みにした項目を元に戻す。中身は従来 toggleStep の中にあった
    取り消しの処理をそのまま出したもの（この回に足した実績も一緒に消す）。 */
@@ -1498,6 +1581,10 @@ function undoStep(i){
     save();
   }
   delete doneSet[i];
+  /* v21: いま居る項目を中断してから戻る。
+     取り消した項目に貯まっている時間（stepAcc）は**消さない**。
+     もう一度やり直すときも、そこまでの分に続けて数える。 */
+  commitSeg();
   curStep = i;
   stepAt = Date.now();
   render();
@@ -1519,13 +1606,20 @@ function toggleStep(i){
     stepAt = Date.now();
     render(); return;
   }
+  /* v21 (2026-09-03 ご依頼): まず、いま数えている分をその項目に確定する。
+     そのうえで「この回にその項目へ使った合計時間」を実績として残す。
+     従来は「順番どおりに進めた項目だけ（i===curStep のとき）」しか記録
+     していなかったので、順番を前後させると実績が残らなかった。いまは
+     中断・再開をはさんでも合計で残る＝触った項目はすべて記録される。 */
+  var start0 = stepAt || Date.now();
+  if(i===curStep) commitSeg();
   doneSet[i] = "done";
-  /* 順番どおりに進めたときだけ、実際にかかった時間を残す */
-  if(i===curStep && stepAt){
+  var total = accOf(i);
+  if(total > 0){
     var xx = stepsOf(s)[i];
     if(xx){
-      var rec = { t:stepAt, sid:s.id, step:noteKey(xx.text),
-                  plan:stepSec(i), act:Math.max(0, Math.round((Date.now()-stepAt)/1000)) };
+      var rec = { t:start0, sid:s.id, step:noteKey(xx.text),
+                  plan:stepSec(i), act:Math.max(0, total) };
       DB.times.push(rec);
       if(DB.times.length > TIMEMAX) DB.times = DB.times.slice(DB.times.length - TIMEMAX);
       runTimes[i] = rec;
@@ -1554,6 +1648,10 @@ function skipStep(){
   var s = setOf(curId); if(!s) return;
   var st = stepsOf(s);
   if(curStep >= st.length) return;
+  /* v21: 飛ばす前に、そこまでに使った時間は項目に残す（実績としては
+     記録しない＝「やっていない項目の所要時間」を作らないため）。
+     取り消して戻ったときは、この続きから数える。 */
+  commitSeg();
   doneSet[curStep] = "skip";
   stepAt = Date.now();
   var next = -1;
@@ -1568,6 +1666,8 @@ function skipStep(){
 }
 function enterDone(){
   if(tick) clearInterval(tick); tick=null;
+  /* v21: 「ここまでで終える」で切り上げた項目の時間も、そこまでを残す */
+  commitSeg();
   logRun();          /* 終わりまで来た回は、0ステップでも「押した」事実として残す */
   /* v16: 手動終了（「ここまでで終える」）も、自然終了（autoTick）と必ず同じ
      分岐を通す。ここだけ直して autoTick 側を直し忘れると、8/23と同じ
@@ -1888,6 +1988,7 @@ function viewRun(){
   h += '<div class="bigsub">'+(sl<0 ? 'この項目の予定を過ぎています。続けて大丈夫です' : 'この項目の残り時間')+'</div>';
   h += '<div class="bar"><i style="width:'+spct+'%"></i></div>';
   h += '<p class="note" style="text-align:center;margin-top:9px">この項目に使った時間 <b>'+mmss(stepUsed())+'</b>'
+     + (accOf(curStep) ? '（中断前の '+mmss(accOf(curStep))+' を含む）' : '')
      + (stepExtra[curStep] ? '（延長 +'+durLabel(stepExtra[curStep])+'）' : '')
      + '<br>ルーティン全体： 経過 '+mmss(elapsed())+' ／ 目安 '+durLabel(lim)
      + '<br>このまま進むと <b>'+etaLabel()+'</b> ごろ終わります</p>';
@@ -1918,7 +2019,9 @@ function viewRun(){
     h += '<div class="'+cls+'" onclick="gotoStep('+i+')"><div class="n">'+mark+'</div>'
        + '<div class="t">'+(doneSet[i]==="skip"?'<s>'+esc(x.text)+'</s>':esc(x.text))
        + (ap0 ? ' <span class="tag">'+ap0.icon+' '+esc(ap0.name)+'</span>' : '')
-       + '<em>目安 '+durLabel(x.sec)+(stepExtra[i]?'（延長 +'+durLabel(stepExtra[i])+'）':'')+'</em></div></div>';
+       + '<em>目安 '+durLabel(x.sec)+(stepExtra[i]?'（延長 +'+durLabel(stepExtra[i])+'）':'')
+       + (usedOf(i) ? '　／　'+(doneSet[i] ? '実際 ' : (i===curStep ? '使用中 ' : '中断中 '))+mmss(usedOf(i)) : '')
+       + '</em></div></div>';
     /* v13: いまの項目にだけ、メモと「次に足す」を出す。
        全部の行に出すと、行そのもののタップと取り合いになるため。
        v20: 行のタップは「移る」だけになったが、ボタンを全行に出すと
@@ -1954,6 +2057,10 @@ function viewRun(){
            + '</div></div>';
       }else{
         h += '<div class="stbtns" style="margin:-4px 0 10px">'
+           /* v21 (2026-09-03 ご依頼): 実行中に順番を入れ替える。
+              入れ替えた順番はセットにそのまま残る。 */
+           + '<button onclick="moveStep('+i+',-1)"'+(i===0?' disabled':'')+'>↑ 上へ</button>'
+           + '<button onclick="moveStep('+i+',1)"'+(i===st.length-1?' disabled':'')+'>↓ 下へ</button>'
            + '<button onclick="openInput(\'note:'+i+'\')">💬 メモ</button>'
            + '<button onclick="openInput(\'name:'+i+'\')">✏️ 名前を直す</button>'
            + '<button onclick="openInput(\'add:'+(i+1)+'\')">＋ 次に足す</button>'
@@ -1982,8 +2089,9 @@ function viewRun(){
     h += '<button class="btn ghost" onclick="openInput(\'add:end\')">＋ いまの項目の次に1つ足す</button>';
   }
   h += '<p class="note"><b>行をタップすると、その項目へ移ります（完了にはなりません）。</b>完了は上の「✓ できた — 次へ」です。<br>'
+     + '<b>移ると、それまでの項目は「中断中」になり、そこまでに使った時間はその項目に残ります。</b>戻ってくれば、その続きから数え直します。順番が前後しても、かかった時間は項目ごとに合計で記録されます。<br>'
      + '下の行から始めても構いません（上は「–」になるだけで、失敗にはなりません）。<br>'
-     + '<b>足したものは、このセットにそのまま残ります。</b>やりながら形を作っていって構いません。</p>';
+     + '<b>足したもの・入れ替えた順番は、このセットにそのまま残ります。</b>やりながら形を作っていって構いません。</p>';
   h += '<button class="btn ghost" onclick="nativeTimer()">⏱ iPhoneのタイマーにも残り'+Math.max(1,Math.round(left()/60))+'分を渡す</button>';
   h += '<p class="note">この画面は他のアプリを開くと止まります（戻れば時刻から計算し直すのでズレません）。<br><b>画面の上に残り時間を出したいときは、上のボタンでiPhone標準のタイマーへ渡してください。</b></p>';
   if(s.spotify){
@@ -2096,27 +2204,25 @@ function viewDone(){
   else if(d>0) h += '<div class="hint">'+d+'つやれました。<b>0か1かではありません。</b>次の合図でまた押せます。</div>';
   else h += '<div class="hint">今日はここまで。押したこと自体は残っています。次の合図でまた押してください。</div>';
   /* v20 (2026-09-03 ご依頼): 「これで N 回目です」の累計表示は取りやめ。 */
-  /* v13: 落ち着いて振り返れるのはここ。項目ごとに感じたことを残せる。 */
-  h += '<div class="sec">やってみて、どう感じましたか（任意）</div>';
-  stepsOf(s).forEach(function(x,i){
-    var prev = notesFor(s.id, x.text);
-    h += '<div class="dnrow">'
-       + '<div class="h">'+(doneSet[i]==="done"?'✓ ':(doneSet[i]==="skip"?'– ':''))
-       + (doneSet[i]==="skip" ? '<s>'+esc(x.text)+'</s>' : esc(x.text))+'</div>'
-       + '<input class="inp" type="text" id="dn_'+i+'" placeholder="例）これは要らない気がする／もっと短くていい" onchange="doneNote('+i+')">';
-    if(prev.length){
-      h += '<div class="nlist">';
-      prev.slice(0,3).forEach(function(o){
-        h += '<div class="nline"><span class="d">'+dayLabel(o.r.t)+'</span>'
-           + '<span style="flex:1">'+esc(o.r.v)+'</span>'
-           + '<button class="x" onclick="delNote('+o.i+');render()">×</button></div>';
-      });
-      if(prev.length>3) h += '<p class="note" style="margin:2px 0 0">ほか'+(prev.length-3)+'件は「セットを編集」で見られます。</p>';
-      h += '</div>';
-    }
+  /* v21 (2026-09-03 ご依頼): 完了後のメモ入力欄は廃止した。
+     「メモは実施中に書くことがほとんどなので、セット完了後のメモ書きは不要」
+     とのご指摘による。実行画面の「💬 メモ」はそのまま残してある。
+     空いたところには、この回に項目ごとどれだけかかったかを並べる
+     （順番を前後させても合計で数えている＝中断して戻った分も足してある）。 */
+  if(!s.auto){
+    h += '<div class="sec">この回、項目ごとにかかった時間</div>';
+    h += '<div class="dnrow">';
+    stepsOf(s).forEach(function(x,i){
+      var u = usedOf(i);
+      h += '<div class="nline"><span style="flex:1">'
+         + (doneSet[i]==="done" ? '✓ ' : (doneSet[i]==="skip" ? '– ' : '・'))
+         + (doneSet[i]==="skip" ? '<s>'+esc(x.text)+'</s>' : esc(x.text))+'</span>'
+         + '<b style="flex:none;color:'+(u ? '#9ec8a4' : '#6f7a8c')+'">'+(u ? mmss(u) : '—')+'</b>'
+         + '<span class="d">目安 '+durLabel(stepSec(i))+'</span></div>';
+    });
     h += '</div>';
-  });
-  h += '<p class="note">書かなくて構いません。書いたものは<b>この端末の中だけ</b>に残り、次に同じ項目をやるときと、「セットを編集」の画面に出ます。<br>いま形を探している最中なら、ここのメモがそのまま材料になります。</p>';
+    h += '<p class="note">触った項目は、順番が前後していても<b>合計時間</b>で残しています（中断して戻った分も足しています）。飛ばした項目（–）は記録しません。<br>この時間は「📊 このルーティンの振り返り」で平均になり、予定の秒数を合わせ直す材料になります。</p>';
+  }
   h += '<p class="note">この記録はこの端末の中だけに残ります。Obsidian・Points Tracker には入りません。<br>連続日数と達成率は数えていません。</p>';
   if(!s.rescue && d<n) h += '<button class="btn ghost" onclick="go(\'run\');tick=setInterval(tickRender,250)">続きに戻る</button>';
   if(fromFocus && fStart){
@@ -3300,7 +3406,7 @@ function viewReview(){
         h += '<p class="note" style="margin-top:5px">予定と実績が合っています。</p>';
       }
     }else{
-      h += '<p class="note" style="margin:4px 0 0">まだ実績がありません（順番どおりに進めた回だけ記録します）。</p>';
+      h += '<p class="note" style="margin:4px 0 0">まだ実績がありません（「✓ できた」で完了した項目だけ記録します）。</p>';
     }
     if(ns.length){
       h += '<div class="nlist" style="margin-top:8px;border-top:1px solid #262d3a;padding-top:7px">';
@@ -3335,7 +3441,7 @@ function viewReview(){
     });
     h += '<p class="note">消した項目のメモと実績も、ここに残しています。<b>戻したくなったときの材料です。</b></p>';
   }
-  h += '<p class="note">実績は「順番どおりに進めた項目」だけを数えています（飛ばしてタップした回は、どこからどこまでか決められないので数えません）。<br>'
+  h += '<p class="note">実績は「✓ できた」で完了した項目を数えています。<b>順番を前後させても、その項目に使った時間は合計で入ります</b>（別の項目へ移って戻ったぶんも足しています）。飛ばした項目（–）は数えません。<br>'
      + '<b>できなかった回数・守れた率のような数は出しません。</b>形を直すための材料だけを置いています。</p>';
   h += '<button class="btn ghost" onclick="go(\'edit\')">セットを編集する</button>';
   h += '<button class="btn ghost" onclick="go(\'home\')">戻る</button>';

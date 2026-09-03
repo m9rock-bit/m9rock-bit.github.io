@@ -172,6 +172,13 @@ textarea{width:100%;height:120px;background:#12151c;border:1px solid #303a4a;col
        「その種目のいまの種類」として読む＝v4以前の記録もそのまま出る。
      ・バンドの言葉を後から改名しても、過去の記録は**押した当時の言葉のまま**残る
        （記録は事実なので、あとから書き換えない）。
+   ■ v7（2026-09-03、提案_2026-09-03_ジムアプリ有酸素記録の設計 のご回答）: 有酸素（トレッドミル）
+     30分あたりの走行距離・消費カロリーを伸ばすための記録。Garminが持たない
+     「設定した速度・傾斜」と「主観のきつさ」、そして「次回どう設定するか」を持つ。
+     区間タイマー（Q1=②）・区間分け・推移グラフつき（Q4）。傾斜を先に上げる（Q2）。
+     1段は 傾斜+0.5% / 速度+0.2km/h（Q3）。詳細は下の「v7: 有酸素」ブロックのコメント。
+     ※同じ日にもう一つの v6（休憩終わりの音・視覚の合図）が入っているため、
+       こちらは v7 としています。
    ========================================================================= */
 
 const KEY="bmc_gym_v1";
@@ -241,6 +248,20 @@ const ALT = {
    古い定義には load が無いので、unit から読み替える（冪等・過去データを書き換えない）。 */
 const LOADS=[{id:"kg",label:"重さ（kg）"},{id:"bw",label:"自重"},{id:"band",label:"バンド"}];
 const BANDS_DEF=["Light","Medium","Heavy"];
+
+/* ---------- v7（2026-09-03）: 有酸素の既定値。初期化で使うのでここに置く ---------- */
+const CARDIO_DEF={
+  plan:[{lb:"ウォームアップ",min:5,sp:5.0,inc:2.0},
+        {lb:"メイン",       min:23,sp:6.8,inc:3.0},
+        {lb:"クールダウン", min:5,sp:4.5,inc:2.0}],
+  spStep:0.2, incStep:0.5, incCap:4.0
+};
+const NORM=30;                    /* グラフの換算基準（30分あたり） */
+const HARDS=["余裕","ちょうどよい","きつい"];
+
+
+
+
 function loadOf(e){ return e && e.load ? e.load : ((e && e.unit==="自重") ? "bw" : "kg"); }
 function bands(){ return DB.settings.bands; }
 function unitOf(ld){ return ld==="bw" ? "自重" : (ld==="band" ? "バンド" : "kg"); }
@@ -309,6 +330,15 @@ if(!ENVS.some(function(x){return x.id===DB.settings.env})) DB.settings.env="gym"
 if(!DB.settings.alt || typeof DB.settings.alt!=="object") DB.settings.alt={};
 /* v5: バンドの言葉。**並び順が弱い→強い**を表す（この配列そのものが強さの順序）。 */
 if(!Array.isArray(DB.settings.bands) || !DB.settings.bands.length) DB.settings.bands=BANDS_DEF.slice();
+/* v7: 有酸素。既存データには無いので、無いときだけ既定を置く（冪等・過去は触らない） */
+if(!Array.isArray(DB.cardio)) DB.cardio=[];
+if(!DB.settings.cardio || typeof DB.settings.cardio!=="object") DB.settings.cardio={};
+if(!Array.isArray(DB.settings.cardio.plan) || !DB.settings.cardio.plan.length)
+  DB.settings.cardio.plan=JSON.parse(JSON.stringify(CARDIO_DEF.plan));
+if(typeof DB.settings.cardio.spStep!=="number")  DB.settings.cardio.spStep=CARDIO_DEF.spStep;
+if(typeof DB.settings.cardio.incStep!=="number") DB.settings.cardio.incStep=CARDIO_DEF.incStep;
+if(typeof DB.settings.cardio.incCap!=="number")  DB.settings.cardio.incCap=CARDIO_DEF.incCap;
+
 function restSec(){ return DB.settings.rest; }
 function save(){
   try{ localStorage.setItem(KEY,JSON.stringify(DB)); }
@@ -580,12 +610,487 @@ function dropHint(id){
   </div>`;
 }
 
+/* ===================== v7（2026-09-03）: 有酸素（トレッドミル） =====================
+   提案_2026-09-03_ジムアプリ有酸素記録の設計 のQ1〜Q5へのご回答どおりに作っています。
+
+   ■ 設計の骨格
+     1. 距離を目標にしない。**速度・傾斜（設定）を目標にする。**
+        30分と決めれば 距離＝平均速度×時間 で、距離そのものは操作できない。
+        操作できるのは速度と傾斜だけ。距離・カロリーは「伸びたことの確認」に回す。
+     2. 上げる引き金は数字ではなく **主観のきつさ**。
+        同じ設定で2回続けて「余裕／ちょうどよい」で走り切れたら1段上げる
+        （筋トレのダブル・プログレッションの有酸素版）。
+     3. 入力は走り終えた直後に3つだけ（距離・カロリー・きつさ）。
+
+   ■ Garminとの役割分担（重複させない）
+     Garmin = 実測（心拍・距離・時間）。アプリ = 設定値・主観のきつさ・次回の設定。
+     距離とカロリーは**トレッドミルの表示の転記**。Garminとずれてよい
+     （毎回同じ物差しで並べば伸びは見えるため、そろえる必要がない）。
+
+   ■ この画面の「やらないこと」（gym.html 全体の方針と同じ）
+     ・自己ベスト・連続日数・達成バッジ・目標距離を持たない
+     ・「先週より遅い」「目標に届いていない」を表示しない
+     ・グラフに目標線を引かない。最高値を強調しない。下がった点の色を変えない
+     ・上げる案内は必ず断れる（「今日は据え置き」）。下げるのも正しい選択として書く
+
+   ■ 上げ方（cardioAdvice）
+     ・対象は **いちばん長い区間（メイン）** ひとつだけ。ここ以外は自動で動かさない
+     ・傾斜を先に上げる（着地の衝撃が増えないため）。incCap に達したら速度に切り替え
+     ・1段 = 傾斜 +0.5% ／ 速度 +0.2km/h（設定で変更可）
+     ・「きつい」が2回続いたら1段戻す提案。1回なら据え置き（何も言わない）
+
+   ■ 記録の持ち方
+     ・DB.cardio に別配列で持つ（筋トレの DB.sessions とは混ぜない。
+       走るだけの日・筋トレだけの日があるため）
+     ・plan は**その回の記録の中にコピーで持つ**。あとから既定を変えても過去は変わらない
+       （記録は事実なので書き換えない、という v5 までと同じ原則）
+     ・時間が毎回違う（33分の日も25分の日もある）ので、グラフは **30分あたりに換算**した値。
+       生の値は一覧に残す
+   ==================================================================================== */
+
+/* CARDIO_DEF / NORM / HARDS は初期化より前に必要なため上で定義しています */
+
+function cSet(){ return DB.settings.cardio; }
+function cPlan(){ return cSet().plan; }
+function cClone(p){ return JSON.parse(JSON.stringify(p)); }
+function cTotal(p){ return p.reduce(function(a,s){return a+(+s.min||0)},0); }
+function mainIdx(p){
+  var k=0;
+  for(var i=1;i<p.length;i++){
+    if(p[i].min>p[k].min || (p[i].min===p[k].min && p[i].sp>p[k].sp)) k=i;
+  }
+  return k;
+}
+function mainOf(p){ return p[mainIdx(p)]||{sp:0,inc:0}; }
+function n1(v){ return (Math.round(v*10)/10).toFixed(1); }
+function pace(sp){
+  if(!sp||sp<=0) return "—";
+  var m=60/sp, mm=Math.floor(m), ss=Math.round((m-mm)*60);
+  if(ss===60){ mm++; ss=0; }
+  return mm+":"+String(ss).padStart(2,"0")+"/km";
+}
+function per30(v,min){ return (min>0? v*NORM/min : 0); }
+function segLine(s){ return (s.lb?esc(s.lb)+" ":"")+s.min+"分 ／ "+n1(s.sp)+"km/h ／ 傾斜"+n1(s.inc)+"%"; }
+
+/* ---------- 上げ下げの判断 ---------- */
+function cardioAdvice(){
+  if(cHold) return null;
+  var cs=cSet(), p=cPlan(), cur=mainOf(p);
+  var recs=DB.cardio.slice(-2);
+  if(recs.length<2) return null;
+  var same=recs.every(function(r){
+    var m=mainOf(r.plan||[]);
+    return Math.abs(m.sp-cur.sp)<1e-9 && Math.abs(m.inc-cur.inc)<1e-9;
+  });
+  if(!same) return null;
+  if(recs.every(function(r){return r.hard>=3})){
+    return {dir:-1, field:(cur.inc>0 ? "inc":"sp")};
+  }
+  if(recs.every(function(r){return r.hard<=2})){
+    return {dir:1, field:(cur.inc < cs.incCap ? "inc":"sp")};
+  }
+  return null;
+}
+function advText(a){
+  var cs=cSet(), cur=mainOf(cPlan());
+  var step=(a.field==="inc"? cs.incStep : cs.spStep)*a.dir;
+  var from=(a.field==="inc"? cur.inc : cur.sp), to=Math.max(0, from+step);
+  return {from:from, to:to, unit:(a.field==="inc"?"%":"km/h"),
+          name:(a.field==="inc"?"傾斜":"速度"), field:a.field, to2:to};
+}
+function cardioApply(){
+  var a=cardioAdvice(); if(!a) return;
+  var t=advText(a), p=cPlan(), i=mainIdx(p);
+  p[i][a.field]=Math.round(t.to*100)/100;
+  save(); cHold=true; render();
+}
+function cardioHold(){ cHold=true; render(); }
+
+/* ---------- ホームのカード ---------- */
+function cardioCard(hideSec){
+  var p=cPlan(), a=cardioAdvice(), n=DB.cardio.length;
+  var last=n?DB.cardio[n-1]:null;
+  var adv="";
+  if(a){
+    var t=advText(a);
+    adv = a.dir>0
+      ? `<div class="hint">同じ設定で<strong>2回続けて余裕がありました。</strong>
+           メインの${t.name}を <strong>${n1(t.from)}${t.unit} → ${n1(t.to)}${t.unit}</strong> にしてみますか。
+           <div class="row" style="margin-top:9px">
+             <button class="btn" style="margin-top:0" onclick="cardioApply()">上げる</button>
+             <button class="btn ghost" style="margin-top:0" onclick="cardioHold()">今日は据え置き</button>
+           </div></div>`
+      : `<div class="hint">前回・前々回とも「きつい」でした。
+           メインの${t.name}を <strong>${n1(t.from)}${t.unit} → ${n1(t.to)}${t.unit}</strong> に戻せます。
+           <strong>戻すのも正しい選択です。</strong>体調・睡眠・生理周期でも変わります。
+           <div class="row" style="margin-top:9px">
+             <button class="btn ghost" style="margin-top:0" onclick="cardioApply()">1段戻す</button>
+             <button class="btn ghost" style="margin-top:0" onclick="cardioHold()">このままでいく</button>
+           </div></div>`;
+  }
+  return `
+  ${hideSec?"":`<div class="sec">🏃 有酸素（トレッドミル）</div>`}
+  <div class="card">
+    <div class="bigsub" style="margin-bottom:8px">今日の設定 ／ 合計 ${cTotal(p)}分</div>
+    ${p.map(function(s){return `<div class="prev">${segLine(s)}</div>`}).join("")}
+    ${adv}
+    <button class="btn" onclick="cStart()">走る（区間タイマーを動かす）</button>
+    <div class="row">
+      <button class="btn ghost" onclick="cPlanOpen('cardio')">設定を編集</button>
+      <button class="btn ghost" onclick="cInOpen(null)">あとから記録する</button>
+    </div>
+    <button class="btn ghost" onclick="go('cgraph')">推移と記録（${n}回）</button>
+    ${last?`<p class="note">前回 ${mdw(last.date)} ／ ${last.min}分 ${n1(last.dist)}km ${last.kcal}kcal ／ ${HARDS[(last.hard||2)-1]}</p>`:
+           `<p class="note">最初の1回を記録すると、次から「同じ設定で2回続けて余裕があれば1段上げる」の判定が始まります。</p>`}
+  </div>`;
+}
+
+/* ---------- 実行（区間タイマー） ----------
+   経過はすべて **開始時刻からの実時間** で計算する（setTimeout の連鎖にしない）。
+   iOSで画面を消したりバックグラウンドに回っても、戻れば正しい位置に自己修復するため。 */
+var cRun=null, cTimer=null, cWake=null, cHold=false, cRet="cardio", cSel=-1;
+
+/* 走行中の状態は localStorage にも置く。33分のあいだにiOSがページを捨てても、
+   開き直せば続きから動く（経過は開始時刻から計算しているので自己修復する）。 */
+function cSaveRun(){ DB.crun = cRun ? JSON.parse(JSON.stringify(cRun)) : null; save(); }
+function cLoop(){
+  if(cTimer) clearInterval(cTimer);
+  cTimer=setInterval(function(){
+    if(!cRun){ clearInterval(cTimer); cTimer=null; return; }
+    cTick();
+    if(isTyping()) return;
+    if(view==="crun") render();
+  },1000);
+}
+function cStart(){
+  /* 区間の切り替え音・終了音は setInterval から鳴らすので、
+     iOSでは押した瞬間に音を開通させておかないと無音になる（同日のv6と同じ理由）。 */
+  unlockAudio();
+  cRun={start:Date.now(), plan:cClone(cPlan()), lost:0, paused:false, pauseAt:0, chimed:{}};
+  cSaveRun();
+  if(navigator.wakeLock&&navigator.wakeLock.request){
+    navigator.wakeLock.request("screen").then(function(w){cWake=w}).catch(function(){});
+  }
+  cLoop();
+  go("crun");
+}
+function cElapsed(){
+  if(!cRun) return 0;
+  var now = cRun.paused ? cRun.pauseAt : Date.now();
+  return Math.max(0, Math.floor((now-cRun.start-cRun.lost)/1000));
+}
+function cPos(){
+  /* いま何区間目か・その区間の残り秒 */
+  var e=cElapsed(), acc=0, p=cRun.plan;
+  for(var i=0;i<p.length;i++){
+    var sec=(+p[i].min||0)*60;
+    if(e < acc+sec) return {i:i, left:acc+sec-e, segSec:sec, done:false};
+    acc+=sec;
+  }
+  return {i:p.length-1, left:0, segSec:0, done:true};
+}
+function cTick(){
+  var q=cPos();
+  if(q.done){ if(!cRun.chimed.end){ cRun.chimed.end=true; chimeDone(); } return; }
+  if(!cRun.chimed["s"+q.i] && q.i>0){ cRun.chimed["s"+q.i]=true; chimeMark(); }
+}
+function cPause(){
+  if(!cRun) return;
+  if(cRun.paused){ cRun.lost += Date.now()-cRun.pauseAt; cRun.paused=false; }
+  else { cRun.pauseAt=Date.now(); cRun.paused=true; }
+  cSaveRun(); render();
+}
+function cSkip(){
+  if(!cRun) return;
+  var q=cPos(); if(q.done) return;
+  cRun.lost -= q.left*1000;      /* 区間の終わりまで時計を進める */
+  cRun.chimed["s"+(q.i+1)]=true; /* 手で進めたときは合図を鳴らさない */
+  cSaveRun(); render();
+}
+function cStopRun(){
+  if(cTimer){ clearInterval(cTimer); cTimer=null; }
+  DB.crun=null; save();
+  try{ if(cWake){ cWake.release(); cWake=null; } }catch(e){}
+}
+function cFinish(){
+  var min=Math.max(1, Math.round(cElapsed()/60));
+  var plan=cRun?cClone(cRun.plan):cClone(cPlan());
+  cStopRun(); cRun=null;
+  cInOpen({min:min, plan:plan});
+}
+function cQuit(){
+  if(!confirm("この回を記録せずにやめますか。")) return;
+  cStopRun(); cRun=null; go("cardio");
+}
+function viewCRun(){
+  if(!cRun) return viewCardio();
+  var p=cRun.plan, q=cPos(), s=p[q.i], e=cElapsed(), tot=cTotal(p)*60;
+  var nx=p[q.i+1];
+  var pct=Math.min(100, tot? e/tot*100 : 0);
+  return `
+  <h1>${q.done?"走り終わりました":esc(s.lb||("区間"+(q.i+1)))}</h1>
+  <p class="sub">${q.i+1} / ${p.length} 区間 ／ 全体 ${mmss(e)} / ${cTotal(p)}分</p>
+  <div class="card">
+    <div class="big" style="font-size:52px;margin:2px 0">${n1(s.sp)}<span style="font-size:20px"> km/h</span></div>
+    <div class="bigsub">傾斜 ${n1(s.inc)}% ／ ${pace(s.sp)}</div>
+    <div class="big" style="font-size:40px;margin:14px 0 0;color:${q.done?"#7fd1c1":"#e8ecf2"}">${q.done?"おつかれさまでした":mmss(q.left)}</div>
+    <div class="bigsub">${q.done?"下のボタンから記録に進めます":"この区間の残り"}</div>
+    <div class="bar"><i style="width:${pct}%"></i></div>
+    <p class="note">${nx?`次は <strong>${segLine(nx)}</strong>`:`これが最後の区間です`}
+    <br>トレッドミルの操作はご自分で。ここは<strong>いま何に設定するかを出すだけ</strong>です。</p>
+  </div>
+  <div class="row">
+    <button class="btn ghost" onclick="cPause()">${cRun.paused?"再開":"一時停止"}</button>
+    <button class="btn ghost" onclick="cSkip()">次の区間へ</button>
+  </div>
+  <button class="btn" onclick="cFinish()">終わった（記録する）</button>
+  <button class="btn link" onclick="cQuit()">この回を残さずにやめる</button>`;
+}
+
+/* ---------- 記録の入力（走り終えた直後の3項目） ---------- */
+var cBuf=null;
+function cInOpen(seed){
+  var p=(seed&&seed.plan)?seed.plan:cClone(cPlan());
+  cBuf={min:(seed&&seed.min)?seed.min:cTotal(p), plan:p, dist:"", kcal:"", hard:2, memo:""};
+  go("cin");
+}
+function cinGrab(){
+  if(!cBuf) return;
+  var g=function(id){ var e=document.getElementById(id); return e?e.value:""; };
+  var m=parseFloat(g("c_min")); if(!isNaN(m)&&m>0) cBuf.min=m;
+  cBuf.dist=g("c_dist"); cBuf.kcal=g("c_kcal"); cBuf.memo=g("c_memo");
+}
+function cinHard(h){ cinGrab(); cBuf.hard=h; render(); }
+function cinSave(){
+  cinGrab();
+  var d=parseFloat(cBuf.dist), k=parseFloat(cBuf.kcal);
+  if(isNaN(d)||d<=0){ alert("距離を入れてください（トレッドミルの表示のままで大丈夫です）"); return; }
+  DB.cardio.push({date:Date.now(), min:Math.round(cBuf.min), plan:cClone(cBuf.plan),
+                  dist:Math.round(d*100)/100, kcal:(isNaN(k)?0:Math.round(k)),
+                  hard:cBuf.hard, memo:String(cBuf.memo||"").slice(0,120)});
+  save(); cBuf=null; cHold=false; go("cardio");
+}
+function viewCIn(){
+  if(!cBuf) return viewCardio();
+  var p=cBuf.plan;
+  return `
+  <h1>今日の有酸素を記録</h1>
+  <p class="sub">トレッドミルの表示をそのまま写してください。<strong>Garminの数字と合っていなくて構いません。</strong>毎回同じ物差しで並べば、伸びは見えます。</p>
+  <div class="card">
+    <label>時間（分）</label>
+    <input id="c_min" type="number" inputmode="decimal" step="1" value="${cBuf.min}">
+    <label>距離（km）</label>
+    <input id="c_dist" type="number" inputmode="decimal" step="0.01" value="${esc(cBuf.dist)}" placeholder="例 3.72">
+    <label>消費カロリー（kcal）<small>機種と体重設定で変わるので、機械が変わった日は比べられません</small></label>
+    <input id="c_kcal" type="number" inputmode="numeric" step="1" value="${esc(cBuf.kcal)}" placeholder="例 241">
+    <label>きつさ<small>次に上げるかどうかは、この3択だけで決めます</small></label>
+    <div class="row">
+      ${HARDS.map(function(h,i){
+        return `<button class="btn ${cBuf.hard===i+1?"":"ghost"}" style="margin-top:0" onclick="cinHard(${i+1})">${h}</button>`;
+      }).join("")}
+    </div>
+    <label>メモ（任意）</label>
+    <input id="c_memo" type="text" value="${esc(cBuf.memo)}" placeholder="機械が違った・膝の様子 など">
+  </div>
+  <div class="sec">この回の設定</div>
+  <div class="card">
+    ${p.map(function(s){return `<div class="prev">${segLine(s)}</div>`}).join("")}
+    <button class="btn ghost" onclick="cPlanOpen('cin')">設定を直す</button>
+    <p class="note">途中で速度や傾斜を変えた日は、ここを実際の値に直してから保存してください。<strong>次回の判定はこの値を見ます。</strong></p>
+  </div>
+  <button class="btn" onclick="cinSave()">保存する</button>
+  <button class="btn link" onclick="cBuf=null;go('cardio')">やめる</button>`;
+}
+
+/* ---------- 区間の編集 ----------
+   routine.html v10 と同じ考え方：移動・追加・削除の前に必ず collect（cpGrab）する。
+   忘れると打ちかけの数字が消える。 */
+function cPlanOpen(ret){ cRet=ret||"cardio"; go("cplan"); }
+function cpGrab(){
+  var p=cPlan();
+  p.forEach(function(s,i){
+    var g=function(k){ var e=document.getElementById("cp_"+k+i); return e?e.value:null; };
+    var lb=g("lb"); if(lb!==null) s.lb=String(lb).slice(0,12);
+    var mn=parseFloat(g("mn")); if(!isNaN(mn)&&mn>0) s.min=Math.round(mn);
+    var sp=parseFloat(g("sp")); if(!isNaN(sp)&&sp>0) s.sp=Math.round(sp*10)/10;
+    var ic=parseFloat(g("ic")); if(!isNaN(ic)&&ic>=0) s.inc=Math.round(ic*10)/10;
+  });
+  if(cBuf) cBuf.plan=cClone(p);
+}
+function cpAdd(){
+  cpGrab();
+  var p=cPlan(), last=p[p.length-1]||{sp:5,inc:2};
+  p.push({lb:"",min:5,sp:last.sp,inc:last.inc});
+  save(); render();
+}
+function cpDel(i){
+  cpGrab();
+  var p=cPlan();
+  if(p.length<=1){ alert("区間は1つ以上必要です。"); return; }
+  p.splice(i,1); save(); render();
+}
+function cpMove(i,d){
+  cpGrab();
+  var p=cPlan(), j=i+d;
+  if(j<0||j>=p.length) return;
+  var t=p[i]; p[i]=p[j]; p[j]=t; save(); render();
+}
+function cpSave(){ cpGrab(); save(); go(cRet); }
+function cpRecalc(){
+  cpGrab();
+  var e=document.getElementById("cp_total");
+  if(e) e.textContent=cTotal(cPlan())+"分";
+}
+function viewCPlan(){
+  var p=cPlan(), mi=mainIdx(p);
+  return `
+  <h1>区間の設定</h1>
+  <p class="sub">上から順に走ります。<strong>いちばん長い区間を「メイン」とみなし、上げ下げの対象にします</strong>（いまは ${mi+1}番目）。ここ以外はアプリが勝手に動かしません。</p>
+  <div class="card">
+    ${p.map(function(s,i){
+      return `<div class="ex">
+        <div class="t"><h2>${i+1}${i===mi?" ・ メイン":""}</h2>
+          <span class="pill">${pace(s.sp)}</span></div>
+        <label>区間名</label>
+        <input id="cp_lb${i}" type="text" value="${esc(s.lb||"")}" placeholder="ウォームアップ など">
+        <div class="row">
+          <div><label>分</label><input id="cp_mn${i}" type="number" inputmode="numeric" step="1" value="${s.min}" oninput="cpRecalc()"></div>
+          <div><label>速度 km/h</label><input id="cp_sp${i}" type="number" inputmode="decimal" step="0.1" value="${n1(s.sp)}"></div>
+          <div><label>傾斜 %</label><input id="cp_ic${i}" type="number" inputmode="decimal" step="0.5" value="${n1(s.inc)}"></div>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <button class="btn ghost" style="margin-top:0" onclick="cpMove(${i},-1)">↑</button>
+          <button class="btn ghost" style="margin-top:0" onclick="cpMove(${i},1)">↓</button>
+          <button class="btn ghost" style="margin-top:0" onclick="cpDel(${i})">削除</button>
+        </div>
+      </div>`;
+    }).join("")}
+    <div class="bigsub" style="margin-top:12px">合計 <b id="cp_total">${cTotal(p)}分</b></div>
+    <button class="btn ghost" onclick="cpAdd()">＋ 区間を足す</button>
+  </div>
+  <div class="sec">上げ方の設定</div>
+  <div class="card">
+    <div class="row">
+      <div><label>速度の1段</label><input id="cp_ss" type="number" inputmode="decimal" step="0.1" value="${n1(cSet().spStep)}"></div>
+      <div><label>傾斜の1段</label><input id="cp_is" type="number" inputmode="decimal" step="0.1" value="${n1(cSet().incStep)}"></div>
+      <div><label>傾斜の上限</label><input id="cp_ic" type="number" inputmode="decimal" step="0.5" value="${n1(cSet().incCap)}"></div>
+    </div>
+    <p class="note"><strong>傾斜を先に上げます。</strong>着地の衝撃は速度を上げるほうが大きく、傾斜なら衝撃を増やさずに強度だけ上げられるためです。上限に届いたら速度に切り替わります。</p>
+  </div>
+  <button class="btn" onclick="cpSaveAll()">保存する</button>
+  <button class="btn link" onclick="go(cRet)">やめる</button>`;
+}
+function cpSaveAll(){
+  cpGrab();
+  var g=function(id){ var e=document.getElementById(id); return e?parseFloat(e.value):NaN; };
+  var a=g("cp_ss"), b=g("cp_is"), c=g("cp_ic");
+  if(!isNaN(a)&&a>0) cSet().spStep=a;
+  if(!isNaN(b)&&b>0) cSet().incStep=b;
+  if(!isNaN(c)&&c>=0) cSet().incCap=c;
+  save(); go(cRet);
+}
+
+/* ---------- 推移 ----------
+   ・縦軸は 0 から。落ち込みを大きく見せないため（目盛りを切り詰めない）
+   ・点は全部おなじ色・おなじ大きさ。最高値を強調しない。目標線を引かない
+   ・数字を出すのは最後の1点だけ（全部に出すと数字を追う画面になる）
+   ・時間が毎回ちがうので **30分あたりに換算**した値を並べる（生の値は下の一覧に残す） */
+function niceTop(v){
+  if(!(v>0)) return 1;
+  var e=Math.pow(10,Math.floor(Math.log10(v))), f=v/e;
+  var st=[1,1.2,1.5,2,2.5,3,4,5,6,8,10], m=10;
+  for(var i=0;i<st.length;i++){ if(f<=st[i]){ m=st[i]; break; } }
+  return Math.round(m*e*1000)/1000;
+}
+/* 縦軸は 0 から（目盛りを切り詰めない）。そのぶん線は寝るので、
+   伸びは **最初と最新の数字** で読めるようにする。色や矢印で良し悪しを付けない。 */
+function cChart(vals, dates, title, unit, dec){
+  if(vals.length<2) return `<p class="note">${title}は、記録が2回たまると出ます。</p>`;
+  var W=320,H=142,PL=42,PR=16,PT=16,PB=26;
+  var top=niceTop(Math.max.apply(null,vals)*1.02), n=vals.length;
+  var X=function(i){ return PL+(W-PL-PR)*(n===1?0:i/(n-1)); };
+  var Y=function(v){ return PT+(H-PT-PB)*(1-v/top); };
+  var r=function(v){ return dec? (Math.round(v*100)/100).toFixed(2) : String(Math.round(v)); };
+  var d=vals.map(function(v,i){ return (i?"L":"M")+X(i).toFixed(1)+" "+Y(v).toFixed(1); }).join(" ");
+  var pts=vals.map(function(v,i){
+    return `<circle cx="${X(i).toFixed(1)}" cy="${Y(v).toFixed(1)}" r="4" fill="#7fd1c1"/>`
+         + `<circle cx="${X(i).toFixed(1)}" cy="${Y(v).toFixed(1)}" r="14" fill="transparent" onclick="cPick(${i})"/>`;
+  }).join("");
+  var lab=function(i,anchor,below){
+    var v=vals[i], y=below? Y(v)+17 : Math.max(11,Y(v)-11);
+    return `<text x="${X(i).toFixed(1)}" y="${y.toFixed(1)}" text-anchor="${anchor}" fill="#e8ecf2" font-size="11">${r(v)}</text>`;
+  };
+  return `
+  <div class="bigsub" style="margin:2px 0 2px">${title}</div>
+  <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block" role="img" aria-label="${title}">
+    <line x1="${PL}" y1="${Y(0)}" x2="${W-PR}" y2="${Y(0)}" stroke="#232b38" stroke-width="1"/>
+    <line x1="${PL}" y1="${Y(top)}" x2="${W-PR}" y2="${Y(top)}" stroke="#1c222c" stroke-width="1"/>
+    <text x="${PL-6}" y="${Y(0)+4}" text-anchor="end" fill="#6f7a8c" font-size="10">0</text>
+    <text x="${PL-6}" y="${Y(top)+4}" text-anchor="end" fill="#6f7a8c" font-size="10">${top}</text>
+    <path d="${d}" fill="none" stroke="#7fd1c1" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+    ${pts}${lab(0,"start",true)}${lab(n-1,"end",false)}
+    <text x="${PL}" y="${H-8}" text-anchor="start" fill="#6f7a8c" font-size="10">${dates[0]}</text>
+    <text x="${W-PR}" y="${H-8}" text-anchor="end" fill="#6f7a8c" font-size="10">${dates[n-1]}</text>
+  </svg>
+  <p class="note" style="margin-top:2px;text-align:center">最初 ${r(vals[0])}${unit} ・ 最新 ${r(vals[n-1])}${unit}（${n}回）</p>`;
+}
+function cPick(i){ cSel=(cSel===i?-1:i); render(); }
+function cDel(i){
+  var r=DB.cardio[i]; if(!r) return;
+  if(!confirm(mdw(r.date)+" の記録を削除しますか。")) return;
+  DB.cardio.splice(i,1); cSel=-1; save(); render();
+}
+function viewCGraph(){
+  var A2=DB.cardio;
+  if(!A2.length) return `<h1>有酸素の記録</h1><p class="sub">まだ記録がありません。</p>
+    <button class="btn ghost" onclick="go('cardio')">戻る</button>`;
+  var dist=A2.map(function(r){ return Math.round(per30(r.dist,r.min)*100)/100; });
+  var kcal=A2.map(function(r){ return Math.round(per30(r.kcal,r.min)); });
+  var ds=A2.map(function(r){ return mdw(r.date); });
+  var sel = (cSel>=0 && cSel<A2.length) ? A2[cSel] : null;
+  return `
+  <h1>有酸素の記録</h1>
+  <p class="sub">走った時間が毎回ちがうので、グラフは<strong>30分あたりに換算した値</strong>です。実際の値は下の一覧にあります。点を押すとその日の中身が出ます。</p>
+  <div class="card">
+    ${cChart(dist,ds,"30分あたりの距離","km",true)}
+    <div style="height:14px"></div>
+    ${cChart(kcal,ds,"30分あたりの消費カロリー","kcal",false)}
+    <p class="note">体調・睡眠・生理周期で上下します。<strong>1回の落ち込みは判断材料にしません。</strong>次に上げるかどうかは、記録したきつさ（余裕／ちょうどよい／きつい）だけで決めています。
+    <br>カロリーは機械と体重設定で変わるため、<strong>ちがう機械の日とは比べられません。</strong></p>
+  </div>
+  ${sel?`<div class="card">
+    <div class="bigsub">${mdw(sel.date)} の中身</div>
+    ${(sel.plan||[]).map(function(s){return `<div class="prev">${segLine(s)}</div>`}).join("")}
+    <p class="note">${sel.min}分 ／ ${n1(sel.dist)}km ／ ${sel.kcal}kcal ／ ${HARDS[(sel.hard||2)-1]}${sel.memo?"<br>"+esc(sel.memo):""}</p>
+  </div>`:""}
+  <div class="sec">一覧（新しい順）</div>
+  <div class="card">
+    ${A2.slice().reverse().map(function(r){
+      var i=A2.indexOf(r), m=mainOf(r.plan||[]);
+      return `<div class="log"><b>${mdw(r.date)}</b> ${r.min}分 ／ ${n1(r.dist)}km ／ ${r.kcal}kcal ／ ${HARDS[(r.hard||2)-1]}
+        <small>メイン ${n1(m.sp)}km/h ・ 傾斜${n1(m.inc)}% ／ 30分あたり ${n1(per30(r.dist,r.min))}km・${Math.round(per30(r.kcal,r.min))}kcal${r.memo?"<br>"+esc(r.memo):""}
+        <br><span class="link" style="cursor:pointer;color:#6f7a8c;text-decoration:underline" onclick="cDel(${i})">この回を削除</span></small></div>`;
+    }).join("")}
+  </div>
+  <button class="btn ghost" onclick="go('cardio')">戻る</button>`;
+}
+
+/* ---------- 有酸素のホーム ---------- */
+function viewCardio(){
+  return `
+  <h1>有酸素（トレッドミル）</h1>
+  <p class="sub">30分あたりの距離とカロリーを伸ばすための画面です。<strong>目標は距離ではなく「今日この速度・傾斜で走り切ること」</strong>に置いています（距離は速度×時間で決まるので、直接は動かせないためです）。</p>
+  ${cardioCard(true)}
+  <button class="btn ghost" onclick="go('home')">筋トレの画面に戻る</button>`;
+}
+
 /* ===================== 画面 ===================== */
 let view="home", curId=null, tmpW=null, tmpR=null, tmpB=null;
 function go(v){ view=v; render(); }
 /* v5: 文字を打ち込む画面では、1秒ごとの自動再描画を止める（打っている途中で消えないように）。
    経過時間そのものは Date.now() から計算しているので、戻れば正しい値に追いつく。 */
-function isTyping(){ return view==="backup" || view==="edlist" || view==="edex" || view==="bands"; }
+function isTyping(){ return view==="backup" || view==="edlist" || view==="edex" || view==="bands"
+    || view==="cin" || view==="cplan"; }
 
 /* ===== バックアップ（書き出し・読み込み）　2026-08-15追加 =====================
    記録はこの端末のブラウザの中だけにあります。ここのテキストを控えておけば、
@@ -658,7 +1163,7 @@ function viewBackup(){
   return h;
 }
 function bkValid(o){ return o && typeof o==="object" && Array.isArray(o.sessions); }
-function bkSummary(){ try{ return "記録 "+(DB.sessions?DB.sessions.length:0)+"回"; }catch(e){ return "—"; } }
+function bkSummary(){ try{ return "記録 "+(DB.sessions?DB.sessions.length:0)+"回・有酸素 "+(DB.cardio?DB.cardio.length:0)+"回"; }catch(e){ return "—"; } }
 
 
 /* ===== v5: 種目を自分で入力する画面 ==========================================
@@ -863,6 +1368,11 @@ function render(){
   if(view==="edex" && edId && edBuf) return void(A.innerHTML=viewEdEx());
   if(view==="edlist") return void(A.innerHTML=viewEdList());
   if(view==="log")  return void(A.innerHTML=viewLog());
+  if(view==="crun")   return void(A.innerHTML=viewCRun());
+  if(view==="cin")    return void(A.innerHTML=viewCIn());
+  if(view==="cplan")  return void(A.innerHTML=viewCPlan());
+  if(view==="cgraph") return void(A.innerHTML=viewCGraph());
+  if(view==="cardio") return void(A.innerHTML=viewCardio());
   if(view==="work" && DB.active) return void(A.innerHTML=viewWork());
   if(view==="ex" && DB.active && curId) return void(A.innerHTML=viewEx());
   view = DB.active ? "work" : "home";
@@ -918,6 +1428,8 @@ function viewHome(){
   <div class="card">${restStepper()}
     <p class="note">既定は20秒です。<strong>短くしすぎると2・3セット目の重さが落ちやすくなります。</strong>落ちたときはその場で延ばせます（アプリからも声をかけます）。</p>
   </div>
+
+  ${cardioCard()}
 
   <button class="btn ghost" onclick="go('log')">これまでの記録（${d.length}回）</button>
   <button class="btn ghost" onclick="bkGo()">💾 バックアップ（書き出し・読み込み）</button>
@@ -1178,6 +1690,15 @@ function cancelSession(){
 
 /* 再読み込みしても、実施中のセッションの経過時間は続きから動く */
 if(DB.active) startSessionClock();
+
+/* v7: 走行中に再読み込みされたら、続きから復帰する。
+   ただし「昨日つけっぱなし」を拾わないよう、予定時間＋20分を過ぎていたら捨てる。 */
+if(DB.crun && DB.crun.start){
+  cRun=DB.crun;
+  var _lim=(cTotal(cRun.plan||[])+20)*60;
+  if(cElapsed()>_lim){ cRun=null; DB.crun=null; save(); }
+  else { cLoop(); view="crun"; }
+}
 render();
 </script>
 </body>
