@@ -560,6 +560,25 @@ function defaults(){ return [
     auto:true, voice:true, spotify:true,
     note:"吸う4秒・止める7秒・吐く8秒 × 9回。タップして進める必要はありません。合図（音・声）に合わせて呼吸するだけです。",
     steps: breathSteps(9) },
+  /* v24（2026-09-05・問9のK）: 子供と一緒のときにイライラしたとき。
+     文言は H.M.C. の納品（指示_2026-09-05_4）をそのまま使っている。こちらで作文していない。
+     ★呼吸は breathSteps() を呼んで**同じ生成器を流用**している（4-7-8を二重に実装しない）。
+     ★自動で進む（auto）。子供が目の前にいる場面なので、タップを求めない。
+     ★別室に行く手順は入れない（現実に選べない場面が多い、というH.M.C.の指定）。
+     ★記録欄・チェック・点数は作らない。Points Trackerにも連動させない。
+       「今日は優しくできたか」を採点する画面は、心配されている構造を家庭側に作るため。 */
+  /* ★タグは付けずに出す。付けて出すと anyTagged() が最初から真になり、
+     「タグを付けるまでホームの見た目は変わらない」（v23の約束）が破れるため。
+     このセットにタグを付けたくなったら、編集画面から入れられる。 */
+  { id:"anger", icon:"🧸", name:"イライラしたとき（子供と一緒のとき）", limit:65,
+    auto:true, voice:true,
+    note:"子供が目の前にいるままできます。席を外す必要はありません。点数も記録も付きません。",
+    steps: ["8|心の中で「今、イライラしている」と認める。良い悪いは決めない"]
+      .concat(breathSteps(1))
+      .concat([
+        "8|「ちょっと待ってね、今考えてる」と、声に出して伝える",
+        "30|いちばん小さい一歩を1つだけ選ぶ（1分だけ黙って見る／代わりの言葉をかける／抱きしめる）"
+      ]) },
   /* 2026-09-01追加（v16）：🛌就寝を押すと自動で始まる下ごしらえ。ホーム画面には
      単独のボタンとして出さない（hidden:true）。ストレッチの中身は
      ストレッチアプリ「夜の基本（就寝前・毎日・5分）」プログラムをそのまま7項目。 */
@@ -592,7 +611,7 @@ function defaults(){ return [
    seg  … ブロックの中の区切りの並び（分）。最後の値が以降ずっと続く。
           「まず短時間から、乗ってきたら伸ばす」を素直に形にしたもの。
    すべて集中の設定画面から変えられます。 */
-var FOCUS_DEF = { len:{am:120,pm:90,ev:50}, from:{pm:12,ev:16}, seg:[15,25,40], sound:false, native:true, notify:true, lastBreak:"",
+var FOCUS_DEF = { len:{am:120,pm:90,ev:50,kids:15}, from:{pm:12,ev:16}, seg:[15,25,40], segKids:[5,5,5], sound:false, native:true, notify:true, lastBreak:"",
   /* v20 (2026-09-03): 集中ブロックのプレイリスト。spMode は "default"（既定URL）か "own"（専用URL）。 */
   spotify:false, spMode:"default", spotifyUrl:"" };
 var DB = { v:19, sets:null, chime:true, voice:true, spotifyUrl:"", scName:"ルーティンタイマー", log:[], count:0, focus:null, notes:[], times:[], sleepActive:false, sleepStartAt:0,
@@ -615,6 +634,7 @@ try{
     if(p.focus && typeof p.focus==="object") DB.focus = p.focus;
     if(p.mig_dinner===true) DB.mig_dinner = true;
     if(p.mig_breath478===true) DB.mig_breath478 = true;
+    if(p.mig_anger===true) DB.mig_anger = true;
     if(p.mig_presleep===true) DB.mig_presleep = true;
     /* v16: 就寝の見守り状態。アプリを閉じても経過時間が消えないよう、
        開始時刻そのものを保存し、毎回いまの時刻から計算し直す。 */
@@ -643,6 +663,13 @@ try{
   var f = DB.focus && typeof DB.focus==="object" ? DB.focus : {};
   if(!f.len || typeof f.len!=="object") f.len = {};
   ["am","pm","ev"].forEach(function(k){ if(typeof f.len[k]!=="number" || f.len[k]<1) f.len[k] = FOCUS_DEF.len[k]; });
+  /* v23（2026-09-05・問9のH）: 子供と一緒モード。
+     5分刻み・上限15分。**時間帯からは絶対に自動で選ばれない**（slotAt は kids を返さない）。
+     休日の午後、子供といるときに「自分のこと」を15分だけ取るための枠で、
+     仕事の集中ブロックとは別のプリセットとして持つ。 */
+  if(typeof f.len.kids!=="number" || f.len.kids<5) f.len.kids = FOCUS_DEF.len.kids;
+  f.len.kids = Math.max(5, Math.min(15, Math.round(f.len.kids/5)*5));
+  if(!Array.isArray(f.segKids) || !f.segKids.length) f.segKids = FOCUS_DEF.segKids.slice();
   if(!f.from || typeof f.from!=="object") f.from = {};
   ["pm","ev"].forEach(function(k){ if(typeof f.from[k]!=="number" || f.from[k]<0 || f.from[k]>23) f.from[k] = FOCUS_DEF.from[k]; });
   if(!Array.isArray(f.seg) || !f.seg.length) f.seg = FOCUS_DEF.seg.slice();
@@ -657,6 +684,17 @@ try{
   if(typeof f.spotifyUrl !== "string") f.spotifyUrl = "";
   DB.focus = f;
 })();
+/* v23（2026-09-05・問9のG）: セットのタグと、シーン別のタブ。
+   ・タグはセットごとの自由な文字列（カンマ区切り）。s.tags に持つ
+   ・タブは DB.scenes（{id,name,tag}）。Manamiさんが名前もタグも足せる・消せる
+   ・**タグを1つも付けていないあいだ、ホームの見た目は今までと1ミリも変わらない**
+     （タブを出すのは「タグの付いたセットが1つ以上あるとき」だけ）
+   ・8/20の「その日のルーティンをトップに／パターンと紐づける」（提案_2026-09-03 §4 #4）は
+     この土台の上に載せる。別機能として二重に作らないこと。 */
+if(!Array.isArray(DB.scenes) || !DB.scenes.length)
+  DB.scenes = [{id:"sc_work", name:"仕事（平日）", tag:"仕事"},
+               {id:"sc_off",  name:"休日",        tag:"休日"}];
+if(typeof DB.sceneCur !== "string") DB.sceneCur = "";
 if(!DB.sets || !DB.sets.length) DB.sets = defaults();
 if(!DB.sets.some(function(s){return s.rescue})) DB.sets.push(defaults().filter(function(s){return s.rescue})[0]);
 /* 2026-08-15追加：🍽 夕食の準備前。★一度だけ入れる。
@@ -693,6 +731,19 @@ if(!DB.mig_presleep){
     var at3 = DB.sets.length;
     DB.sets.forEach(function(s,i){ if(s.rescue && i<at3) at3 = i; });
     DB.sets.splice(at3, 0, pr);
+  }
+  save();
+}
+
+/* v24（2026-09-05）：🧸 イライラしたとき。breath478/presleep と同じ原則＝
+   一度だけ差し込み、以後は編集済みの内容（削除・書き換え）を正として扱う。 */
+if(!DB.mig_anger){
+  DB.mig_anger = true;
+  if(!DB.sets.some(function(s){return s.id==="anger";})){
+    var ag = defaults().filter(function(s){return s.id==="anger";})[0];
+    var at4 = DB.sets.length;
+    DB.sets.forEach(function(s,i){ if(s.rescue && i<at4) at4 = i; });
+    DB.sets.splice(at4, 0, ag);
   }
   save();
 }
@@ -1256,6 +1307,47 @@ function idxOf(id){ for(var i=0;i<DB.sets.length;i++){ if(DB.sets[i].id===id) re
    集中ブロックの選択肢からは外す。振り返り（viewReview）は別枠で全セット
    を対象にしているので、ここでは触っていない。 */
 function normals(){ return DB.sets.filter(function(s){return !s.rescue && !s.hidden && !s.archived;}); }
+/* v23: タグの読み書き。表記ゆれ（全角カンマ・読点・空白）をここで吸収する。 */
+function tagsOf(s){
+  return String(s.tags||"").split(/[,、\s]+/).map(function(x){return x.trim();}).filter(Boolean);
+}
+function hasTag(s, t){
+  if(!t) return true;
+  return tagsOf(s).indexOf(t) >= 0;
+}
+function anyTagged(){ return DB.sets.some(function(s){ return tagsOf(s).length>0; }); }
+/* いま選ばれているタブで絞ったホーム一覧。タブ未選択（""）は全部。 */
+function normalsCur(){
+  var sc = DB.scenes.filter(function(x){return x.id===DB.sceneCur;})[0];
+  if(!sc) return normals();
+  return normals().filter(function(s){ return hasTag(s, sc.tag); });
+}
+function scenePick(id){ DB.sceneCur = (DB.sceneCur===id ? "" : id); save(); render(); }
+function sceneAdd(){
+  var nm = prompt("タブの名前（例: 仕事（平日）、休日、子供と一緒）", "");
+  if(nm===null) return; nm = String(nm).trim().slice(0,14);
+  if(!nm) return;
+  var tg = prompt("このタブに出すセットのタグ（セットの編集画面で同じ言葉を入れたものが出ます）", nm);
+  if(tg===null) return; tg = String(tg).trim().slice(0,14);
+  if(!tg) return;
+  DB.scenes.push({id:"sc"+Date.now().toString(36), name:nm, tag:tg});
+  save(); render();
+}
+function sceneEdit(id){
+  var sc = DB.scenes.filter(function(x){return x.id===id;})[0]; if(!sc) return;
+  var nm = prompt("タブの名前", sc.name); if(nm===null) return;
+  nm = String(nm).trim().slice(0,14); if(nm) sc.name = nm;
+  var tg = prompt("このタブに出すセットのタグ", sc.tag); if(tg===null) return;
+  tg = String(tg).trim().slice(0,14); if(tg) sc.tag = tg;
+  save(); render();
+}
+function sceneDel(id){
+  var sc = DB.scenes.filter(function(x){return x.id===id;})[0]; if(!sc) return;
+  if(!confirm("タブ「"+sc.name+"」を消しますか。\n\nセットそのものは消えません。タグも残ります。")) return;
+  DB.scenes = DB.scenes.filter(function(x){return x.id!==id;});
+  if(DB.sceneCur===id) DB.sceneCur = "";
+  save(); render();
+}
 function rescues(){ return DB.sets.filter(function(s){return s.rescue && !s.archived;}); }
 function stepsOf(s){ return s.steps.map(parseStep); }
 function sumSec(s){ return stepsOf(s).reduce(function(a,b){return a+b.sec;},0); }
@@ -1809,7 +1901,8 @@ function nativeTimer(sec){
 /* ============================ 画面 ============================ */
 function render(){
   var h = "";
-  if(view==="home") h = viewHome();
+  if(view==="words") h = viewWords();
+  else if(view==="home") h = viewHome();
   else if(view==="run"){
     var _s = setOf(curId);
     if(_s && _s.auto) autoTick(_s);   /* 完了すると内部で view が "done"/"sleepWatch" に変わることがある */
@@ -1923,16 +2016,41 @@ function viewHome(){
        + weekGrid()
        + '</div>';
   }
-  normals().forEach(function(s){
+  /* v23: タグを1つも付けていないあいだは、この行ごと出さない（見た目を変えない）。 */
+  if(anyTagged() && DB.scenes.length){
+    h += '<div class="row" style="flex-wrap:wrap;gap:6px;margin:2px 0 10px">'
+       + '<button class="btn ghost" style="margin-top:0;width:auto;padding:6px 12px'
+       + (DB.sceneCur===""?';border:1px solid #e0a86a;color:#e0a86a':'')+'" onclick="scenePick(\'\')">すべて</button>'
+       + DB.scenes.map(function(sc){
+           var n = normals().filter(function(s){return hasTag(s,sc.tag);}).length;
+           return '<button class="btn ghost" style="margin-top:0;width:auto;padding:6px 12px'
+             + (DB.sceneCur===sc.id?';border:1px solid #e0a86a;color:#e0a86a':'')
+             + '" onclick="scenePick(\''+sc.id+'\')">'+esc(sc.name)+'<span style="opacity:.6"> '+n+'</span></button>';
+         }).join('')
+       + '</div>';
+  }
+  var lst = normalsCur();
+  lst.forEach(function(s){
     h += '<button class="setb" onclick="start(\''+s.id+'\')">'+esc(s.icon)+' '+esc(s.name)
        + '<small>'+durLabel(limitOf(s))+' ・ '+countLabel(s)
        + (s.note ? '<br>'+esc(s.note) : '')+'</small></button>';
   });
+  if(DB.sceneCur && !lst.length){
+    h += '<p class="note">このタブに入れたセットがまだありません。「セットを編集」で、出したいセットに同じタグを入れてください。'
+       + '<br><b>「すべて」を押せば、いつでも全部に戻れます。</b></p>';
+  }
   h += '<div class="sec">時間を区切って進める</div>';
   h += '<button class="setb" onclick="focusGo()">🎯 集中ブロック'
      + '<small>いまは '+SLOTN[slotAt(Date.now())]+' ・ 休憩まで '+durLabel(DB.focus.len[slotAt(Date.now())]*60)
      + '<br>区切り： '+segLabel(slotAt(Date.now()))
      + '<br>時間を区切って進めるためのタイマーです。仕事の日にも、休日にも。</small></button>';
+  /* v23（問9のH）: 子供と一緒の枠。仕事の集中ブロックとは別の入口にしている。
+     同じボタンの中に混ぜると、休日にも仕事の長さ（90〜120分）が最初に目に入るため。 */
+  h += '<button class="setb" onclick="kidsGo()">🧸 子供と一緒のあいだに'
+     + '<small>自分のことに '+DB.focus.len.kids+'分 ・ 区切り： '+segLabel("kids")
+     + '<br>長くて15分・5分刻み。区切りが来たら、子供のほうへ戻る合図です。</small></button>';
+  /* v24: 声かけの言い換え（見るだけ）。イライラしたときのセットはホームの一覧側に出ている。 */
+  h += '<button class="btn ghost" onclick="go(\'words\')">🗣 声かけの言い換え（見るだけ・5つ）</button>';
   if(!DB.sleepActive){
     h += '<div class="sec">夜</div>';
     h += '<button class="setb" onclick="sleepStart()">🛌 就寝'
@@ -2387,7 +2505,7 @@ function viewDone(){
    越えたか・出せたもの（任意の1行）だけ。集中時間の合計・連続日数・
    達成率は持たない。
    ============================================================ */
-var SLOTN = { am:"午前", pm:"午後", ev:"夕方" };
+var SLOTN = { am:"午前", pm:"午後", ev:"夕方", kids:"子供と一緒" };
 function slotAt(t){
   var h = new Date(t).getHours();
   if(h < DB.focus.from.pm) return "am";
@@ -2398,7 +2516,9 @@ function slotAt(t){
    端数（最後の区切りの半分未満）は1つ前に足して、細切れを作らない。 */
 function segsFor(slot){
   var total = Math.max(60, (DB.focus.len[slot]||60)*60);
-  var arr = (DB.focus.seg && DB.focus.seg.length) ? DB.focus.seg : [25];
+  /* v23: 子供と一緒モードだけは5分刻みの並びを使う（仕事用の 15/25/40 を持ち込まない） */
+  var src = (slot==="kids") ? DB.focus.segKids : DB.focus.seg;
+  var arr = (src && src.length) ? src : [25];
   var out = [], rest = total, i = 0;
   while(rest > 0 && out.length < 60){
     var s = Math.max(60, (arr[Math.min(i,arr.length-1)]||25)*60);
@@ -2514,7 +2634,46 @@ function focusGo(){
   fSlot = slotAt(Date.now()); fList = []; fMemo = "";
   go("focusStart");
 }
+/* v23: 子供と一緒モードで開始画面へ。時間帯の自動判定を通さず、必ず kids から始める。 */
+/* ===== v24（2026-09-05・問9のK）: 声かけの言い換え =====
+   ★これは「見るだけ」の画面です。選ばせない・保存しない・数えない。
+     満腹度のものさし（viewScale）と同じ扱い。チェックを付けられるようにすると、
+     「今日は優しくできたか」の採点になり、心配されている構造そのものを家庭に作るため。
+   ★文言は H.M.C. の納品（指示_2026-09-05_4 §2）をそのまま。こちらで作文・加筆していない。
+   ★お子さんの反応を記録させる項目も作らない。 */
+var WORDS = [
+  {from:"やればできるのに",            to:"ここまでは合ってるね",              why:"止まる前に「ゼロではない」と示す"},
+  {from:"何回言ったら分かるの",        to:"もう一回だけ一緒に読もう",          why:"分からない箇所を一緒に特定する"},
+  {from:"そこ違うよ",                  to:"1個だけ見直すとしたら、どこ？",     why:"責めずに自分で探させる"},
+  {from:"（泣き出した後）",            to:"じゃあ最初の1問だけ、一緒にやろう",  why:"全部ではなく1問に縮めて、再開のハードルを下げる"},
+  {from:"そんなことで泣かないの／元気出しなさい", to:"悲しかったんだね",        why:"気持ちをそのまま言葉にして返す（良し悪しを判断しない）"}
+];
+function viewWords(){
+  var h = '<h1>🗣 声かけの言い換え</h1>'
+    + '<p class="sub">見るだけの画面です。<b>選ぶところも、記録するところもありません。</b><br>'
+    + '5つ全部を覚える必要はありません。1つ思い出せれば十分です。</p>';
+  h += WORDS.map(function(w){
+    return '<div class="card" style="padding:13px 15px">'
+      + '<div style="opacity:.6;font-size:13px">'+esc(w.from)+'</div>'
+      + '<div style="color:#7fd1c1;font-weight:700;font-size:17px;margin:5px 0 4px">'+esc(w.to)+'</div>'
+      + '<div class="note" style="margin:0">'+esc(w.why)+'</div></div>';
+  }).join('');
+  h += '<p class="note"><b>言えなかった日を数えません。</b>この画面は、思い出したいときに開くためだけのものです。'
+     + '<br>文言は H.M.C. が用意したものです（勉強の場面向けに作ったものを、ほかの場面にも使える形にしています）。</p>';
+  h += '<button class="btn ghost" onclick="go(\'home\')">戻る</button>';
+  return h;
+}
+function kidsGo(){
+  fSlot = "kids"; fList = []; fMemo = "";
+  go("focusStart");
+}
 function focusPick(sl){ focusGrab(); fSlot = sl; render(); }
+/* v23: 子供と一緒モードの長さ。5分刻み・上限15分だけを受け付ける。 */
+function kidsLen(m){
+  focusGrab();
+  DB.focus.len.kids = Math.max(5, Math.min(15, Math.round(m/5)*5));
+  save(); render();
+}
 function focusGrab(){
   var ta = document.getElementById("f_list");
   if(ta) fList = ta.value.split("\n").filter(function(x){ return x.trim()!==""; });
@@ -2727,10 +2886,18 @@ function viewFocusStart(){
   h += '<div class="card"><div class="big ok" style="font-size:40px">'+durLabel(DB.focus.len[sl]*60)+'</div>'
      + '<div class="bigsub">'+SLOTN[sl]+' ・ 休憩まで</div>'
      + '<div class="row" style="margin-top:10px">'
-     + ["am","pm","ev"].map(function(k){
+     + ["am","pm","ev","kids"].map(function(k){
          return '<button class="btn ghost" style="margin-top:0'+(k===sl?';border:1px solid #e0a86a;color:#e0a86a':'')+'" onclick="focusPick(\''+k+'\')">'+SLOTN[k]+'</button>';
        }).join('')
      + '</div>'
+     /* v23: 子供と一緒モードのときだけ、5分刻みの長さを選ばせる（上限15分） */
+     + (sl==="kids"
+        ? '<div class="row" style="margin-top:8px">'
+          + [5,10,15].map(function(m){
+              return '<button class="btn ghost" style="margin-top:0'+(DB.focus.len.kids===m?';border:1px solid #e0a86a;color:#e0a86a':'')+'" onclick="kidsLen('+m+')">'+m+'分</button>';
+            }).join('')
+          + '</div>'
+        : '')
      + '<p class="note" style="text-align:center">区切り： '+segLabel(sl)+'</p></div>';
   h += '<label>このブロックで手をつけること（1行に1つ）</label>'
      + '<textarea id="f_list" style="min-height:96px;font-family:inherit;font-size:14px" placeholder="空のままでも始められます。&#10;例）A案件の企画書のたたき&#10;例）B案件の見積もり確認">'
@@ -2990,6 +3157,8 @@ function collect(){
     var ic = document.getElementById("ic_"+s.id); if(ic && ic.value.trim()) s.icon = ic.value.trim();
     var nm = document.getElementById("nm_"+s.id); if(nm && nm.value.trim()) s.name = nm.value.trim();
     var nt = document.getElementById("nt_"+s.id); if(nt) s.note = nt.value.trim();
+    /* v23: タグも「空にする」操作に意味があるので、空欄もそのまま取り込む */
+    var tg = document.getElementById("tg_"+s.id); if(tg) s.tags = tg.value.trim();
     /* v9: 全体の秒数の入力欄は廃止した（ステップの合計から自動計算する） */
     /* v5: URLは「空にする」操作も意味を持つので、空欄もそのまま取り込む */
     var sp = document.getElementById("sp_"+s.id);
@@ -3197,6 +3366,9 @@ function setCardBody(s){
      + '</div>'
      + '<label>説明文（一覧と実行中の画面に出ます）</label>'
      + '<textarea class="inp" id="nt_'+s.id+'" style="min-height:76px;font-family:inherit;font-size:14px">'+esc(s.note)+'</textarea>'
+     /* v23: シーン別タブ用のタグ。空のままで構わない（空ならタブに出ないだけ）。 */
+     + '<label>タグ<small>ホームのタブで絞り込むための言葉です。カンマ区切りで複数入れられます。空のままでも構いません。</small></label>'
+     + '<input class="inp" type="text" id="tg_'+s.id+'" value="'+esc(s.tags||"")+'" placeholder="例: 仕事, 休日, 子供と一緒">'
      /* --- v5: このセットの進み方・音声・Spotify --- */
      + '<label>このセットの進み方・音声・タイマー・プレイリスト</label>'
      + '<div class="toggle"><b>'+(s.auto?'自動で進む':'タップして進む')+'</b>'
@@ -3352,6 +3524,25 @@ function viewEdit(){
   h += '<div class="sec">ホーム画面に出るセット</div>';
   actives.forEach(function(s){ h += editRow(s, s.rescue ? '崩れたとき用' : ''); });
   h += '<button class="btn ghost" onclick="addSet()">＋ セットを追加する</button>';
+  /* v23（問9のG）: シーン別タブの管理。ここ以外に置かない（タブの編集を探して迷わないよう、
+     セットの一覧と同じ画面に置く）。 */
+  h += '<div class="sec">ホームのタブ（シーン別の絞り込み）</div>';
+  h += '<div class="card">';
+  if(DB.scenes.length){
+    DB.scenes.forEach(function(sc){
+      var n = normals().filter(function(x){return hasTag(x,sc.tag);}).length;
+      h += '<div class="toggle" style="margin-top:6px"><b>'+esc(sc.name)+'<span style="opacity:.6;font-weight:400"> ／ タグ「'+esc(sc.tag)+'」・'+n+'件</span></b>'
+         + '<span><button class="btn ghost" style="margin-top:0;width:auto;padding:5px 10px" onclick="sceneEdit(\''+sc.id+'\')">直す</button>'
+         + '<button class="btn link" style="margin-top:0;width:auto;padding:5px 8px" onclick="sceneDel(\''+sc.id+'\')">消す</button></span></div>';
+    });
+  }else{
+    h += '<p class="note" style="margin:0">タブはまだありません。</p>';
+  }
+  h += '<button class="btn ghost" onclick="sceneAdd()">＋ タブを足す</button>';
+  h += '<p class="note"><b>タブは、セットに付けた「タグ」で絞り込みます。</b>上のセットを開いて、同じ言葉をタグ欄に入れてください。'
+     + '<br>タグを1つも付けていないあいだ、<b>ホームの見た目は今までと変わりません</b>（タブ自体が出ません）。'
+     + '<br>タブを消してもセットは消えません。</p>';
+  h += '</div>';
   if(hiddens.length){
     h += '<div class="sec">🌙 非表示（自動でのみ使う下ごしらえ）</div>';
     hiddens.forEach(function(s){ h += editRow(s, '非表示'); });

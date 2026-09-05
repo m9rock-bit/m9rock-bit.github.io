@@ -338,6 +338,8 @@ if(!Array.isArray(DB.settings.cardio.plan) || !DB.settings.cardio.plan.length)
 if(typeof DB.settings.cardio.spStep!=="number")  DB.settings.cardio.spStep=CARDIO_DEF.spStep;
 if(typeof DB.settings.cardio.incStep!=="number") DB.settings.cardio.incStep=CARDIO_DEF.incStep;
 if(typeof DB.settings.cardio.incCap!=="number")  DB.settings.cardio.incCap=CARDIO_DEF.incCap;
+/* v8（2026-09-05）: 名前を付けて保存したプログラム（インターバル等）。無いときだけ空配列を置く。 */
+if(!Array.isArray(DB.settings.cardio.progs)) DB.settings.cardio.progs=[];
 
 function restSec(){ return DB.settings.rest; }
 function save(){
@@ -706,6 +708,94 @@ function cardioApply(){
 }
 function cardioHold(){ cHold=true; render(); }
 
+/* ===== v8（2026-09-05）: A=インターバルの登録 / B=実施中の変更・時間の選択 =====
+   設計の線（v7から変えていない）:
+   ・距離を目標にしない。操作するのは速度と傾斜だけ。時間は「今日どれだけ走るか」の枠
+   ・上げ下げの引き金は主観のきつさ。ここで作る機能はどれも判定を自動で動かさない
+   ・達成率・連続日数・未実施の赤字は出さない（8/8の安全4条件）
+   B-1（実施中の変更）は cRun.plan を直接書き換える。cFinish がその plan を記録へ渡すので、
+   「実際にやった値」がそのまま次回の判定材料になる（v7では記録画面で手直しが必要だった）。 */
+
+function cUid(){ return "cp"+Date.now().toString(36)+Math.floor(Math.random()*1e4).toString(36); }
+function cProgs(){ return cSet().progs; }
+
+/* --- A: いまの区間構成に名前を付けて保存 / 呼び出し / 消す --- */
+function cProgSave(){
+  var p=cPlan();
+  if(!p.length){ alert("区間がありません。"); return; }
+  var nm=prompt("この構成に名前を付けて保存します（例: インターバル 1分速い＋2分ゆるい×8）", "");
+  if(nm===null) return;
+  nm=String(nm).trim().slice(0,30);
+  if(!nm){ alert("名前を入れてください。"); return; }
+  cProgs().push({id:cUid(), name:nm, plan:cClone(p)});
+  save(); render();
+}
+function cProgLoad(id){
+  var g=cProgs().filter(function(x){return x.id===id})[0];
+  if(!g) return;
+  if(!confirm("「"+g.name+"」を今日の設定にします。いまの区間は置き換わります（保存したプログラムは消えません）。")) return;
+  cSet().plan=cClone(g.plan); cHold=false; save(); render();
+}
+function cProgDel(id){
+  var g=cProgs().filter(function(x){return x.id===id})[0];
+  if(!g) return;
+  if(!confirm("「"+g.name+"」を消しますか。今日の設定と過去の記録はそのまま残ります。")) return;
+  cSet().progs=cProgs().filter(function(x){return x.id!==id});
+  save(); render();
+}
+
+/* --- A: 繰り返しブロックを展開して区間に足す --- */
+function cRepAdd(){
+  cpGrab();
+  var g=function(id){ var e=document.getElementById(id); return e?parseFloat(e.value):NaN; };
+  var fm=g("cr_fmin"), fs=g("cr_fsp"), fi=g("cr_finc");
+  var em=g("cr_emin"), es=g("cr_esp"), ei=g("cr_einc");
+  var nn=g("cr_n");
+  if(isNaN(fm)||fm<=0||isNaN(em)||em<=0){ alert("速い側とゆるい側の「分」を入れてください。"); return; }
+  if(isNaN(nn)||nn<1){ alert("繰り返す回数を入れてください。"); return; }
+  nn=Math.min(30, Math.round(nn));
+  if(isNaN(fs)||fs<=0) fs=mainOf(cPlan()).sp||6.0;
+  if(isNaN(es)||es<=0) es=Math.max(1, fs-1.5);
+  if(isNaN(fi)||fi<0) fi=mainOf(cPlan()).inc||2.0;
+  if(isNaN(ei)||ei<0) ei=fi;
+  var p=cPlan();
+  for(var k=1;k<=nn;k++){
+    p.push({lb:"速い "+k+"/"+nn, min:Math.round(fm*10)/10, sp:Math.round(fs*10)/10, inc:Math.round(fi*10)/10});
+    p.push({lb:"ゆるい "+k+"/"+nn, min:Math.round(em*10)/10, sp:Math.round(es*10)/10, inc:Math.round(ei*10)/10});
+  }
+  save(); render();
+}
+
+/* --- B-2: 全体をこの分数に合わせる（メインだけを伸縮させる） ---
+   ウォームアップ・クールダウンは動かさない。動かすと「今日は短くした」が
+   準備運動を削ったことになりかねないため。メインが1分を割る指定は受け付けない。 */
+function cFitMin(target){
+  var p=cPlan(), mi=mainIdx(p);
+  if(!p.length) return;
+  var others=0; p.forEach(function(s,i){ if(i!==mi) others+=(+s.min||0); });
+  var want=target-others;
+  if(want<1){
+    alert("この区間構成だと "+target+"分にはできません（メイン以外だけで "+others+"分あります）。区間の設定から直してください。");
+    return;
+  }
+  p[mi].min=Math.round(want);
+  cHold=false; save(); render();
+}
+
+/* --- B-1: 実施中に、いまの区間の速度・傾斜を変える --- */
+function cAdj(field, dir){
+  if(!cRun) return;
+  var q=cPos(); if(q.done) return;
+  var s=cRun.plan[q.i]; if(!s) return;
+  var step=(field==="sp")?cSet().spStep:cSet().incStep;
+  var v=(+s[field]||0)+step*dir;
+  if(field==="sp") v=Math.max(0.5, Math.min(25, v));
+  else             v=Math.max(0, Math.min(15, v));
+  s[field]=Math.round(v*10)/10;
+  if(!cRun.edited) cRun.edited=true;
+  cSaveRun(); render();
+}
+
 /* ---------- ホームのカード ---------- */
 function cardioCard(hideSec){
   var p=cPlan(), a=cardioAdvice(), n=DB.cardio.length;
@@ -734,11 +824,26 @@ function cardioCard(hideSec){
     <div class="bigsub" style="margin-bottom:8px">今日の設定 ／ 合計 ${cTotal(p)}分</div>
     ${p.map(function(s){return `<div class="prev">${segLine(s)}</div>`}).join("")}
     ${adv}
+    <div class="row" style="margin-top:10px">
+      ${[15,20,30].map(function(t){
+        return `<button class="btn ${cTotal(p)===t?"":"ghost"}" style="margin-top:0" onclick="cFitMin(${t})">${t}分</button>`;
+      }).join("")}
+    </div>
+    <p class="note">分数を選ぶと<strong>メインの区間だけ</strong>が伸び縮みします。ウォームアップとクールダウンは動きません。</p>
+    ${cProgs().length?`<div class="bigsub" style="margin-top:12px;margin-bottom:6px">保存したプログラム</div>
+      ${cProgs().map(function(g){
+        return `<div class="prev" style="display:flex;align-items:center;gap:8px">
+          <span style="flex:1">${esc(g.name)}<br><small style="opacity:.7">${cTotal(g.plan)}分 ／ ${g.plan.length}区間</small></span>
+          <button class="btn ghost" style="margin-top:0;width:auto;padding:6px 10px" onclick="cProgLoad('${g.id}')">使う</button>
+          <button class="btn link" style="margin-top:0;width:auto;padding:6px 8px" onclick="cProgDel('${g.id}')">消す</button>
+        </div>`;
+      }).join("")}`:""}
     <button class="btn" onclick="cStart()">走る（区間タイマーを動かす）</button>
     <div class="row">
       <button class="btn ghost" onclick="cPlanOpen('cardio')">設定を編集</button>
       <button class="btn ghost" onclick="cInOpen(null)">あとから記録する</button>
     </div>
+    <button class="btn ghost" onclick="cProgSave()">いまの構成に名前を付けて保存</button>
     <button class="btn ghost" onclick="go('cgraph')">推移と記録（${n}回）</button>
     ${last?`<p class="note">前回 ${mdw(last.date)} ／ ${last.min}分 ${n1(last.dist)}km ${last.kcal}kcal ／ ${HARDS[(last.hard||2)-1]}</p>`:
            `<p class="note">最初の1回を記録すると、次から「同じ設定で2回続けて余裕があれば1段上げる」の判定が始まります。</p>`}
@@ -836,6 +941,15 @@ function viewCRun(){
     <div class="big" style="font-size:40px;margin:14px 0 0;color:${q.done?"#7fd1c1":"#e8ecf2"}">${q.done?"おつかれさまでした":mmss(q.left)}</div>
     <div class="bigsub">${q.done?"下のボタンから記録に進めます":"この区間の残り"}</div>
     <div class="bar"><i style="width:${pct}%"></i></div>
+    ${q.done?"":`<div class="row" style="margin-top:12px">
+      <button class="btn ghost" style="margin-top:0" onclick="cAdj('sp',-1)">速度 −</button>
+      <button class="btn ghost" style="margin-top:0" onclick="cAdj('sp',1)">速度 ＋</button>
+    </div>
+    <div class="row">
+      <button class="btn ghost" style="margin-top:0" onclick="cAdj('inc',-1)">傾斜 −</button>
+      <button class="btn ghost" style="margin-top:0" onclick="cAdj('inc',1)">傾斜 ＋</button>
+    </div>
+    <p class="note">実際に変えたら、ここも合わせて動かしてください。<strong>この回の記録にそのまま残ります</strong>（あとで直さなくて大丈夫です）。いまの区間だけに効きます。</p>`}
     <p class="note">${nx?`次は <strong>${segLine(nx)}</strong>`:`これが最後の区間です`}
     <br>トレッドミルの操作はご自分で。ここは<strong>いま何に設定するかを出すだけ</strong>です。</p>
   </div>
@@ -967,6 +1081,26 @@ function viewCPlan(){
     }).join("")}
     <div class="bigsub" style="margin-top:12px">合計 <b id="cp_total">${cTotal(p)}分</b></div>
     <button class="btn ghost" onclick="cpAdd()">＋ 区間を足す</button>
+  </div>
+  <div class="sec">繰り返しをまとめて足す</div>
+  <div class="card">
+    <p class="note">「速い1分＋ゆるい2分」のような組を、指定した回数ぶん<strong>下に足します</strong>。いまある区間は消えません。</p>
+    <label>速い側</label>
+    <div class="row">
+      <div><label>分</label><input id="cr_fmin" type="number" inputmode="decimal" step="0.5" value="1"></div>
+      <div><label>速度 km/h</label><input id="cr_fsp" type="number" inputmode="decimal" step="0.1" value="${n1(mainOf(p).sp)}"></div>
+      <div><label>傾斜 %</label><input id="cr_finc" type="number" inputmode="decimal" step="0.5" value="${n1(mainOf(p).inc)}"></div>
+    </div>
+    <label style="margin-top:10px">ゆるい側</label>
+    <div class="row">
+      <div><label>分</label><input id="cr_emin" type="number" inputmode="decimal" step="0.5" value="2"></div>
+      <div><label>速度 km/h</label><input id="cr_esp" type="number" inputmode="decimal" step="0.1" value="${n1(Math.max(1,mainOf(p).sp-1.5))}"></div>
+      <div><label>傾斜 %</label><input id="cr_einc" type="number" inputmode="decimal" step="0.5" value="${n1(mainOf(p).inc)}"></div>
+    </div>
+    <label style="margin-top:10px">繰り返す回数</label>
+    <input id="cr_n" type="number" inputmode="numeric" step="1" value="8">
+    <button class="btn ghost" onclick="cRepAdd()">この組を足す</button>
+    <p class="note">足したあとは上の一覧で1つずつ直せます。<strong>よく使う形になったら、ホームの「いまの構成に名前を付けて保存」で残しておけます。</strong></p>
   </div>
   <div class="sec">上げ方の設定</div>
   <div class="card">

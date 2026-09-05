@@ -329,6 +329,11 @@ try{const r=localStorage.getItem(KEY); if(r) DB=JSON.parse(r);}catch(e){}
 if(!DB.sessions) DB.sessions=[];
 if(!DB.checks) DB.checks=[];
 if(!DB.progs) DB.progs=[];      /* v5: 取り込んだプログラム */
+/* v6（2026-09-05）: アーカイブ（削除ではなく退避）。
+   ・取り込んだプログラムは p.arch=true の印だけを立てる（中身は消さない）
+   ・もとから入っているプログラムは DB.archK にキーだけ控える（P自体は書き換えない）
+   ・どちらも実施ログ（DB.sessions）には一切触らない＝過去の記録は残る */
+if(!Array.isArray(DB.archK)) DB.archK=[];
 DB.settings=Object.assign({},DEF,DB.settings||{});
 const S=()=>DB.settings;
 function save(){try{localStorage.setItem(KEY,JSON.stringify(DB));}catch(e){alert("端末に保存できませんでした。記録画面から書き出して保管してください。");}}
@@ -343,6 +348,36 @@ function durLabel(sec){
   if(!m) return s+"秒";
   return m+"分"+(s?s+"秒":"");
 }
+/* v6: アーカイブの判定と出し入れ。ここ以外にアーカイブの知識を持たせない。 */
+function isArch(k){
+  if(P[k]) return DB.archK.indexOf(k)>=0;
+  const p=DB.progs.filter(x=>x.id===k)[0];
+  return !!(p&&p.arch);
+}
+function archList(){
+  const a=Object.keys(P).filter(k=>isArch(k)).map(k=>({k:k,p:P[k],imported:false}));
+  DB.progs.filter(x=>x.arch).forEach(x=>a.push({k:x.id,p:x,imported:true}));
+  return a;
+}
+function archSet(k,on){
+  if(P[k]){
+    const i=DB.archK.indexOf(k);
+    if(on&&i<0) DB.archK.push(k);
+    if(!on&&i>=0) DB.archK.splice(i,1);
+  }else{
+    const p=DB.progs.filter(x=>x.id===k)[0];
+    if(!p) return;
+    if(on) p.arch=true; else delete p.arch;
+  }
+  save(); render();
+}
+function archIn(k){
+  const p=getProg(k); if(!p) return;
+  if(!confirm("「"+p.name+"」をアーカイブに移しますか？\n\nホームの一覧から消えますが、中身も実施の記録も残ります。いつでも戻せます。")) return;
+  archSet(k,true);
+}
+function archOut(k){ archSet(k,false); }
+
 function getProg(k){
   if(!k) return null;
   if(P[k]) return P[k];
@@ -360,10 +395,174 @@ function streak(){
   return n;
 }
 
+/* ===================== v7（2026-09-05・問9のI）: 写真のセルフチェック =====================
+   ご回答: 「アプリ側で写真が日付順に見れるようにしてほしい。
+            iPhoneの写真アプリだとどこに保管したかわかりづらい」
+
+   ■ 9/5に「アプリ内に写真を持たせるのは勧めない」と申し上げた件について
+     反対した理由は2つありました。①iOS Safariがストレージごと捨てうる
+     ②数十枚ぶんの容量が、既存の実施ログと同じ場所を圧迫する。
+     **②はこの作りで完全に外せます。①は外せません。**正直にそう書いておきます。
+
+   ■ 写真は localStorage に置かない。IndexedDB の別ストアに置く。
+     理由がはっきりしています。localStorage は 5MB 程度が上限で、
+     容量を超えると **save() 自体が失敗し、実施ログとチェックの記録が丸ごと
+     保存できなくなります**（写真を1枚足したせいで、これまでの記録が
+     止まる、という壊れ方をする）。写真を別の入れ物に分けておけば、
+     写真がいっぱいになっても、消えても、**記録側は無傷**です。
+     記録の書き出し（JSON）にも写真は混ざりません（巨大になって使えなくなるため）。
+
+   ■ 保存する前に必ず縮める（長辺1280px・JPEG品質0.82）。
+     iPhoneの写真はそのままだと1枚3〜5MBあり、数枚で破綻するため。
+
+   ■ 出さないもの（8/8の安全4条件と、9/5のご指示）
+     ・「先週より硬くなりました」等の判定を一切出さない。並べるだけ
+     ・撮り忘れた週を欠測として赤く見せない。空いた週は、ただ無い
+     ・連続週数・達成率を出さない
+   ■ 消えたときのために「まとめて書き出す」を必ず置く（下の phExportAll）。 */
+
+var POSES = [
+  {k:"straddle", label:"開脚", hint:"壁にお尻と背中をつけて座り、開けるところまで開く。正面から"},
+  {k:"baddha",   label:"合蹠",  hint:"足裏を合わせて座る。膝の浮き具合が見えるよう、正面から"},
+  {k:"forward",  label:"前屈",  hint:"立って前屈。横から"},
+  {k:"gomu",     label:"牛の顔（脚）", hint:"膝の重なり具合が見えるよう、正面から"}
+];
+var PDB_NAME="bmc_stretch_photos", PDB_STORE="photos";
+var pdb=null, pdbFailed=false;
+function pdbOpen(){
+  return new Promise(function(res,rej){
+    if(pdb) return res(pdb);
+    if(pdbFailed) return rej(new Error("indexeddb-unavailable"));
+    try{
+      var rq=indexedDB.open(PDB_NAME,1);
+      rq.onupgradeneeded=function(){ 
+        var d=rq.result;
+        if(!d.objectStoreNames.contains(PDB_STORE)) d.createObjectStore(PDB_STORE,{keyPath:"id"});
+      };
+      rq.onsuccess=function(){ pdb=rq.result; res(pdb); };
+      rq.onerror=function(){ pdbFailed=true; rej(rq.error||new Error("open-failed")); };
+    }catch(e){ pdbFailed=true; rej(e); }
+  });
+}
+function pdbTx(mode){ return pdbOpen().then(function(d){ return d.transaction(PDB_STORE,mode).objectStore(PDB_STORE); }); }
+function pdbPut(rec){ return pdbTx("readwrite").then(function(st){ return new Promise(function(res,rej){ var r=st.put(rec); r.onsuccess=function(){res(true)}; r.onerror=function(){rej(r.error)}; }); }); }
+function pdbAll(){ return pdbTx("readonly").then(function(st){ return new Promise(function(res,rej){ var r=st.getAll(); r.onsuccess=function(){res(r.result||[])}; r.onerror=function(){rej(r.error)}; }); }); }
+function pdbDel(id){ return pdbTx("readwrite").then(function(st){ return new Promise(function(res,rej){ var r=st.delete(id); r.onsuccess=function(){res(true)}; r.onerror=function(){rej(r.error)}; }); }); }
+
+/* 縮めてJPEGにする。元のファイルはそのまま端末に残る（こちらは触らない）。 */
+function shrink(file){
+  return new Promise(function(res,rej){
+    var fr=new FileReader();
+    fr.onload=function(){
+      var img=new Image();
+      img.onload=function(){
+        var mx=1280, w=img.width, h=img.height;
+        if(w>mx||h>mx){ var r=Math.min(mx/w,mx/h); w=Math.round(w*r); h=Math.round(h*r); }
+        var c=document.createElement("canvas"); c.width=w; c.height=h;
+        c.getContext("2d").drawImage(img,0,0,w,h);
+        res({data:c.toDataURL("image/jpeg",0.82), w:w, h:h});
+      };
+      img.onerror=function(){ rej(new Error("画像として読めませんでした")); };
+      img.src=fr.result;
+    };
+    fr.onerror=function(){ rej(new Error("ファイルを読めませんでした")); };
+    fr.readAsDataURL(file);
+  });
+}
+
+var photos=[], photosLoaded=false, phPose="";
+function phLoad(){
+  return pdbAll().then(function(a){
+    photos=a.sort(function(x,y){ return (y.date+y.id).localeCompare(x.date+x.id); });
+    photosLoaded=true; return photos;
+  }).catch(function(){ photos=[]; photosLoaded=true; return []; });
+}
+function phAdd(poseKey, input){
+  var f=input && input.files && input.files[0];
+  if(!f) return;
+  shrink(f).then(function(im){
+    var rec={id:"ph"+Date.now().toString(36)+Math.floor(Math.random()*1e4).toString(36),
+             date:today(), pose:poseKey, memo:"", data:im.data, w:im.w, h:im.h};
+    return pdbPut(rec).then(function(){ return phLoad(); }).then(function(){
+      alert("保存しました（"+today()+"）。");
+      go("photos");
+    });
+  }).catch(function(e){
+    alert("写真を保存できませんでした。\n\n"+(e&&e.message?e.message:"")+
+      "\n\nこの端末・この開き方（ファイルを直接開いた場合など）では写真を保存できないことがあります。記録とプログラムには影響していません。");
+  });
+}
+function phDel(id){
+  if(!confirm("この写真を消しますか。元に戻せません。")) return;
+  pdbDel(id).then(phLoad).then(function(){ render(); });
+}
+function phMemo(id, val){
+  var r=photos.filter(function(x){return x.id===id;})[0]; if(!r) return;
+  r.memo=String(val||"").slice(0,60);
+  pdbPut(r);
+}
+function phPick(k){ phPose=(phPose===k?"":k); render(); }
+function phExportAll(){
+  if(!photos.length){ alert("書き出す写真がありません。"); return; }
+  if(!confirm(photos.length+"枚を、1枚ずつ端末に保存します。\n（ブラウザによっては、まとめて保存の許可を1度聞かれます）")) return;
+  photos.forEach(function(r,i){
+    setTimeout(function(){
+      var a=document.createElement("a");
+      a.href=r.data; a.download="stretch_"+r.date+"_"+r.pose+"_"+(i+1)+".jpg"; a.click();
+    }, i*350);
+  });
+}
+function photosView(){
+  if(!photosLoaded){ phLoad().then(function(){ render(); }); return '<h1>写真</h1><p class="sub">読み込んでいます…</p>'; }
+  var list = phPose ? photos.filter(function(r){return r.pose===phPose;}) : photos;
+  var byDate = {};
+  list.forEach(function(r){ (byDate[r.date]=byDate[r.date]||[]).push(r); });
+  var dates = Object.keys(byDate).sort().reverse();
+  var h = '<h1>写真の記録</h1>'
+    + '<p class="sub">新しい日付が上です。<b>並べて見るだけの画面です。</b>良し悪しの判定は出しません。</p>';
+  h += '<div class="row" style="flex-wrap:wrap;gap:6px;margin-bottom:10px">'
+     + '<button class="btn sm '+(phPose===""?"":"ghost")+'" style="margin-top:0;width:auto" onclick="phPick(\'\')">すべて</button>'
+     + POSES.map(function(p){
+         var n=photos.filter(function(r){return r.pose===p.k;}).length;
+         return '<button class="btn sm '+(phPose===p.k?"":"ghost")+'" style="margin-top:0;width:auto" onclick="phPick(\''+p.k+'\')">'+esc(p.label)+' '+n+'</button>';
+       }).join('')
+     + '</div>';
+  if(!dates.length){
+    h += '<p class="note">まだ1枚もありません。「週1回のセルフチェック」の画面から撮れます。</p>';
+  }
+  dates.forEach(function(d){
+    h += '<div class="sec">'+d+'</div>';
+    h += '<div style="display:flex;flex-wrap:wrap;gap:8px">';
+    byDate[d].forEach(function(r){
+      var pl=(POSES.filter(function(p){return p.k===r.pose;})[0]||{label:r.pose}).label;
+      h += '<div class="card" style="padding:8px;margin:0;width:calc(50% - 4px);box-sizing:border-box">'
+        + '<img src="'+r.data+'" style="width:100%;border-radius:8px;display:block">'
+        + '<div style="font-size:12.5px;margin:6px 0 4px"><b>'+esc(pl)+'</b></div>'
+        + '<input class="inp" style="font-size:12px;padding:6px 8px" value="'+esc(r.memo||"")+'" placeholder="一言（任意）" onchange="phMemo(\''+r.id+'\',this.value)">'
+        + '<button class="btn link" style="padding:5px;font-size:12px" onclick="phDel(\''+r.id+'\')">この写真を消す</button>'
+        + '</div>';
+    });
+    h += '</div>';
+  });
+  h += '<div class="sec">保管について</div>';
+  h += '<div class="card"><p class="note" style="margin:0">'
+     + '<b>写真はこの端末のブラウザの中（IndexedDB）にあります。記録やプログラムとは別の入れ物です。</b>'
+     + '写真が増えても、実施ログやセルフチェックの記録を圧迫しません。'
+     + '<br><br><b>正直に書いておきます。iOSは、しばらく使わないサイトの保存領域をまとめて捨てることがあります。</b>'
+     + 'この作りでもそれは防げません。<b>大事な写真は、下から書き出して手元にも置いてください。</b>'
+     + '<br><br>撮った写真そのものは、iPhoneの写真アプリにも残ります（こちらは何も消しません）。</p>'
+     + '<button class="btn ghost" onclick="phExportAll()">📤 写真をまとめて書き出す（'+photos.length+'枚）</button></div>';
+  h += '<button class="btn ghost" onclick="go(\'check\')">セルフチェックへ</button>';
+  h += '<button class="btn ghost" onclick="go(\'home\')">戻る</button>';
+  return h;
+}
+
 /* ===================== 画面 ===================== */
 const app=document.getElementById("app");
 let view="home";
 function go(v){view=v;render();window.scrollTo(0,0);}
+/* v7: 写真は起動時に一度だけ読み込む。失敗しても本体は動く（catchはphLoad内）。 */
+try{ if(typeof indexedDB!=="undefined") phLoad().then(function(){ if(view==="photos") render(); }); }catch(e){}
 
 function render(){
   if(view==="home") return home();
@@ -374,6 +573,8 @@ function render(){
   if(view==="impc") return impConfirm();
   if(view==="impt") return impTextView();
   if(view==="spec") return specView();
+  if(view==="manage") return manageView();
+  if(view==="photos") return app.innerHTML=photosView();
 }
 
 function pcard(k,p,imported){
@@ -390,14 +591,18 @@ function home(){
     <p class="sub">目標：180度開脚 ／ 合蹠で膝を床へ ／ 牛の顔のポーズ<br>
     連続 <b style="color:#7fd1c1">${streak()}</b> 日 ・ 今日 ${n} 回実施</p>
     <div class="sec">プログラム</div>
-    ${Object.keys(P).map(k=>pcard(k,P[k],false)).join("")}
-    ${DB.progs.length?`<div class="sec">取り込んだプログラム</div>`+DB.progs.map(p=>pcard(p.id,p,true)).join(""):""}
+    ${Object.keys(P).filter(k=>!isArch(k)).map(k=>pcard(k,P[k],false)).join("")}
+    ${DB.progs.filter(p=>!p.arch).length?`<div class="sec">取り込んだプログラム</div>`+DB.progs.filter(p=>!p.arch).map(p=>pcard(p.id,p,true)).join(""):""}
+    <button class="card" onclick="go('manage')"><div class="t">セットの整理（コピー・アーカイブ）</div>
+      <div class="d">使う数が増えてきたら、ここで見えるものを絞れます${archList().length?" ／ アーカイブ "+archList().length+"件":""}</div></button>
     <div class="sec">プログラムを増やす</div>
     <button class="card" onclick="go('imp')"><div class="t">AIが書いたプログラムを取り込む</div>
       <div class="d">AIに渡すフォーマットをコピーして、書いてもらったテキストを貼り付けるだけです${DB.progs.length?" ／ 取り込み済み "+DB.progs.length+"件":""}</div></button>
     <div class="sec">記録</div>
     <button class="card" onclick="go('check')"><div class="t">週1回のセルフチェック</div>
       <div class="d">${DB.checks.length?"前回："+DB.checks[DB.checks.length-1].date:"まだ記録がありません"} ・ 日曜の夜、体が冷えているときに測る</div></button>
+    <button class="card" onclick="go('photos')"><div class="t">週1回の写真を見る</div>
+      <div class="d">開脚・合蹠・前屈・牛の顔を、日付順に並べて見返せます。判定は出しません</div></button>
     <button class="card" onclick="go('log')"><div class="t">実施ログ・データ書き出し</div>
       <div class="d">${DB.sessions.length}件の実施記録 ／ ${DB.checks.length}件のチェック</div></button>
     <button class="card" onclick="go('set')"><div class="t">設定</div>
@@ -417,7 +622,7 @@ function settings(){
     <label>カウントダウン音<small>残り3秒からのビープ音</small></label>${sw("s_beep",s.beep)}
     <button class="btn" onclick="saveSet()">保存する</button>
     <button class="btn ghost" onclick="go('home')">戻る</button>
-    <p class="note">バージョン：v5（2026-08-25）／この表示が出ていれば更新版です。<br>
+    <p class="note">バージョン：v5（2026-09-03）／この表示が出ていれば更新版です。<br>
     v5でAIが書いたプログラムの取り込みに対応し、所要時間を秒数の合計から自動計算するようにしました。<br>
     v3で姿勢の線画イラストを削除しました（分かりづらいとのご指摘のため）。フォームは各種目の説明文と「できない・つらいときは」を参照してください。</p>`;
 }
@@ -441,6 +646,17 @@ function check(){
     `).join("")}
     <label>メモ（任意）</label><input id="c_memo" placeholder="体調・気づいたことなど">
     <button class="btn" onclick="saveCheck()">保存する</button>
+    <div class="sec">写真で残す（cmを測らない日はこちらだけでも）</div>
+    <div class="card">
+      <p class="note" style="margin:0 0 9px"><b>数字を入れなくても構いません。</b>撮った写真は日付順に並びます。
+      良し悪しの判定は出しません。撮らなかった週があっても、何も表示しません。</p>
+      ${POSES.map(p=>`
+        <label style="margin-top:8px">${esc(p.label)}<small>${esc(p.hint)}</small></label>
+        <input type="file" accept="image/*" id="ph_${p.k}" onchange="phAdd('${p.k}', this)" style="font-size:13px">
+      `).join("")}
+      <button class="btn ghost" onclick="go('photos')">📷 これまでの写真を見る</button>
+      <p class="note"><b>ジムの鏡の前でも、家でも構いません。</b>同じ場所・同じ角度だと見比べやすいですが、揃っていなくても大丈夫です。</p>
+    </div>
     <button class="btn ghost" onclick="go('home')">戻る</button>`;
 }
 function saveCheck(){
@@ -525,7 +741,9 @@ function delProg(id){
 }
 let textBuf="";
 function showText(id){
-  const p=DB.progs.filter(x=>x.id===id)[0];
+  /* v6: もとから入っているプログラム（P）も対象にする。
+     v5までは取り込んだものしか書き出せず、プリセットをAIに相談できなかった。 */
+  const p=getProg(id);
   if(!p) return;
   textBuf=progToText(p);
   go("impt");
@@ -539,6 +757,50 @@ function impTextView(){
       <button class="btn sm" onclick="copyBox('ptext')">コピー</button>
       <button class="btn sm ghost" onclick="go('imp')">戻る</button>
     </div>`;
+}
+/* ===== v6（2026-09-05）: セットの整理（F=アーカイブ / J=コピーと書き出し） =====
+   J の「AIと相談」は、アプリの中にAIを載せないという線をそのまま守る。
+   ここでできるのは「コピーを作る」「テキストで書き出す」までで、
+   相談そのものは Cowork／Spark で行う（できないことをできるように見せない）。 */
+function copyProg(k){
+  const src=getProg(k); if(!src) return;
+  let base=String(src.name||"セット")+"（コピー）", nm=base, i=2;
+  while(DB.progs.some(x=>x.name===nm)){ nm=base+i; i++; }
+  const cp=JSON.parse(JSON.stringify({name:nm, tag:src.tag||"", desc:src.desc||"",
+             warn:(typeof src.warn==="string"?src.warn:""), steps:src.steps||[]}));
+  cp.id="p"+Date.now().toString(36)+Math.floor(Math.random()*1e4).toString(36);
+  cp.at=today();
+  DB.progs.push(cp);
+  save();
+  alert("「"+nm+"」を作りました。\n\n元のセットはそのままです。中身を直すときは「テキストを見る」でコピーして、直したものを取り込み直してください。");
+  render();
+}
+function manageView(){
+  const live=[].concat(
+    Object.keys(P).filter(k=>!isArch(k)).map(k=>({k:k,p:P[k],imported:false})),
+    DB.progs.filter(x=>!x.arch).map(x=>({k:x.id,p:x,imported:true}))
+  );
+  const arch=archList();
+  app.innerHTML=`
+    <h1>セットの整理</h1>
+    <p class="sub"><b>アーカイブは削除ではありません。</b>ホームの一覧から見えなくなるだけで、中身も実施の記録も残ります。いつでも戻せます。</p>
+    <div class="sec">いま出ているセット（${live.length}）</div>
+    ${live.map(x=>`
+      <div class="log"><b>${esc(x.p.name)}</b> ・ ${x.p.steps.length}種目 ・ ${durLabel(sumSec(x.p))}${x.imported?" ・ 取り込み":""}
+        <div class="row" style="margin-top:8px">
+          <button class="btn sm ghost" onclick="copyProg('${x.k}')">コピーを作る</button>
+          <button class="btn sm ghost" onclick="showText('${x.k}')">テキストを見る</button>
+          <button class="btn sm ghost" onclick="archIn('${x.k}')">アーカイブへ</button>
+        </div></div>`).join("")}
+    ${arch.length?`<div class="sec">アーカイブ（${arch.length}）</div>`+arch.map(x=>`
+      <div class="log" style="opacity:.75"><b>${esc(x.p.name)}</b> ・ ${x.p.steps.length}種目 ・ ${durLabel(sumSec(x.p))}
+        <div class="row" style="margin-top:8px">
+          <button class="btn sm ghost" onclick="archOut('${x.k}')">ホームに戻す</button>
+          <button class="btn sm ghost" onclick="showText('${x.k}')">テキストを見る</button>
+          ${x.imported?`<button class="btn sm ghost" onclick="delProg('${x.k}')">完全に削除</button>`:""}
+        </div></div>`).join(""):`<p class="note">アーカイブはまだ空です。</p>`}
+    <button class="btn ghost" onclick="go('home')">戻る</button>
+    <p class="note"><b>コピーを作る</b>と、中身が同じ別のセットができます。元のセットは変わりません。AIに直してもらいたいときは、コピーの「テキストを見る」からコピーして相談し、返ってきたテキストを取り込み画面に貼り付けてください（同じ名前なら上書きされます）。</p>`;
 }
 function specView(){
   app.innerHTML=`
