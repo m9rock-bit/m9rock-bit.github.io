@@ -104,7 +104,21 @@ textarea.big{height:240px;font-size:12px;color:#e8ecf2}
 
 <div id="app" class="wrap"></div>
 
-<div id="runner"><div class="rwrap">
+<div id="runner"><div class="rwrap" id="rwrapDone" style="display:none">
+  <!-- v8（2026-09-05）: 完了の画面。押すまでホームへ戻らない。
+       連続日数・達成率・ほめ言葉は出さない（事実だけ）。 -->
+  <div style="text-align:center;padding:8px 0">
+    <div style="font-size:44px;line-height:1.1;margin-bottom:10px">🌿</div>
+    <h2 class="exname" style="margin:0 0 6px">おつかれさまでした</h2>
+    <div id="rd_name" style="font-size:17px;font-weight:700;color:#7fd1c1;margin-bottom:4px"></div>
+    <div id="rd_sub" style="opacity:.8;font-size:14px"></div>
+  </div>
+  <div class="ctrl" style="margin-top:18px">
+    <button onclick="doneAgain()">もう一度</button>
+    <button class="main" onclick="doneClose()">ホームへ</button>
+  </div>
+  <p style="text-align:center;opacity:.55;font-size:12px;margin-top:12px">記録に残しました。<br>この画面は、押すまで閉じません。</p>
+</div><div class="rwrap" id="rwrapMain">
   <div class="rtop">
     <button class="xbtn" onclick="quit()">✕</button>
     <span id="rname"></span>
@@ -890,6 +904,9 @@ function start(k){
     if(!confirm("【開始前の注意】\n\n"+p.warn+"\n\n確認して開始しますか？")) return;
   }
   CP=p; cur=k; idx=0; paused=false; startT=Date.now();
+  /* v8: 前回の完了画面が残っていることがあるので、必ず実行の面に戻してから始める */
+  var dw=R("rwrapDone"); if(dw) dw.style.display="none";
+  var mw=R("rwrapMain"); if(mw) mw.style.display="";
   R("runner").style.display="block";
   R("rname").textContent=p.name;
   R("rpause").textContent="一時停止";
@@ -967,14 +984,50 @@ function togglePause(){
   paused=!paused;
   R("rpause").textContent=paused?"再開":"一時停止";
 }
+/* v8（2026-09-05 ご指摘）: 終わったことに気づけない件の作り直し。
+   ■ 何が起きていたか
+     finish() は close_(true) で**すぐ実行画面を閉じてホームへ戻し**、
+     900ms後に alert を出していた。iOSでは alert（ネイティブのダイアログ）が
+     読み上げを止めるため、「音声が途中で切れる」。
+     完了の画面も、実質この alert だけだった。
+   ■ 直したこと
+     1. **完了画面を実行画面の中に出す**（閉じない）。押すまでホームに戻らない。
+     2. **alert をやめた**。読み上げを邪魔しない。
+     3. **完了音を長くした**（chimeDone。下記）。
+   ■ 出さないもの: 連続日数・達成率・「よくできました」の類は完了画面に出さない
+     （8/8の安全4条件と、ホーム側との二重表示を避けるため）。事実だけ出す。 */
 function finish(){
   const sec=Math.round((Date.now()-startT)/1000);
   DB.sessions.push({date:today(),prog:CP.name,done:idx+1,total:CP.steps.length,sec});
   save();
-  close_(true);                 /* v4: 完了の読み上げを打ち切らない */
-  chimeDone();                  /* v4: 完了チャイム（音声オフでも鳴る） */
+  clearInterval(tid);
+  try{ wake&&wake.release(); wake=null; }catch(e){}
+  showDone(CP.name, idx+1, CP.steps.length, sec);
+  chimeDone();
   say("ストレッチ完了です。おつかれさまでした。");
-  setTimeout(()=>alert("完了：" + CP.name + "\n" + (idx+1) + "/" + CP.steps.length + "種目 ・ " + fmt(sec)),900);
+}
+/* 実行画面を「完了の表示」に差し替える。閉じるのは押されたときだけ。 */
+function showDone(name, done, total, sec){
+  var w=R("rwrapDone");
+  if(w){
+    R("rd_name").textContent=name;
+    R("rd_sub").textContent=done+" / "+total+"種目 ・ "+fmt(sec);
+    R("rwrapMain").style.display="none";
+    w.style.display="";
+    R("runner").style.display="";
+  }
+}
+function doneClose(){
+  var w=R("rwrapDone");
+  if(w){ w.style.display="none"; R("rwrapMain").style.display=""; }
+  close_(true);
+}
+function doneAgain(){
+  var k=cur;
+  var w=R("rwrapDone");
+  if(w){ w.style.display="none"; R("rwrapMain").style.display=""; }
+  close_();
+  if(k) start(k);
 }
 function quit(){
   if(idx>0 && !confirm("中断しますか？（ここまでの分を記録します）")) return;
@@ -998,8 +1051,15 @@ function close_(keepSpeech){
 let ac=null;
 /* v4: 完了チャイム。種目の切り替え音（単発880Hz）と区別できる上昇3音。
    設定の読み上げ／ビープをどちらもオフにしていても必ず鳴らす（完了に気づけない、というご指摘への対応） */
+/* v8（2026-09-05 ご指摘「気づけないほど短い音」）:
+   上昇3音を1回（約1秒）→ **上昇3音を2回くり返し、最後を長く伸ばす**（約3.4秒）に伸ばした。
+   種目の切り替え音（単発880Hz・0.18秒）とは、長さでも回数でもはっきり違う。
+   設定の読み上げ／ビープをどちらもオフにしていても必ず鳴らす（v4からの約束）。 */
 function chimeDone(){
-  const seq=[[784,.22,0],[988,.22,240],[1319,.55,480]];
+  const seq=[
+    [784,.30,   0],[988,.30, 320],[1319,.75, 640],
+    [784,.30,1500],[988,.30,1820],[1319,1.10,2140]
+  ];
   seq.forEach(function(s){ setTimeout(function(){ beep(s[0],s[1]); }, s[2]); });
 }
 function beep(f,d){
@@ -1007,9 +1067,12 @@ function beep(f,d){
     ac=ac||new (window.AudioContext||window.webkitAudioContext)();
     const o=ac.createOscillator(),g=ac.createGain();
     o.frequency.value=f;o.connect(g);g.connect(ac.destination);
-    g.gain.setValueAtTime(.18,ac.currentTime);
-    g.gain.exponentialRampToValueAtTime(.001,ac.currentTime+d);
-    o.start();o.stop(ac.currentTime+d);
+    /* v8: 立ち上がりを少しなめらかにして、短く切れた印象を減らす。
+       音量も 0.18 → 0.26 に上げた（ジムでも気づけるように）。 */
+    g.gain.setValueAtTime(.0001,ac.currentTime);
+    g.gain.exponentialRampToValueAtTime(.26,ac.currentTime+.02);
+    g.gain.exponentialRampToValueAtTime(.0001,ac.currentTime+d);
+    o.start();o.stop(ac.currentTime+d+.05);
   }catch(e){}
 }
 function say(t){
