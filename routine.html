@@ -1005,6 +1005,9 @@ function tickRender(){
      項目を進めるたびの保存だけだと、1つの項目に長く居るあいだが無防備になる。 */
   if(view==="run" && curId && Date.now()-lastRunSave > 10000) saveRun();
   if(inputOpen && view==="run") return;
+  /* v27: テキストを打ち込む画面では描き直さない（打っている途中で消えないように）。
+     セットを走らせたままホーム経由でここへ来ることがあるため、必要な保険。 */
+  if(view==="sximp" || view==="sxtext" || view==="sxspec") return;
   /* v15: 「次に何をしますか」の入力待ちも同じ。描き直すと打ち込んだ文字が消える。
      このあいだ時計は止めてあるので、描き直さなくても表示はずれない。 */
   if(fAsking && view==="focus") return;
@@ -2004,7 +2007,13 @@ function nativeTimer(sec){
 /* ============================ 画面 ============================ */
 function render(){
   var h = "";
-  if(view==="scenes") h = viewScenes();
+  if(view==="sxlib") h = viewSxLib();
+  else if(view==="sximp") h = viewSxImp();
+  else if(view==="sximpc") h = viewSxImpC();
+  else if(view==="sxtext") h = viewSxText();
+  else if(view==="sxspec") h = viewSxSpec();
+  else if(view==="sxattach") h = viewSxAttach();
+  else if(view==="scenes") h = viewScenes();
   else if(view==="words") h = viewWords();
   else if(view==="home") h = viewHome();
   else if(view==="run"){
@@ -2175,6 +2184,13 @@ function viewHome(){
     h += '<button class="setb" onclick="sleepStart()">🛌 就寝'
        + '<small>イヤホン切替→ストレッチ5分→プレイリスト切替→見守り画面へ、自動で進みます。'
        + '<br>途中で起きたときは、見守り画面の「🌃 途中で起きてしまった」から。</small></button>';
+    /* v27: 寝る前のストレッチを入れ替える入口を、就寝のすぐ下に置く。
+       編集画面の奥まで探しに行かせない（9/5のタグの件と同じ轍を踏まない）。 */
+    var psl = setOf("presleep");
+    if(psl){
+      h += '<button class="btn ghost" onclick="sxAttachGo(\'presleep\')">🧘 寝る前のストレッチを入れ替える'
+         + (psl.sx?'（いま: '+esc(psl.sx.name)+'）':'')+'</button>';
+    }
   }
   h += '<div class="sec">崩れてしまったとき</div>';
   rescues().forEach(function(s){
@@ -2206,6 +2222,7 @@ function viewHome(){
   h += '<button class="btn ghost" onclick="go(\'log\')">📖 これまでの記録</button>';
   h += '<button class="btn ghost" onclick="revGo(null)">📊 ルーティンの振り返り（実績とメモ）</button>';
   h += '<button class="btn ghost" onclick="go(\'edit\')">セットを編集・追加・削除</button>';
+  h += '<button class="btn ghost" onclick="sxLibGo()">🧘 ストレッチのプログラム（登録・AIに渡す書式）</button>';
   h += '<button class="btn ghost" onclick="bkGo()">💾 バックアップ（書き出し・読み込み）</button>';
   h += '<button class="btn link" onclick="go(\'about\')">このアプリが持たないもの</button>';
   return h;
@@ -2809,6 +2826,344 @@ var WORDS = [
   {from:"（泣き出した後）",            to:"じゃあ最初の1問だけ、一緒にやろう",  why:"全部ではなく1問に縮めて、再開のハードルを下げる"},
   {from:"そんなことで泣かないの／元気出しなさい", to:"悲しかったんだね",        why:"気持ちをそのまま言葉にして返す（良し悪しを判断しない）"}
 ];
+/* ===================== v27（2026-09-05・ご依頼）: ストレッチのプログラム置き場 =====
+   ご依頼:
+     「就寝セットで寝る前のストレッチのプログラムを入れ替えやすいようにしてほしい。
+       ストレッチのプログラムを別で登録しておき、セットを編集・追加する際に
+       どのプログラムを組み込むのか選択できるようにしてほしい。
+       ストレッチのプログラムはAIに相談できるようにほかのアプリと同様の対応をしてほしい」
+
+   ■ 書式は stretch.html とまったく同じ `#BMC-STRETCH v1`。
+     わざと合わせている。**AIに1度書いてもらったものを、両方のアプリで使える。**
+     ストレッチアプリで書き出したテキストを、そのままここに貼れる（逆も同じ）。
+   ■ 置き場（DB.sxProgs）はセットとは別。**登録しただけでは、どのセットにも影響しない。**
+   ■ セットへ組み込むときは「どこを差し替えるか」を選ぶ。
+     就寝セットのように前後に別の項目（イヤホン切替・プレイリスト切替）がある場合、
+     **あいだだけを入れ替えられる**ようにしてある。全部を消してしまわない。
+   ■ 2回目からは、前回入れ替えた範囲（s.sx）をワンタップで差し替えられる。 */
+
+function sxProgs(){ if(!Array.isArray(DB.sxProgs)) DB.sxProgs=[]; return DB.sxProgs; }
+function sxUid(){ return "sx"+Date.now().toString(36)+Math.floor(Math.random()*1e4).toString(36); }
+function sxSec(t){
+  t=String(t==null?"":t).trim().replace(/[０-９]/g,function(c){return String.fromCharCode(c.charCodeAt(0)-0xFEE0);});
+  if(!t) return null;
+  var m=t.match(/^(?:(\d+)\s*(?:分|min|m))?\s*(?:(\d+)\s*(?:秒|sec|s))?$/i);
+  if(m&&(m[1]||m[2])) return (+(m[1]||0))*60+(+(m[2]||0));
+  m=t.match(/^(\d+(?:\.\d+)?)$/);
+  if(m) return Math.round(+m[1]);
+  return null;
+}
+var SXKEY={"プログラム名":"name","名前":"name","プログラム":"name","タイトル":"name","program":"name",
+  "タグ":"tag","場面":"tag","いつ":"tag",
+  "説明":"desc","概要":"desc","ねらい":"desc","目的":"desc",
+  "注意":"warn","警告":"warn",
+  "時間":"_","所要時間":"_","合計":"_","合計時間":"_","目安":"_"};
+/* stretch.html の parseImport と同じ考え方。1つのテキストに複数のプログラムが
+   入っていても読める（AIがまとめて出したときのため）。 */
+function sxParse(text){
+  var progs=[], errs=[], skips=[];
+  var lines=String(text||"").replace(/\r/g,"").split("\n");
+  var p=null;
+  lines.forEach(function(raw,i){
+    var ln=i+1;
+    var s2=raw.replace(/　/g," ").trim();
+    if(!s2) return;
+    if(s2.slice(0,3)==="```") return;
+    if(/^[-=—ー─＝]{3,}$/.test(s2)) return;
+    if(s2.charAt(0)==="#") return;
+    s2=s2.replace(/^[・･]\s*/,"").replace(/^[-*]\s+/,"").replace(/^\d+[.)]\s+/,"");
+    var t=s2.replace(/｜/g,"|");
+    var k=s2.match(/^([^:：|｜]{1,8})\s*[:：]\s*(.*)$/);
+    if(k && SXKEY[k[1].trim()]!==undefined && t.indexOf("|")<0){
+      var f=SXKEY[k[1].trim()], v=k[2].trim();
+      if(f==="_") return;
+      if(f==="name"){
+        if(!v){ errs.push(ln+"行目：プログラム名が空です"); return; }
+        p={name:v,tag:"",desc:"",warn:"",items:[],line:ln}; progs.push(p); return;
+      }
+      if(!p){ errs.push(ln+"行目：「プログラム名:」より前に「"+k[1]+"」があります"); return; }
+      p[f]=v; return;
+    }
+    if(t.indexOf("|")>=0){
+      var c=t.split("|").map(function(x){return x.trim();});
+      if(/^(種目名?|名前|ポーズ名?)$/.test(c[0])&&/^(秒数?|時間)$/.test(c[1]||"")) return;
+      if(/^[-–—:：\s]*$/.test(c.join(""))) return;
+      if(!p){ errs.push(ln+"行目：「プログラム名:」がまだ書かれていません"); return; }
+      if(!c[0]){ errs.push(ln+"行目：種目名が空です"); return; }
+      var sec=sxSec(c[1]||"");
+      if(sec===null||sec<=0){ errs.push(ln+"行目：秒数が読み取れません（"+(c[1]?c[1]:"空欄")+"）"); return; }
+      if(sec>1800){ errs.push(ln+"行目：秒数が長すぎます（"+sec+"秒）"); return; }
+      var side=(c[2]||"").trim();
+      if(/^([-–—ー]|なし|無し|none)$/i.test(side)) side="";
+      p.items.push({n:c[0], s:sec, side:side||"", how:(c[3]||"").trim(), ease:(c[4]||"").trim()});
+      return;
+    }
+    skips.push(ln+"行目：" + (s2.length>26?s2.slice(0,26)+"…":s2));
+  });
+  progs.forEach(function(q){ if(!q.items.length) errs.push(q.line+"行目：「"+q.name+"」に種目が1つもありません"); });
+  if(!progs.length) errs.push("プログラムが見つかりません。「プログラム名: 〜」の行が必要です。");
+  return {progs:progs, errs:errs, skips:skips};
+}
+function sxToText(g){
+  var L=["#BMC-STRETCH v1","プログラム名: "+g.name];
+  if(g.tag) L.push("タグ: "+g.tag);
+  if(g.desc) L.push("説明: "+g.desc);
+  if(g.warn) L.push("注意: "+g.warn);
+  L.push("---","種目名 | 秒数 | 左右 | やり方 | できないときは");
+  (g.items||[]).forEach(function(x){
+    L.push([x.n, x.s+"秒", x.side||"", x.how||"", x.ease||""].join(" | "));
+  });
+  return L.join("\n");
+}
+function sxTotal(g){ return (g.items||[]).reduce(function(a,x){return a+(+x.s||0)},0); }
+/* プログラム → このアプリのステップ（"秒|文言|読み上げ"）へ。
+   文言は「種目名（左右）・やり方」、読み上げは「種目名、左右」。
+   既存の就寝前ストレッチの書き方に合わせている。 */
+function sxToSteps(g){
+  return (g.items||[]).map(function(x){
+    var nm = x.n + (x.side ? "（"+x.side+"）" : "");
+    var txt = nm + (x.how ? "・"+x.how : "");
+    var say = x.n + (x.side ? "、"+x.side : "");
+    return x.s + "|" + txt.replace(/\|/g,"／") + "|" + say.replace(/\|/g,"／");
+  });
+}
+
+var sxText="", sxBuf=null, sxTextBuf="", sxTarget=null, sxPick=null, sxHead=0, sxTail=0;
+function sxLibGo(){ go("sxlib"); }
+function sxImpGo(){ sxBuf=null; go("sximp"); }
+function sxSpecGo(){ go("sxspec"); }
+function sxTextGo(id){
+  var g=sxProgs().filter(function(x){return x.id===id;})[0]; if(!g) return;
+  sxTextBuf=sxToText(g); go("sxtext");
+}
+function sxImpCheck(){
+  var e=document.getElementById("sx_t"); sxText=e?e.value:"";
+  sxBuf=sxParse(sxText); go("sximpc");
+}
+function sxImpSave(){
+  if(!sxBuf || !sxBuf.progs.length) return;
+  var added=0;
+  sxBuf.progs.forEach(function(q){
+    var ex=sxProgs().filter(function(x){return x.name===q.name;})[0];
+    if(ex){ ex.items=q.items.slice(); ex.tag=q.tag||""; ex.desc=q.desc||""; ex.warn=q.warn||""; }
+    else { sxProgs().push({id:sxUid(), name:q.name, tag:q.tag||"", desc:q.desc||"", warn:q.warn||"", items:q.items.slice()}); added++; }
+  });
+  save(); sxBuf=null; sxText="";
+  go("sxlib");
+}
+function sxDel(id){
+  var g=sxProgs().filter(function(x){return x.id===id;})[0]; if(!g) return;
+  if(!confirm("「"+g.name+"」を置き場から消しますか。\n\n**すでにセットへ組み込んだ内容は消えません。**ここから消えるだけです。")) return;
+  DB.sxProgs=sxProgs().filter(function(x){return x.id!==id;});
+  save(); render();
+}
+function viewSxLib(){
+  var h='<h1>🧘 ストレッチのプログラム</h1>'
+    + '<p class="sub"><b>ここに登録しただけでは、どのセットも変わりません。</b>'
+    + 'セットの編集画面から「組み込む」を選んだときにだけ、そのセットに入ります。'
+    + '<br>書式は<b>ストレッチアプリとまったく同じ</b>です。あちらで書き出したテキストを、そのまま貼れます。</p>';
+  h += '<button class="btn ghost" onclick="sxImpGo()">テキストから取り込む</button>';
+  h += '<button class="btn ghost" onclick="sxSpecGo()">AIに渡すフォーマットを見る・コピーする</button>';
+  if(!sxProgs().length){
+    h += '<p class="note">まだ1つも登録されていません。上の「AIに渡すフォーマット」をコピーしてAIに渡し、返ってきたテキストを取り込んでください。</p>';
+  }
+  sxProgs().forEach(function(g){
+    h += '<div class="card"><div class="sec" style="margin-top:0">'+esc(g.name)
+       + (g.tag?'<span class="tag">'+esc(g.tag)+'</span>':'')+'</div>'
+       + '<p class="note" style="margin:0 0 6px">'+(g.items||[]).length+'種目 ・ '+durLabel(sxTotal(g))+(g.desc?'<br>'+esc(g.desc):'')+'</p>'
+       + (g.items||[]).slice(0,3).map(function(x){ return '<div class="prev" style="opacity:.75">'+esc(x.n)+(x.side?'（'+esc(x.side)+'）':'')+' '+x.s+'秒</div>'; }).join("")
+       + ((g.items||[]).length>3?'<div class="prev" style="opacity:.5">ほか '+((g.items||[]).length-3)+'種目</div>':'')
+       + '<div class="row" style="margin-top:8px">'
+       + '<button class="btn ghost" style="margin-top:0" onclick="sxTextGo(\''+g.id+'\')">テキスト</button>'
+       + '<button class="btn link" style="margin-top:0" onclick="sxDel(\''+g.id+'\')">消す</button>'
+       + '</div></div>';
+  });
+  h += '<button class="btn ghost" onclick="go(\'home\')">戻る</button>';
+  return h;
+}
+function viewSxImp(){
+  return '<h1>ストレッチを取り込む</h1>'
+    + '<p class="sub">AIに書いてもらったテキストを、そのまま貼り付けてください。'
+    + '前後に余計な文章やコードブロックが付いていても取り込めます。<br>'
+    + '<b>同じ名前があれば中身を差し替えます。</b>1度に何本でも取り込めます。</p>'
+    + '<button class="btn ghost" onclick="sxSpecGo()">AIに渡すフォーマットを見る・コピーする</button>'
+    + '<label>プログラムのテキスト</label>'
+    + '<textarea id="sx_t" style="min-height:200px;font-family:ui-monospace,monospace;font-size:12.5px">'+esc(sxText)+'</textarea>'
+    + '<button class="btn" onclick="sxImpCheck()">内容を確認する</button>'
+    + '<button class="btn link" onclick="go(\'sxlib\')">戻る</button>';
+}
+function viewSxImpC(){
+  if(!sxBuf) return viewSxImp();
+  var b=sxBuf;
+  var h='<h1>この内容で取り込みます</h1>';
+  b.progs.forEach(function(q){
+    h += '<div class="card"><div class="sec" style="margin-top:0">'+esc(q.name)+'</div>'
+       + '<p class="note" style="margin:0 0 6px">'+q.items.length+'種目 ・ '+durLabel(q.items.reduce(function(a,x){return a+x.s},0))+'</p>'
+       + q.items.map(function(x){ return '<div class="prev">'+esc(x.n)+(x.side?'（'+esc(x.side)+'）':'')+' '+x.s+'秒</div>'; }).join("")
+       + '</div>';
+  });
+  if(b.errs.length) h += '<div class="warn"><b>読み取れなかったところがあります。</b><br>'+b.errs.map(function(x){return esc(x)}).join("<br>")+'</div>';
+  if(b.skips.length) h += '<div class="hint"><b>無視した行</b><br>'+b.skips.map(function(x){return esc(x)}).join("<br>")+'</div>';
+  if(b.progs.length) h += '<button class="btn" onclick="sxImpSave()">置き場に登録する</button>';
+  h += '<button class="btn ghost" onclick="go(\'sximp\')">テキストを直す</button>';
+  h += '<button class="btn link" onclick="sxBuf=null;go(\'sxlib\')">やめる</button>';
+  return h;
+}
+function viewSxText(){
+  return '<h1>プログラムのテキスト</h1>'
+    + '<p class="sub">この形式のままAIに渡して直してもらえます。<b>ストレッチアプリにもそのまま貼れます。</b>'
+    + '直したテキストを取り込み画面に貼ると、同じ名前のまま中身が入れ替わります。</p>'
+    + '<textarea id="sxt_t" style="min-height:240px;font-family:ui-monospace,monospace;font-size:12.5px" readonly>'+esc(sxTextBuf)+'</textarea>'
+    + '<button class="btn" onclick="sxCopy(\'sxt_t\')">コピー</button>'
+    + '<button class="btn ghost" onclick="sxImpGo()">取り込み画面へ</button>'
+    + '<button class="btn link" onclick="go(\'sxlib\')">戻る</button>';
+}
+var SXFMT=[
+"【B.M.C. ストレッチ 取り込みフォーマット v1】",
+"",
+"次の書式でストレッチプログラムを出力してください。このテキストをそのまま",
+"「切り替えルーティン」アプリにも「ストレッチ」アプリにも貼り付けられます。",
+"",
+"#BMC-STRETCH v1",
+"プログラム名: 就寝前の5分",
+"タグ: 就寝前",
+"説明: 股関節まわりをゆるめて、呼吸を落ち着かせる。",
+"---",
+"種目名 | 秒数 | 左右 | やり方 | できないときは",
+"カエルストレッチ | 60 |  | 四つ這いから両膝を左右に開き、お尻を後ろに引いて止まる。内ももが伸びる。 | 開く角度を半分にする。膝の下にタオルを敷く。",
+"仰向けフィギュア4 | 30 | 右 | 右足首を左膝に乗せ、下の太ももを両手で胸に引き寄せる。お尻の外側が伸びる。 | 手が届かないときはタオルを腿にかけて引く。",
+"仰向けフィギュア4 | 30 | 左 | 反対側も同じ。 | 同上。",
+"",
+"■ 書き方の決まり",
+"1. はじめに「プログラム名:」を書く。「タグ:」「説明:」は任意。",
+"2. 区切り線（---）の下は1行が1種目。縦棒 | で5つに区切り、順番は必ず",
+"   「種目名 | 秒数 | 左右 | やり方 | できないときは」。",
+"3. 左右がある種目は「右」「左」を書き、左右を別々の2行に分ける。",
+"   左右のない種目は3つめを空欄にする。",
+"4. 秒数は 30 ／ 30秒 ／ 1分30秒 のどれでもよい。1種目 10〜120秒を目安に。",
+"5. 「やり方」は実施中に画面に出る手順。1〜3文で、体の位置・どこが伸びるか・注意点。",
+"6. 「できないときは」は緩和策（タオルを使う／可動域を半分にする 等）。全種目に書く。",
+"7. 種目名・やり方・緩和策の中では縦棒 | と全角の ｜ を使わない。",
+"8. 所要時間は秒数の合計からアプリが自動計算するので、書かなくてよい。",
+"9. 複数のプログラムを一度に出すときは、2つめ以降も「プログラム名:」から続けて書く。",
+"10. コードブロックで囲んで出力しても構わない（アプリ側で無視する）。",
+"",
+"■ 作るときの前提（このアプリの持ち主）",
+"・目標は「180度開脚」「合蹠で膝を床につける」「牛の顔のポーズ」。股関節まわりと肩が中心。",
+"・iPhoneで再生し、種目名・左右・秒数を音声で読み上げる。種目名は聞いて分かる長さにする。",
+"・痛みを我慢させる指示は書かない。「痛気持ちいいの手前で止める」方針。",
+"・就寝前に使うプログラムは、心拍を上げる動き・反動を使う動きを入れない。"
+].join("\n");
+function viewSxSpec(){
+  return '<h1>AIに渡すフォーマット</h1>'
+    + '<p class="sub">下の文章をまるごとコピーしてAIに貼り付け、「この書式でストレッチプログラムを作って」と伝えてください。'
+    + '<b>返ってきたテキストは、このアプリにもストレッチアプリにも貼れます。</b></p>'
+    + '<textarea id="sxs_t" style="min-height:320px;font-family:ui-monospace,monospace;font-size:12px" readonly>'+esc(SXFMT)+'</textarea>'
+    + '<button class="btn" onclick="sxCopy(\'sxs_t\')">フォーマットをコピー</button>'
+    + '<button class="btn link" onclick="go(\'sximp\')">戻る</button>';
+}
+function sxCopy(id){
+  var t=document.getElementById(id); if(!t) return;
+  t.removeAttribute("readonly");
+  try{ t.select(); t.setSelectionRange(0,999999); }catch(e){}
+  var ok=false; try{ ok=document.execCommand("copy"); }catch(e){}
+  t.setAttribute("readonly","");
+  var done=function(r){ alert(r?"コピーしました":"コピーできませんでした。長押しで選択してコピーしてください"); };
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(t.value).then(function(){done(true)},function(){done(ok)});
+  }else done(ok);
+}
+
+/* ---- セットへ組み込む ---- */
+function sxAttachGo(setId){
+  var s=setOf(setId); if(!s) return;
+  collect();
+  sxTarget=setId; sxPick=null;
+  var sx=s.sx;
+  if(sx && typeof sx.from==="number"){ sxHead=sx.from; sxTail=Math.max(0, s.steps.length-(sx.from+sx.len)); }
+  else { sxHead=0; sxTail=0; }
+  go("sxattach");
+}
+function sxPickProg(id){ sxPick=(sxPick===id?null:id); render(); }
+function sxSetHead(v){ sxHead=Math.max(0, Math.min(20, sxHead+v)); render(); }
+function sxSetTail(v){ sxTail=Math.max(0, Math.min(20, sxTail+v)); render(); }
+function sxDoAttach(){
+  var s=setOf(sxTarget), g=sxProgs().filter(function(x){return x.id===sxPick;})[0];
+  if(!s||!g) return;
+  var head=Math.min(sxHead, s.steps.length);
+  var tail=Math.min(sxTail, Math.max(0, s.steps.length-head));
+  var body=sxToSteps(g);
+  var before=s.steps.slice(0, head);
+  var after=tail? s.steps.slice(s.steps.length-tail) : [];
+  s.steps=before.concat(body, after);
+  s.sx={id:g.id, name:g.name, from:head, len:body.length};
+  save();
+  alert("「"+g.name+"」を組み込みました。\n\n"+s.icon+" "+s.name+" は "+s.steps.length+"項目・"+durLabel(limitOf(s))+" になりました。");
+  sxTarget=null; sxPick=null;
+  go("edit");
+}
+function viewSxAttach(){
+  var s=setOf(sxTarget);
+  if(!s) return viewSxLib();
+  var head=Math.min(sxHead, s.steps.length);
+  var tail=Math.min(sxTail, Math.max(0, s.steps.length-head));
+  var g=sxProgs().filter(function(x){return x.id===sxPick;})[0];
+  var h='<h1>ストレッチを組み込む</h1>'
+    + '<p class="sub">'+esc(s.icon)+' <b>'+esc(s.name)+'</b> に入れます。'
+    + (s.sx?'<br>前回は「'+esc(s.sx.name)+'」を入れていました。':'')+'</p>';
+  if(!sxProgs().length){
+    h += '<div class="warn">置き場にプログラムがありません。先に取り込んでください。</div>'
+       + '<button class="btn ghost" onclick="sxImpGo()">テキストから取り込む</button>'
+       + '<button class="btn link" onclick="go(\'edit\')">戻る</button>';
+    return h;
+  }
+  h += '<div class="sec">どれを入れますか</div>';
+  sxProgs().forEach(function(q){
+    h += '<button class="setb'+(sxPick===q.id?'':'')+'" style="'+(sxPick===q.id?'border-color:#7fd1c1;background:#16211f':'')+'" onclick="sxPickProg(\''+q.id+'\')">'
+       + (sxPick===q.id?'✓ ':'')+esc(q.name)
+       + '<small>'+(q.items||[]).length+'種目 ・ '+durLabel(sxTotal(q))+(q.desc?'<br>'+esc(q.desc):'')+'</small></button>';
+  });
+  h += '<div class="sec">どこを入れ替えますか</div>';
+  h += '<div class="card">';
+  h += '<p class="note" style="margin:0 0 8px"><b>前後に残す項目の数</b>を決めます。'
+     + '就寝のセットのように、はじめとおわりに別の項目（イヤホンの切替・プレイリストの切替）があるときは、'
+     + '<b>そこを残して、あいだだけ</b>を入れ替えられます。</p>';
+  h += '<div class="toggle"><b>はじめに残す</b><span>'
+     + '<button class="btn ghost" style="margin-top:0;width:auto;padding:6px 12px" onclick="sxSetHead(-1)">−</button>'
+     + ' <b style="font-size:16px">'+head+'</b>項目 '
+     + '<button class="btn ghost" style="margin-top:0;width:auto;padding:6px 12px" onclick="sxSetHead(1)">＋</button></span></div>';
+  h += '<div class="toggle" style="margin-top:8px"><b>おわりに残す</b><span>'
+     + '<button class="btn ghost" style="margin-top:0;width:auto;padding:6px 12px" onclick="sxSetTail(-1)">−</button>'
+     + ' <b style="font-size:16px">'+tail+'</b>項目 '
+     + '<button class="btn ghost" style="margin-top:0;width:auto;padding:6px 12px" onclick="sxSetTail(1)">＋</button></span></div>';
+  h += '</div>';
+  h += '<div class="sec">こうなります</div>';
+  h += '<div class="card">';
+  var st=stepsOf(s);
+  st.slice(0,head).forEach(function(x){ h += '<div class="prev">そのまま　'+esc(x.text)+'</div>'; });
+  if(g){
+    sxToSteps(g).forEach(function(line){
+      var t2=line.split("|");
+      h += '<div class="prev" style="color:#7fd1c1">入れ替え　'+esc(t2[1]||"")+'　<span style="opacity:.6">'+t2[0]+'秒</span></div>';
+    });
+  }else{
+    h += '<div class="prev" style="opacity:.6">（上でプログラムを選んでください）</div>';
+  }
+  if(tail) st.slice(st.length-tail).forEach(function(x){ h += '<div class="prev">そのまま　'+esc(x.text)+'</div>'; });
+  var removed=Math.max(0, st.length-head-tail);
+  var newSec=0;
+  st.slice(0,head).forEach(function(x){ newSec+=x.sec; });
+  if(g) newSec+=sxTotal(g);
+  if(tail) st.slice(st.length-tail).forEach(function(x){ newSec+=x.sec; });
+  h += '<p class="note" style="margin-top:8px">いまの'+st.length+'項目のうち、<b>あいだの'+removed+'項目</b>が入れ替わります。'
+     + (g?'　→ 入れ替え後は <b>'+(head+sxToSteps(g).length+tail)+'項目・'+durLabel(newSec)+'</b>':'')+'</p>';
+  h += '</div>';
+  if(g) h += '<button class="btn" onclick="sxDoAttach()">この形にする</button>';
+  h += '<button class="btn ghost" onclick="sxLibGo()">プログラムを増やす・直す</button>';
+  h += '<button class="btn link" onclick="sxTarget=null;go(\'edit\')">やめる</button>';
+  return h;
+}
+
 function viewWords(){
   var h = '<h1>🗣 声かけの言い換え</h1>'
     + '<p class="sub">見るだけの画面です。<b>選ぶところも、記録するところもありません。</b><br>'
@@ -3685,6 +4040,20 @@ function viewEdit(){
     h1 += '<button class="btn save" onclick="collect();save();editBack()">保存して一覧へ戻る</button>';
     h1 += '<p class="note">空にした欄は、変更なしとして扱います（うっかり消えないようにするためです）。説明文とプレイリストURLだけは空にできます。<br>並べ替え・複製・削除・追加・トグルの切り替え・アーカイブ・復元は、押した時点でその場で保存されます。</p>';
     h1 += EDIT_HINT;
+    /* v27: このセットにストレッチのプログラムを組み込む／入れ替える */
+    h1 += '<div class="sec">🧘 ストレッチのプログラム</div>';
+    h1 += '<div class="card">';
+    if(s1.sx){
+      h1 += '<p class="note" style="margin:0 0 8px">いまは <b>'+esc(s1.sx.name)+'</b> が入っています'
+         + '（'+(s1.sx.from+1)+'〜'+(s1.sx.from+s1.sx.len)+'項目め）。</p>';
+    }else{
+      h1 += '<p class="note" style="margin:0 0 8px">登録しておいたストレッチのプログラムを、このセットに組み込めます。'
+         + '<b>前後の項目を残して、あいだだけ入れ替えられます。</b></p>';
+    }
+    h1 += '<button class="btn ghost" style="margin-top:0" onclick="sxAttachGo(\''+s1.id+'\')">'
+       + (s1.sx?'ほかのプログラムに入れ替える':'ストレッチのプログラムを組み込む')+'</button>';
+    h1 += '<button class="btn link" onclick="sxLibGo()">プログラムの置き場を開く（取り込み・AIに渡す書式）</button>';
+    h1 += '</div>';
     h1 += '<button class="btn ghost" onclick="collect();save();go(\'home\')">ホームへ</button>';
     return h1;
   }
