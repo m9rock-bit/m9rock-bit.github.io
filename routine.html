@@ -2359,6 +2359,21 @@ function viewRun(){
        + '<button class="btn ghost" style="margin-top:0" onclick="extendStep(300)">＋5分 延長</button>'
        + '</div>';
     h += '<button class="btn ghost" onclick="skipStep()">↷ この項目をスキップ</button>';
+    /* v26（2026-09-05 ご指摘）: 🧸 と 🛟 は画面のいちばん下にあり、
+       **いちばん急いで押したいときに、いちばん遠かった。**スキップの直下へ移した。
+       この2つは「いま出た衝動・いま出たイライラ」に対する入口なので、
+       スクロールを挟ませない。並びは横2つで、指が届く位置に置く。 */
+    var em = [];
+    if(!s.rescue && rescues().length)
+      em.push('<button class="btn ghost" style="margin-top:0;border-color:#c4a06a;color:#e8c99a" onclick="start(\''+rescues()[0].id+'\')">🛟 崩れた</button>');
+    if(curId !== "anger" && angerSet())
+      em.push('<button class="btn ghost" style="margin-top:0;border-color:#c98b8b;color:#e8b4b4" onclick="angerGo()">🧸 イライラした</button>');
+    if(em.length){
+      h += '<div class="row" style="margin-top:9px">'+em.join("")+'</div>';
+      h += '<p class="note" style="margin-top:4px">'
+         + (em.length>1 ? '<b>🛟</b>は復帰の1手へ、<b>🧸</b>は1分だけ離れる形へ。' : (curId!=="anger"&&angerSet() ? '<b>🧸</b>は1分だけ離れる形へ。' : '<b>🛟</b>は復帰の1手へ。'))
+         + 'どちらも<b>いまのセットはそのまま残り</b>、終わるとこの続きに戻ります。</p>';
+    }
     var ap = appOf(cur);
     if(ap) h += '<button class="btn ghost" onclick="openApp(\''+esc(cur.app)+'\')">'+ap.icon+' '+esc(ap.name)+'を開く</button>';
     h += '<p class="note">延長は<b>この回だけ</b>です。セットの秒数は変わりません（実際にかかった時間は、延長した分もそのまま記録されます）。</p>';
@@ -2449,8 +2464,13 @@ function viewRun(){
     h += '<button class="btn ghost" onclick="openSpotify()">🎵 プレイリストを開く'+(spUrl(s)?'':'（未設定）')+'</button>';
   }
   h += '<button class="btn" onclick="finishNow()">ここまでで終える</button>';
-  if(!s.rescue && rescues().length) h += '<button class="btn ghost" onclick="start(\''+rescues()[0].id+'\')">🛟 崩れた — 復帰の1手へ</button>';
-  h += angerBtn();
+  /* v26: 🛟・🧸 は上（スキップの直下）へ移した。ここには出さない。
+     ただし**全項目を終えたあと**（curStep が範囲外）は上のブロックが出ないので、
+     そのときだけ下に出す（終わってから「崩れた」になることがあるため）。 */
+  if(curStep >= st.length){
+    if(!s.rescue && rescues().length) h += '<button class="btn ghost" onclick="start(\''+rescues()[0].id+'\')">🛟 崩れた — 復帰の1手へ</button>';
+    h += angerBtn();
+  }
   h += backToFocus();
   h += '<button class="btn link" onclick="leaveRun()">'+(inDetour()&&curId==="anger" ? 'やめて、さっきの続きに戻る' : 'やめて最初に戻る')+'</button>';
   return h;
@@ -2524,6 +2544,12 @@ function viewRunAuto(s){
   h += '<button class="btn ghost" style="margin-top:9px" onclick="autoPauseToggle()">'+(autoPaused?'▶ 再開する':'⏸ 一時停止する')+'</button>';
   /* v20 (2026-09-03 ご依頼): 自動で進むセットにも延長を付けた
      （タップ式には v14 から入っていたが、こちらには無かった） */
+  /* v26（2026-09-05 ご指摘）: 自動で進むセットでも、🧸 を下まで探しに行かせない。
+     「次へ ▶」「一時停止」のすぐ下に置く。 */
+  if(curId !== "anger" && angerSet()){
+    h += '<button class="btn ghost" style="margin-top:9px;border-color:#c98b8b;color:#e8b4b4" onclick="angerGo()">🧸 イライラした — 1分だけ離れる</button>';
+    h += '<p class="note" style="margin-top:4px"><b>いまのセットはそのまま残ります。</b>終わると、この続きに戻ります。</p>';
+  }
   h += '<div class="row" style="margin-top:9px">'
      + '<button class="btn ghost" style="margin-top:0" onclick="autoExtend(60)">＋1分 延長</button>'
      + '<button class="btn ghost" style="margin-top:0" onclick="autoExtend(300)">＋5分 延長</button>'
@@ -2553,7 +2579,7 @@ function viewRunAuto(s){
     if(!spUrl(s)) h += '<p class="note">このセットの編集画面か、ホーム画面の「設定」にプレイリストのURLを入れると、次回からここで開けます。</p>';
   }
   h += '<button class="btn" onclick="finishNow()">'+(curId==="anger"&&inDetour() ? 'ここまでにして、さっきの続きに戻る' : 'ここまでで終える')+'</button>';
-  h += angerBtn();
+  /* v26: 🧸 は上（「次へ ▶」の下）へ移した。ここには出さない。 */
   h += backToFocus();
   h += '<button class="btn link" onclick="leaveRun()">'+(inDetour()&&curId==="anger" ? 'やめて、さっきの続きに戻る' : 'やめて最初に戻る')+'</button>';
   return h;
