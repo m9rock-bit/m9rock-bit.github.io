@@ -840,6 +840,8 @@ function finishPending(){
 }
 
 /* --- 状態 --- */
+/* v27: 版の表示（ホーム最下部）。中身を変えたら、ここも必ず上げる。 */
+var APPVER = "切り替えルーティン v27 ・ 2026-09-05";
 var view = "home";
 var curId = null;
 var startAt = 0;
@@ -2225,6 +2227,11 @@ function viewHome(){
   h += '<button class="btn ghost" onclick="sxLibGo()">🧘 ストレッチのプログラム（登録・AIに渡す書式）</button>';
   h += '<button class="btn ghost" onclick="bkGo()">💾 バックアップ（書き出し・読み込み）</button>';
   h += '<button class="btn link" onclick="go(\'about\')">このアプリが持たないもの</button>';
+  /* v27（2026-09-05）: 版の表示。
+     「直したはずなのに変わって見えない」を、開いて1秒で確かめられるようにする。
+     このファイルは自動では更新されないので、**いま開いているのが新しいものかどうか**を
+     見分ける手がかりが要る（上げ直し忘れ・キャッシュのどちらでも同じ症状になる）。 */
+  h += '<p class="note" style="text-align:center;opacity:.45;margin-top:14px">'+APPVER+'</p>';
   return h;
 }
 
