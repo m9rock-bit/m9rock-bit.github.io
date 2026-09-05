@@ -635,6 +635,7 @@ try{
     if(p.mig_dinner===true) DB.mig_dinner = true;
     if(p.mig_breath478===true) DB.mig_breath478 = true;
     if(p.mig_anger===true) DB.mig_anger = true;
+    if(p.detour && typeof p.detour==="object") DB.detour = p.detour;
     if(p.mig_presleep===true) DB.mig_presleep = true;
     /* v16: 就寝の見守り状態。アプリを閉じても経過時間が消えないよう、
        開始時刻そのものを保存し、毎回いまの時刻から計算し直す。 */
@@ -1051,6 +1052,9 @@ function runNote(i){
    メモは実行画面の「💬 メモ」（runNote）と、編集画面から書く。 */
 function logRun(){
   var s = setOf(curId); if(!s) return;
+  /* v25: 🧸 は記録に残さない。残すと「今週の実施」に並び、
+     イライラした回数を数える表になる（H.M.C.の条件に反する）。 */
+  if(s.id === "anger") return;
   var n = s.steps.length, d = 0;
   for(var i=0;i<n;i++){ if(doneSet[i]==="done") d++; }
   var rec = { t:Date.now(), id:s.id, icon:s.icon, name:s.name, d:d, n:n, sec:Math.abs(elapsed()) };
@@ -1306,7 +1310,10 @@ function idxOf(id){ for(var i=0;i<DB.sets.length;i++){ if(DB.sets[i].id===id) re
 /* v17: アーカイブ済み・非表示（presleep等）は、ホーム一覧・休憩の候補・
    集中ブロックの選択肢からは外す。振り返り（viewReview）は別枠で全セット
    を対象にしているので、ここでは触っていない。 */
-function normals(){ return DB.sets.filter(function(s){return !s.rescue && !s.hidden && !s.archived;}); }
+/* v25: 🧸 anger はホームの一覧に出さない。**実行中の画面から押して飛ぶもの**であり、
+   ホームに並べると「イライラの予定を立てる」形になるため（Manamiさんのご指摘で作り直した）。
+   ホームからも1回だけ試せるよう、専用の小さな入口を別に置いてある。 */
+function normals(){ return DB.sets.filter(function(s){return !s.rescue && !s.hidden && !s.archived && s.id!=="anger";}); }
 /* v23: タグの読み書き。表記ゆれ（全角カンマ・読点・空白）をここで吸収する。 */
 function tagsOf(s){
   return String(s.tags||"").split(/[,、\s]+/).map(function(x){return x.trim();}).filter(Boolean);
@@ -1321,6 +1328,54 @@ function normalsCur(){
   var sc = DB.scenes.filter(function(x){return x.id===DB.sceneCur;})[0];
   if(!sc) return normals();
   return normals().filter(function(s){ return hasTag(s, sc.tag); });
+}
+/* v25: タブごとに「どのセットを出すか」をチェックで選ぶ。
+   内部ではセットのタグを付け外ししているだけだが、**タグという言葉を
+   知らなくても操作できる**ようにした。編集画面のタグ欄も残してある（どちらからでも可）。 */
+function sceneToggleSet(sceneId, setId){
+  var sc = DB.scenes.filter(function(x){return x.id===sceneId;})[0]; if(!sc) return;
+  var st = setOf(setId); if(!st) return;
+  var a = tagsOf(st), i = a.indexOf(sc.tag);
+  if(i>=0) a.splice(i,1); else a.push(sc.tag);
+  st.tags = a.join(", ");
+  save(); render();
+}
+var sceneOpen = "";
+function sceneOpenToggle(id){ sceneOpen = (sceneOpen===id ? "" : id); render(); }
+function viewScenes(){
+  var h = '<h1>ホームのタブ</h1>'
+    + '<p class="sub">ホームの一覧を、場面ごとに切り替えられます。<br>'
+    + '<b>タブに入れなかったセットが消えることはありません。</b>「すべて」を押せば、いつでも全部出ます。</p>';
+  if(!DB.scenes.length) h += '<p class="note">タブがありません。下から足せます。</p>';
+  DB.scenes.forEach(function(sc){
+    var mem = normals().filter(function(s){return hasTag(s,sc.tag);});
+    var open = (sceneOpen===sc.id);
+    h += '<div class="card">';
+    h += '<div class="toggle"><b>'+esc(sc.name)+'<span style="opacity:.6;font-weight:400"> ／ '+mem.length+'件</span></b>'
+       + '<button class="btn ghost" style="margin-top:0;width:auto;padding:5px 10px" onclick="sceneOpenToggle(\''+sc.id+'\')">'
+       + (open?'閉じる':'セットを選ぶ')+'</button></div>';
+    if(open){
+      h += '<p class="note" style="margin:8px 0 6px">このタブに出すセットに印を付けてください。</p>';
+      normals().forEach(function(st){
+        var on = hasTag(st, sc.tag);
+        h += '<div class="toggle" style="margin-top:5px"><b style="font-weight:500">'+esc(st.icon)+' '+esc(st.name)+'</b>'
+           + '<button class="sw'+(on?' on':'')+'" onclick="sceneToggleSet(\''+sc.id+'\',\''+st.id+'\')"><i></i></button></div>';
+      });
+      h += '<div class="row" style="margin-top:10px">'
+         + '<button class="btn ghost" style="margin-top:0" onclick="sceneEdit(\''+sc.id+'\')">名前を直す</button>'
+         + '<button class="btn link" style="margin-top:0" onclick="sceneDel(\''+sc.id+'\')">このタブを消す</button></div>';
+    }else if(mem.length){
+      h += '<p class="note" style="margin:6px 0 0">'+mem.map(function(x){return esc(x.icon)+" "+esc(x.name);}).join(" ／ ")+'</p>';
+    }else{
+      h += '<p class="note" style="margin:6px 0 0">まだ何も入っていません。</p>';
+    }
+    h += '</div>';
+  });
+  h += '<button class="btn ghost" onclick="sceneAdd()">＋ タブを足す</button>';
+  h += '<p class="note">タブを消してもセットは消えません。<b>1つのセットを複数のタブに入れても構いません。</b>'
+     + '<br>（セットごとの編集画面にある「タグ」の欄と、ここは同じものを操作しています。どちらから直しても同じです。）</p>';
+  h += '<button class="btn ghost" onclick="go(\'home\')">ホームへ</button>';
+  return h;
 }
 function scenePick(id){ DB.sceneCur = (DB.sceneCur===id ? "" : id); save(); render(); }
 function sceneAdd(){
@@ -1869,10 +1924,58 @@ function enterDone(){
      「自動終了のときだけ就寝画面に戻らない」不具合が再発する。 */
   if(fromPreSleep){ fromPreSleep=false; stop(); sleepEnterWatch(); view="sleepWatch"; render(); return; }
   if(fromWake){ fromWake=false; stop(); sleepBackToWatch(); view="sleepWatch"; render(); return; }
+  /* v25: 🧸 を終えたら、元のセットの続きへ戻る（完了画面は挟まない。
+     「戻れた」ことが分かればよく、達成の画面を挟むと寄り道が儀式になるため） */
+  if(curId==="anger" && inDetour()){ angerReturn(); return; }
   view="done"; render();
 }
 function finishNow(){ enterDone(); }
+/* ===== v25（2026-09-05・ご指摘による作り直し）: 🧸 イライラしたときへの寄り道 =====
+   v24では独立したセットとして作ってしまった。**正しくは「他のセットをやっている
+   最中に押すと飛び、終わったら元のセットの続きに戻る」**（Manamiさんのご指摘）。
+   集中ブロックからの呼吸法（focusBreath / focusResume）と同じ考え方を、
+   セットの実行中にも用意する。
+
+   ★元のセットの状態は runSnap() で控える（v22の「途中のセット」と同じ形）。
+     済みの印・いまの項目・項目ごとの実施時間が、そのまま戻る。
+   ★DB.detour にも置く。寄り道の最中にiOSがタブを捨てても、開き直せば戻れる。
+   ★🧸 の回は DB.log に残さない（logRun をここで止める）。
+     残すと「今週の実施」に並び、**イライラした回数を数える表**になってしまう。
+     H.M.C.の条件（記録・点数を作らない）に反する。 */
+var detour = null;
+function angerSet(){ return setOf("anger"); }
+function angerGo(){
+  var a = angerSet(); if(!a) return;
+  if(curId === "anger") return;              /* 二重に飛ばない */
+  if(curId){
+    commitSeg();                             /* いま数えている区間をそこまでで確定 */
+    detour = runSnap();
+    DB.detour = detour; save();
+  }
+  start("anger");
+}
+/* 🧸 を終えた／やめたあとの戻り先。元のセットが控えてあれば続きへ、無ければホーム。 */
+function angerReturn(){
+  var back = detour || DB.detour;
+  detour = null; DB.detour = null;
+  stop();
+  if(back && setOf(back.id)){
+    loadRun(back);
+    stepAt = Date.now();
+    if(tick) clearInterval(tick);
+    tick = setInterval(tickRender, 250);
+    view = "run"; saveRun(); save(); render();
+    return true;
+  }
+  save();
+  return false;
+}
+function angerDone(){ if(!angerReturn()) go("home"); }
+function inDetour(){ return !!(detour || DB.detour); }
+
 function leaveRun(){
+  /* v25: 🧸 を途中でやめた場合も、元のセットへ戻す（記録は残さない）。 */
+  if(curId==="anger" && inDetour()){ angerReturn(); return; }
   /* 途中でやめた回。1つでもやれていれば残し、0のままなら残さない
      （画面を開いただけ・押し間違いを増やさないため） */
   if(runIdx===null && doneCount()>0) logRun();
@@ -1901,7 +2004,8 @@ function nativeTimer(sec){
 /* ============================ 画面 ============================ */
 function render(){
   var h = "";
-  if(view==="words") h = viewWords();
+  if(view==="scenes") h = viewScenes();
+  else if(view==="words") h = viewWords();
   else if(view==="home") h = viewHome();
   else if(view==="run"){
     var _s = setOf(curId);
@@ -2016,8 +2120,12 @@ function viewHome(){
        + weekGrid()
        + '</div>';
   }
-  /* v23: タグを1つも付けていないあいだは、この行ごと出さない（見た目を変えない）。 */
-  if(anyTagged() && DB.scenes.length){
+  /* v25（2026-09-05・ご指摘による撤回）: v23では「タグを1つも付けていないあいだは
+     タブ行ごと出さない」としていた。**見た目を変えない配慮のつもりが、
+     機能そのものが見つからない結果になった**（Manamiさんから「見当たりません」）。
+     見つからない機能は無いのと同じなので、**タブ行は常に出す**ことにした。
+     ★タグの付け外しは、タブの「⚙」からチェックで選べる（編集画面の奥に隠さない）。 */
+  if(DB.scenes.length){
     h += '<div class="row" style="flex-wrap:wrap;gap:6px;margin:2px 0 10px">'
        + '<button class="btn ghost" style="margin-top:0;width:auto;padding:6px 12px'
        + (DB.sceneCur===""?';border:1px solid #e0a86a;color:#e0a86a':'')+'" onclick="scenePick(\'\')">すべて</button>'
@@ -2027,7 +2135,12 @@ function viewHome(){
              + (DB.sceneCur===sc.id?';border:1px solid #e0a86a;color:#e0a86a':'')
              + '" onclick="scenePick(\''+sc.id+'\')">'+esc(sc.name)+'<span style="opacity:.6"> '+n+'</span></button>';
          }).join('')
+       + '<button class="btn ghost" style="margin-top:0;width:auto;padding:6px 10px" onclick="go(\'scenes\')">⚙</button>'
        + '</div>';
+    if(!anyTagged()){
+      h += '<p class="note" style="margin:-4px 0 10px"><b>タブはまだ空です。</b>「⚙」から、それぞれのタブに出すセットを選べます。'
+         + '<br>選ぶまでは「すべて」と同じ、いまの並びのままです。</p>';
+    }
   }
   var lst = normalsCur();
   lst.forEach(function(s){
@@ -2051,6 +2164,12 @@ function viewHome(){
      + '<br>長くて15分・5分刻み。区切りが来たら、子供のほうへ戻る合図です。</small></button>';
   /* v24: 声かけの言い換え（見るだけ）。イライラしたときのセットはホームの一覧側に出ている。 */
   h += '<button class="btn ghost" onclick="go(\'words\')">🗣 声かけの言い換え（見るだけ・5つ）</button>';
+  /* v25: 🧸 はホームの一覧から外した（実行中に押すもの）。
+     ただし「どんな中身か1度見ておきたい」ときのために、小さな入口だけ残す。 */
+  if(angerSet()){
+    h += '<button class="btn link" style="padding:7px" onclick="start(\'anger\')">🧸 イライラしたときの1分を、試しに通してみる</button>';
+    h += '<p class="note" style="margin-top:0">ふだんは<b>ほかのセットや集中ブロックをやっている最中に、画面のボタンから呼び出します。</b>ここから始めても記録には残りません。</p>';
+  }
   if(!DB.sleepActive){
     h += '<div class="sec">夜</div>';
     h += '<button class="setb" onclick="sleepStart()">🛌 就寝'
@@ -2331,9 +2450,19 @@ function viewRun(){
   }
   h += '<button class="btn" onclick="finishNow()">ここまでで終える</button>';
   if(!s.rescue && rescues().length) h += '<button class="btn ghost" onclick="start(\''+rescues()[0].id+'\')">🛟 崩れた — 復帰の1手へ</button>';
+  h += angerBtn();
   h += backToFocus();
-  h += '<button class="btn link" onclick="leaveRun()">やめて最初に戻る</button>';
+  h += '<button class="btn link" onclick="leaveRun()">'+(inDetour()&&curId==="anger" ? 'やめて、さっきの続きに戻る' : 'やめて最初に戻る')+'</button>';
   return h;
+}
+/* v25: 実行中に出る「🧸 イライラした」。押すと寄り道して、終わったらここへ戻る。
+   ★🧸 自身の実行中には出さない（二重に飛ばない）
+   ★寄り道であることを画面に書く。押しても、いまのセットは消えない */
+function angerBtn(){
+  if(curId === "anger") return '';
+  if(!angerSet()) return '';
+  return '<button class="btn ghost" style="border-color:#c98b8b;color:#e8b4b4" onclick="angerGo()">🧸 イライラした — 1分だけ離れる</button>'
+       + '<p class="note" style="margin-top:4px"><b>いまのセットはそのまま残ります。</b>終わると、この続きに戻ります。</p>';
 }
 /* v7: 集中からの寄り道中だけ出る「集中に戻る」。それ以外では空文字。 */
 function backToFocus(){
@@ -2366,6 +2495,11 @@ function viewRunAuto(s){
   }
   var nx = st[curStep+1];
   var h = '<h1>'+esc(s.icon)+' '+esc(s.name)+'</h1>'+(s.note ? '<p class="sub">'+esc(s.note)+'</p>' : '');
+  /* v25: 寄り道であることを、戻り先の名前つきで出す */
+  if(curId==="anger" && inDetour()){
+    var bk = setOf((detour||DB.detour||{}).id);
+    if(bk) h += '<div class="hint">終わると <b>'+esc(bk.icon)+' '+esc(bk.name)+'</b> の続きに戻ります。<br>そちらの済みの印も、使った時間も、そのまま残っています。</div>';
+  }
   h += '<div class="card">';
   h += '<div class="bigsub">'+head+'</div>';
   /* 文言が長いセット（休憩ルーティン等）でも1〜2行に収まるよう字を小さくする */
@@ -2418,9 +2552,10 @@ function viewRunAuto(s){
     h += '<button class="btn ghost" onclick="openSpotify()">🎵 プレイリストを開く'+(spUrl(s)?'':'（未設定）')+'</button>';
     if(!spUrl(s)) h += '<p class="note">このセットの編集画面か、ホーム画面の「設定」にプレイリストのURLを入れると、次回からここで開けます。</p>';
   }
-  h += '<button class="btn" onclick="finishNow()">ここまでで終える</button>';
+  h += '<button class="btn" onclick="finishNow()">'+(curId==="anger"&&inDetour() ? 'ここまでにして、さっきの続きに戻る' : 'ここまでで終える')+'</button>';
+  h += angerBtn();
   h += backToFocus();
-  h += '<button class="btn link" onclick="leaveRun()">やめて最初に戻る</button>';
+  h += '<button class="btn link" onclick="leaveRun()">'+(inDetour()&&curId==="anger" ? 'やめて、さっきの続きに戻る' : 'やめて最初に戻る')+'</button>';
   return h;
 }
 
@@ -2801,6 +2936,15 @@ function focusBreath(){
   fromFocus = true;
   start(b.id);
 }
+/* v25: 集中ブロック（とくに🧸 子供と一緒モード）からも🧸へ寄り道できる。
+   仕組みは focusBreath と同じ＝集中の時計を止めて飛ぶ。戻りは focusResume。
+   ★セットからの寄り道（detour）とは別経路。集中側は fromFocus が戻り先を持っている。 */
+function focusAnger(){
+  var a = angerSet(); if(!a) return;
+  if(!fPaused){ fPauseAt = Date.now(); fPaused = true; }
+  fromFocus = true;
+  start(a.id);
+}
 function focusResume(){
   /* 呼吸を途中でやめた回も、1つでも進んでいれば残す（leaveRunと同じ扱い） */
   if(curId && runIdx===null && doneCount()>0) logRun();
@@ -3000,6 +3144,12 @@ function viewFocus(){
   if(bs){
     h += '<button class="btn ghost" onclick="focusBreath()">'+esc(bs.icon)+' 集中が切れた — 呼吸を'+Math.max(1,Math.round(limitOf(bs)/60))+'分</button>';
     h += '<p class="note">押すと<b>集中の時計は止まります</b>。呼吸が終わったら、続きから再開できます（休憩の終わりは、その分うしろへずれます）。</p>';
+  }
+  /* v25: 子供と一緒モードのときだけ、🧸を集中の画面にも出す。
+     仕事の集中ブロックには出さない（場面が違うものを毎回見せない）。 */
+  if(angerSet() && fSlotNow()==="kids"){
+    h += '<button class="btn ghost" style="border-color:#c98b8b;color:#e8b4b4" onclick="focusAnger()">🧸 イライラした — 1分だけ離れる</button>';
+    h += '<p class="note" style="margin-top:4px"><b>集中の時計は止まります。</b>終わると、ここに戻ります。</p>';
   }
   h += '<button class="btn ghost" onclick="nativeTimer('+Math.max(1,segLeft)+')">⏱ この区切りの残り'+Math.max(1,Math.round(segLeft/60))+'分をiPhoneのタイマーに渡す</button>';
   if(fShift > 0){
@@ -3538,8 +3688,9 @@ function viewEdit(){
   }else{
     h += '<p class="note" style="margin:0">タブはまだありません。</p>';
   }
+  h += '<button class="btn ghost" onclick="go(\'scenes\')">タブに出すセットを選ぶ</button>';
   h += '<button class="btn ghost" onclick="sceneAdd()">＋ タブを足す</button>';
-  h += '<p class="note"><b>タブは、セットに付けた「タグ」で絞り込みます。</b>上のセットを開いて、同じ言葉をタグ欄に入れてください。'
+  h += '<p class="note"><b>どのセットをどのタブに出すかは、上の「タブに出すセットを選ぶ」から選べます</b>（ホームのタブ行の「⚙」からも開けます）。'
      + '<br>タグを1つも付けていないあいだ、<b>ホームの見た目は今までと変わりません</b>（タブ自体が出ません）。'
      + '<br>タブを消してもセットは消えません。</p>';
   h += '</div>';
