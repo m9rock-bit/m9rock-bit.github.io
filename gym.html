@@ -250,12 +250,31 @@ const LOADS=[{id:"kg",label:"重さ（kg）"},{id:"bw",label:"自重"},{id:"band
 const BANDS_DEF=["Light","Medium","Heavy"];
 
 /* ---------- v7（2026-09-03）: 有酸素の既定値。初期化で使うのでここに置く ---------- */
+/* v9（2026-09-05）: 有酸素をブロック構造に作り直した。
+   ■ プログラム = ブロックの並び
+     ブロックの種別は4つ
+       warm     … ウォームアップ（評価は聞かない・上げ下げの対象にしない）
+       work     … ふつうのセット（1区間）
+       interval … インターバル1本。**複数の区間の組み合わせ×繰り返し回数＝1ループ**
+       cool     … クールダウン（評価は聞かない・上げ下げの対象にしない）
+   ■ 走らせるときは expand() で「区間の平らな並び」に展開する。
+     実行エンジン（cPos/cTick/cSkip）は v7 のままで動く。展開した区間は
+     b（ブロック番号）と bt（種別）を持つので、ブロックの切れ目が分かる。
+   ■ 時間に上限は設けない（30分縛りは撤廃）。グラフだけは長さの違う回を
+     並べるために30分あたりへ換算する（NORM）。これは表示上の換算で、
+     プログラムの長さを縛るものではない。 */
 const CARDIO_DEF={
-  plan:[{lb:"ウォームアップ",min:5,sp:5.0,inc:2.0},
-        {lb:"メイン",       min:23,sp:6.8,inc:3.0},
-        {lb:"クールダウン", min:5,sp:4.5,inc:2.0}],
+  progs:[{ id:"p_default", name:"基本（33分）", note:"最初から入っている形です。自由に直せます。",
+    blocks:[{type:"warm",lb:"ウォームアップ",min:5,sp:5.0,inc:2.0},
+            {type:"work",lb:"メイン",       min:23,sp:6.8,inc:3.0},
+            {type:"cool",lb:"クールダウン", min:5,sp:4.5,inc:2.0}]}],
+  curProg:"p_default",
   spStep:0.2, incStep:0.5, incCap:4.0
 };
+/* 評価。**並びが「軽い→きつい」**。1=かるすぎる 2=ちょうどよい 3=きつすぎる。
+   v7の HARDS（余裕/ちょうどよい/きつい）と同じ向きなので、過去の記録の hard と
+   そのまま比べられる（数字の意味を変えない）。 */
+const RATES=["かるすぎる","ちょうどよい","きつすぎる"];
 const NORM=30;                    /* グラフの換算基準（30分あたり） */
 const HARDS=["余裕","ちょうどよい","きつい"];
 
@@ -333,13 +352,43 @@ if(!Array.isArray(DB.settings.bands) || !DB.settings.bands.length) DB.settings.b
 /* v7: 有酸素。既存データには無いので、無いときだけ既定を置く（冪等・過去は触らない） */
 if(!Array.isArray(DB.cardio)) DB.cardio=[];
 if(!DB.settings.cardio || typeof DB.settings.cardio!=="object") DB.settings.cardio={};
-if(!Array.isArray(DB.settings.cardio.plan) || !DB.settings.cardio.plan.length)
-  DB.settings.cardio.plan=JSON.parse(JSON.stringify(CARDIO_DEF.plan));
+/* v9: 旧 plan（平らな区間の並び）→ プログラム1本へ移行する。
+   **古い plan は消さない。**過去の記録の表示に使っているため。 */
+if(!Array.isArray(DB.settings.cardio.progs)) DB.settings.cardio.progs=[];
+if(!DB.settings.cardio.mig9){
+  DB.settings.cardio.mig9=true;
+  var oldPlan=DB.settings.cardio.plan;
+  var oldProgs=DB.settings.cardio.progs.slice();
+  var mig=[];
+  if(Array.isArray(oldPlan) && oldPlan.length){
+    mig.push({id:"p_now", name:"いままでの設定", note:"",
+      blocks:oldPlan.map(function(x,i){
+        var t=(i===0?"warm":(i===oldPlan.length-1&&oldPlan.length>1?"cool":"work"));
+        return {type:t, lb:x.lb||"", min:+x.min||1, sp:+x.sp||5, inc:+x.inc||0};
+      })});
+  }
+  /* v8で「名前を付けて保存」したものも、同じ形へ移す（中身は変えない） */
+  oldProgs.forEach(function(g){
+    if(g && Array.isArray(g.plan) && g.plan.length && !g.blocks){
+      mig.push({id:g.id||("p"+Math.random().toString(36).slice(2)), name:g.name||"（名前なし）", note:"",
+        blocks:g.plan.map(function(x,i){
+          var t=(i===0?"warm":(i===g.plan.length-1&&g.plan.length>1?"cool":"work"));
+          return {type:t, lb:x.lb||"", min:+x.min||1, sp:+x.sp||5, inc:+x.inc||0};
+        })});
+    }else if(g && Array.isArray(g.blocks)){ mig.push(g); }
+  });
+  if(!mig.length) mig=JSON.parse(JSON.stringify(CARDIO_DEF.progs));
+  DB.settings.cardio.progs=mig;
+  DB.settings.cardio.curProg=mig[0].id;
+}
+if(!DB.settings.cardio.progs.length)
+  DB.settings.cardio.progs=JSON.parse(JSON.stringify(CARDIO_DEF.progs));
+if(!DB.settings.cardio.progs.some(function(g){return g.id===DB.settings.cardio.curProg;}))
+  DB.settings.cardio.curProg=DB.settings.cardio.progs[0].id;
 if(typeof DB.settings.cardio.spStep!=="number")  DB.settings.cardio.spStep=CARDIO_DEF.spStep;
 if(typeof DB.settings.cardio.incStep!=="number") DB.settings.cardio.incStep=CARDIO_DEF.incStep;
 if(typeof DB.settings.cardio.incCap!=="number")  DB.settings.cardio.incCap=CARDIO_DEF.incCap;
-/* v8（2026-09-05）: 名前を付けて保存したプログラム（インターバル等）。無いときだけ空配列を置く。 */
-if(!Array.isArray(DB.settings.cardio.progs)) DB.settings.cardio.progs=[];
+
 
 function restSec(){ return DB.settings.rest; }
 function save(){
@@ -653,8 +702,56 @@ function dropHint(id){
 /* CARDIO_DEF / NORM / HARDS は初期化より前に必要なため上で定義しています */
 
 function cSet(){ return DB.settings.cardio; }
-function cPlan(){ return cSet().plan; }
 function cClone(p){ return JSON.parse(JSON.stringify(p)); }
+function cUid(){ return "p"+Date.now().toString(36)+Math.floor(Math.random()*1e4).toString(36); }
+function cProgs(){ return cSet().progs; }
+function curProg(){
+  var g=cProgs().filter(function(x){return x.id===cSet().curProg;})[0];
+  return g || cProgs()[0];
+}
+function cBlocks(){ var g=curProg(); return (g&&g.blocks)||[]; }
+
+/* ブロック → 区間の平らな並び。実行エンジンはこの形だけを見る。
+   b=ブロック番号 / bt=種別 / lp=インターバルの何ループ目か（表示用） */
+function expand(blocks){
+  var out=[];
+  (blocks||[]).forEach(function(b,bi){
+    if(b.type==="interval"){
+      var reps=Math.max(1, Math.round(+b.reps||1));
+      var segs=(b.segs&&b.segs.length)?b.segs:[{lb:"速い",min:1,sp:8,inc:1}];
+      for(var k=1;k<=reps;k++){
+        segs.forEach(function(sg){
+          out.push({lb:(sg.lb||"")+" "+k+"/"+reps, min:+sg.min||0.5, sp:+sg.sp||5, inc:+sg.inc||0,
+                    b:bi, bt:"interval", lp:k});
+        });
+      }
+    }else{
+      out.push({lb:b.lb||"", min:+b.min||1, sp:+b.sp||5, inc:+b.inc||0, b:bi, bt:b.type||"work"});
+    }
+  });
+  return out;
+}
+/* 既存の呼び出し（cTotal/cStart/segLine 等）はこれをそのまま使う */
+function cPlan(){ return expand(cBlocks()); }
+function blockMin(b){
+  if(!b) return 0;
+  if(b.type==="interval"){
+    var reps=Math.max(1,Math.round(+b.reps||1));
+    return (b.segs||[]).reduce(function(a,x){return a+(+x.min||0)},0)*reps;
+  }
+  return +b.min||0;
+}
+function blocksMin(bs){ return (bs||[]).reduce(function(a,b){return a+blockMin(b)},0); }
+function blockName(b,i){
+  if(!b) return "";
+  if(b.lb) return b.lb;
+  return {warm:"ウォームアップ", cool:"クールダウン", interval:"インターバル", work:"セット"}[b.type||"work"]+(i!=null?" "+(i+1):"");
+}
+/* 評価と上げ下げの対象になるブロックか（ウォームアップ・クールダウンは対象外） */
+function rateable(b){ return b && (b.type==="work" || b.type==="interval"); }
+function rateIdxs(bs){
+  var out=[]; (bs||[]).forEach(function(b,i){ if(rateable(b)) out.push(i); }); return out;
+}
 function cTotal(p){ return p.reduce(function(a,s){return a+(+s.min||0)},0); }
 function mainIdx(p){
   var k=0;
@@ -673,187 +770,176 @@ function pace(sp){
 }
 function per30(v,min){ return (min>0? v*NORM/min : 0); }
 function segLine(s){ return (s.lb?esc(s.lb)+" ":"")+s.min+"分 ／ "+n1(s.sp)+"km/h ／ 傾斜"+n1(s.inc)+"%"; }
-
-/* ---------- 上げ下げの判断 ---------- */
-function cardioAdvice(){
-  if(cHold) return null;
-  var cs=cSet(), p=cPlan(), cur=mainOf(p);
-  var recs=DB.cardio.slice(-2);
-  if(recs.length<2) return null;
-  var same=recs.every(function(r){
-    var m=mainOf(r.plan||[]);
-    return Math.abs(m.sp-cur.sp)<1e-9 && Math.abs(m.inc-cur.inc)<1e-9;
-  });
-  if(!same) return null;
-  if(recs.every(function(r){return r.hard>=3})){
-    return {dir:-1, field:(cur.inc>0 ? "inc":"sp")};
+function blockLine(b,i){
+  if(!b) return "";
+  if(b.type==="interval"){
+    var reps=Math.max(1,Math.round(+b.reps||1));
+    return esc(blockName(b,i))+"（"+reps+"回・計"+blockMin(b)+"分）<br><span style=\"opacity:.75\">"
+      + (b.segs||[]).map(function(x){ return esc(x.lb||"")+" "+x.min+"分 "+n1(x.sp)+"km/h 傾斜"+n1(x.inc)+"%"; }).join(" → ")
+      + "</span>";
   }
-  if(recs.every(function(r){return r.hard<=2})){
-    return {dir:1, field:(cur.inc < cs.incCap ? "inc":"sp")};
+  return esc(blockName(b,i))+" "+b.min+"分 ／ "+n1(b.sp)+"km/h ／ 傾斜"+n1(b.inc)+"%";
+}
+
+/* ---------- 上げ下げの判断（v9: ブロックごと） ----------
+   ★ご指示: 「かるすぎる」と評価したセットは、次回の負荷を上げる調整を提案する。
+   ★v7は「同じ設定で2回続けて余裕」で1段上げる形だった（ダブル・プログレッションの
+     有酸素版）。**今回のご指示で「1回のかるすぎるで提案する」に変えている。**
+     提案であって自動では上げない（「今日は据え置き」でいつでも断れる）。
+   ★きつすぎるは1回で「1段戻す」提案。戻すのも正しい選択、という書き方を保つ。
+   ★対象はセットとインターバルだけ。ウォームアップ・クールダウンは動かさない。
+   ★インターバルは「速い側」（いちばん速い区間）だけを動かす。 */
+function lastRateOf(blockIdx){
+  var g=curProg(); if(!g) return null;
+  for(var i=DB.cardio.length-1;i>=0;i--){
+    var r=DB.cardio[i];
+    if(r.progId!==g.id || !r.rates) continue;
+    var v=r.rates[blockIdx];
+    if(v===1||v===2||v===3) return v;
+    return null;   /* 直近の同じプログラムの回に評価が無ければ、そこで打ち切る */
   }
   return null;
 }
-function advText(a){
-  var cs=cSet(), cur=mainOf(cPlan());
-  var step=(a.field==="inc"? cs.incStep : cs.spStep)*a.dir;
-  var from=(a.field==="inc"? cur.inc : cur.sp), to=Math.max(0, from+step);
-  return {from:from, to:to, unit:(a.field==="inc"?"%":"km/h"),
-          name:(a.field==="inc"?"傾斜":"速度"), field:a.field, to2:to};
+function fastSegIdx(b){
+  var k=0, sg=b.segs||[];
+  for(var i=1;i<sg.length;i++) if((+sg[i].sp||0)>(+sg[k].sp||0)) k=i;
+  return k;
 }
-function cardioApply(){
-  var a=cardioAdvice(); if(!a) return;
-  var t=advText(a), p=cPlan(), i=mainIdx(p);
-  p[i][a.field]=Math.round(t.to*100)/100;
-  save(); cHold=true; render();
+function targetOf(b){
+  if(!b) return null;
+  if(b.type==="interval"){ var k=fastSegIdx(b); return (b.segs||[])[k]||null; }
+  return b;
 }
-function cardioHold(){ cHold=true; render(); }
-
-/* ===== v8（2026-09-05）: A=インターバルの登録 / B=実施中の変更・時間の選択 =====
-   設計の線（v7から変えていない）:
-   ・距離を目標にしない。操作するのは速度と傾斜だけ。時間は「今日どれだけ走るか」の枠
-   ・上げ下げの引き金は主観のきつさ。ここで作る機能はどれも判定を自動で動かさない
-   ・達成率・連続日数・未実施の赤字は出さない（8/8の安全4条件）
-   B-1（実施中の変更）は cRun.plan を直接書き換える。cFinish がその plan を記録へ渡すので、
-   「実際にやった値」がそのまま次回の判定材料になる（v7では記録画面で手直しが必要だった）。 */
-
-function cUid(){ return "cp"+Date.now().toString(36)+Math.floor(Math.random()*1e4).toString(36); }
-function cProgs(){ return cSet().progs; }
-
-/* --- A: いまの区間構成に名前を付けて保存 / 呼び出し / 消す --- */
-function cProgSave(){
-  var p=cPlan();
-  if(!p.length){ alert("区間がありません。"); return; }
-  var nm=prompt("この構成に名前を付けて保存します（例: インターバル 1分速い＋2分ゆるい×8）", "");
-  if(nm===null) return;
-  nm=String(nm).trim().slice(0,30);
-  if(!nm){ alert("名前を入れてください。"); return; }
-  cProgs().push({id:cUid(), name:nm, plan:cClone(p)});
-  save(); render();
+/* 1ブロックぶんの提案。{dir, field, from, to, unit, name} か null */
+function blockAdvice(bi){
+  if(cHold[bi]) return null;
+  var b=cBlocks()[bi]; if(!rateable(b)) return null;
+  var v=lastRateOf(bi); if(v!==1 && v!==3) return null;
+  var t=targetOf(b); if(!t) return null;
+  var cs=cSet(), dir=(v===1?1:-1);
+  var field=(dir>0 ? ((+t.inc||0) < cs.incCap ? "inc":"sp") : ((+t.inc||0) > 0 ? "inc":"sp"));
+  var step=(field==="inc"? cs.incStep : cs.spStep)*dir;
+  var from=+t[field]||0, to=Math.round(Math.max(0, from+step)*100)/100;
+  if(to===from) return null;
+  return {bi:bi, dir:dir, field:field, from:from, to:to,
+          unit:(field==="inc"?"%":"km/h"), name:(field==="inc"?"傾斜":"速度"), rate:v};
 }
-function cProgLoad(id){
-  var g=cProgs().filter(function(x){return x.id===id})[0];
-  if(!g) return;
-  if(!confirm("「"+g.name+"」を今日の設定にします。いまの区間は置き換わります（保存したプログラムは消えません）。")) return;
-  cSet().plan=cClone(g.plan); cHold=false; save(); render();
+function allAdvice(){
+  var out=[];
+  cBlocks().forEach(function(b,i){ var a=blockAdvice(i); if(a) out.push(a); });
+  return out;
 }
-function cProgDel(id){
-  var g=cProgs().filter(function(x){return x.id===id})[0];
-  if(!g) return;
-  if(!confirm("「"+g.name+"」を消しますか。今日の設定と過去の記録はそのまま残ります。")) return;
-  cSet().progs=cProgs().filter(function(x){return x.id!==id});
-  save(); render();
+function applyAdvice(bi){
+  var a=blockAdvice(bi); if(!a) return;
+  var t=targetOf(cBlocks()[bi]); if(!t) return;
+  t[a.field]=a.to;
+  cHold[bi]=true; save(); render();
 }
-
-/* --- A: 繰り返しブロックを展開して区間に足す --- */
-function cRepAdd(){
-  cpGrab();
-  var g=function(id){ var e=document.getElementById(id); return e?parseFloat(e.value):NaN; };
-  var fm=g("cr_fmin"), fs=g("cr_fsp"), fi=g("cr_finc");
-  var em=g("cr_emin"), es=g("cr_esp"), ei=g("cr_einc");
-  var nn=g("cr_n");
-  if(isNaN(fm)||fm<=0||isNaN(em)||em<=0){ alert("速い側とゆるい側の「分」を入れてください。"); return; }
-  if(isNaN(nn)||nn<1){ alert("繰り返す回数を入れてください。"); return; }
-  nn=Math.min(30, Math.round(nn));
-  if(isNaN(fs)||fs<=0) fs=mainOf(cPlan()).sp||6.0;
-  if(isNaN(es)||es<=0) es=Math.max(1, fs-1.5);
-  if(isNaN(fi)||fi<0) fi=mainOf(cPlan()).inc||2.0;
-  if(isNaN(ei)||ei<0) ei=fi;
-  var p=cPlan();
-  for(var k=1;k<=nn;k++){
-    p.push({lb:"速い "+k+"/"+nn, min:Math.round(fm*10)/10, sp:Math.round(fs*10)/10, inc:Math.round(fi*10)/10});
-    p.push({lb:"ゆるい "+k+"/"+nn, min:Math.round(em*10)/10, sp:Math.round(es*10)/10, inc:Math.round(ei*10)/10});
-  }
-  save(); render();
-}
-
-/* --- B-2: 全体をこの分数に合わせる（メインだけを伸縮させる） ---
-   ウォームアップ・クールダウンは動かさない。動かすと「今日は短くした」が
-   準備運動を削ったことになりかねないため。メインが1分を割る指定は受け付けない。 */
-function cFitMin(target){
-  var p=cPlan(), mi=mainIdx(p);
-  if(!p.length) return;
-  var others=0; p.forEach(function(s,i){ if(i!==mi) others+=(+s.min||0); });
-  var want=target-others;
-  if(want<1){
-    alert("この区間構成だと "+target+"分にはできません（メイン以外だけで "+others+"分あります）。区間の設定から直してください。");
-    return;
-  }
-  p[mi].min=Math.round(want);
-  cHold=false; save(); render();
-}
-
-/* --- B-1: 実施中に、いまの区間の速度・傾斜を変える --- */
-function cAdj(field, dir){
-  if(!cRun) return;
-  var q=cPos(); if(q.done) return;
-  var s=cRun.plan[q.i]; if(!s) return;
-  var step=(field==="sp")?cSet().spStep:cSet().incStep;
-  var v=(+s[field]||0)+step*dir;
-  if(field==="sp") v=Math.max(0.5, Math.min(25, v));
-  else             v=Math.max(0, Math.min(15, v));
-  s[field]=Math.round(v*10)/10;
-  if(!cRun.edited) cRun.edited=true;
-  cSaveRun(); render();
-}
+function holdAdvice(bi){ cHold[bi]=true; render(); }
+function applyAllAdvice(){ allAdvice().forEach(function(a){ applyAdvice(a.bi); }); }
 
 /* ---------- ホームのカード ---------- */
 function cardioCard(hideSec){
-  var p=cPlan(), a=cardioAdvice(), n=DB.cardio.length;
-  var last=n?DB.cardio[n-1]:null;
+  var g=curProg(), bs=cBlocks(), p=cPlan(), n=DB.cardio.length;
+  var last=n?DB.cardio[n-1]:null, advs=allAdvice();
   var adv="";
-  if(a){
-    var t=advText(a);
-    adv = a.dir>0
-      ? `<div class="hint">同じ設定で<strong>2回続けて余裕がありました。</strong>
-           メインの${t.name}を <strong>${n1(t.from)}${t.unit} → ${n1(t.to)}${t.unit}</strong> にしてみますか。
-           <div class="row" style="margin-top:9px">
-             <button class="btn" style="margin-top:0" onclick="cardioApply()">上げる</button>
-             <button class="btn ghost" style="margin-top:0" onclick="cardioHold()">今日は据え置き</button>
-           </div></div>`
-      : `<div class="hint">前回・前々回とも「きつい」でした。
-           メインの${t.name}を <strong>${n1(t.from)}${t.unit} → ${n1(t.to)}${t.unit}</strong> に戻せます。
-           <strong>戻すのも正しい選択です。</strong>体調・睡眠・生理周期でも変わります。
-           <div class="row" style="margin-top:9px">
-             <button class="btn ghost" style="margin-top:0" onclick="cardioApply()">1段戻す</button>
-             <button class="btn ghost" style="margin-top:0" onclick="cardioHold()">このままでいく</button>
-           </div></div>`;
+  if(advs.length){
+    adv = `<div class="hint"><strong>前回の評価から、次の調整をおすすめします。</strong>
+      ${advs.map(function(a){
+        var b=bs[a.bi];
+        return `<div style="margin-top:8px">
+          <b>${esc(blockName(b,a.bi))}</b> — 前回「${RATES[a.rate-1]}」
+          <br>${a.name} <strong>${n1(a.from)}${a.unit} → ${n1(a.to)}${a.unit}</strong>
+          ${b.type==="interval"?'<br><span style="opacity:.75">（速い側の区間を動かします）</span>':''}
+          <div class="row" style="margin-top:6px">
+            <button class="btn" style="margin-top:0" onclick="applyAdvice(${a.bi})">${a.dir>0?"上げる":"1段戻す"}</button>
+            <button class="btn ghost" style="margin-top:0" onclick="holdAdvice(${a.bi})">今日は据え置き</button>
+          </div></div>`;
+      }).join("")}
+      <p class="note" style="margin:9px 0 0">${advs.some(function(a){return a.dir<0})?"<strong>戻すのも正しい選択です。</strong>体調・睡眠・生理周期でも変わります。":"上げなくても構いません。据え置きも記録に影響しません。"}</p>
+      ${advs.length>1?`<button class="btn ghost" onclick="applyAllAdvice()">まとめて反映する</button>`:``}
+      </div>`;
   }
   return `
   ${hideSec?"":`<div class="sec">🏃 有酸素（トレッドミル）</div>`}
   <div class="card">
-    <div class="bigsub" style="margin-bottom:8px">今日の設定 ／ 合計 ${cTotal(p)}分</div>
-    ${p.map(function(s){return `<div class="prev">${segLine(s)}</div>`}).join("")}
+    <div class="bigsub" style="margin-bottom:4px">今日のプログラム</div>
+    <div style="font-size:17px;font-weight:700;color:#e0a86a;margin-bottom:2px">${esc(g?g.name:"（未選択）")}</div>
+    <div class="bigsub" style="margin-bottom:8px">合計 ${blocksMin(bs)}分 ／ ${bs.length}ブロック</div>
+    ${bs.map(function(b,i){return `<div class="prev">${blockLine(b,i)}</div>`}).join("")}
     ${adv}
-    <div class="row" style="margin-top:10px">
-      ${[15,20,30].map(function(t){
-        return `<button class="btn ${cTotal(p)===t?"":"ghost"}" style="margin-top:0" onclick="cFitMin(${t})">${t}分</button>`;
-      }).join("")}
-    </div>
-    <p class="note">分数を選ぶと<strong>メインの区間だけ</strong>が伸び縮みします。ウォームアップとクールダウンは動きません。</p>
-    ${cProgs().length?`<div class="bigsub" style="margin-top:12px;margin-bottom:6px">保存したプログラム</div>
-      ${cProgs().map(function(g){
-        return `<div class="prev" style="display:flex;align-items:center;gap:8px">
-          <span style="flex:1">${esc(g.name)}<br><small style="opacity:.7">${cTotal(g.plan)}分 ／ ${g.plan.length}区間</small></span>
-          <button class="btn ghost" style="margin-top:0;width:auto;padding:6px 10px" onclick="cProgLoad('${g.id}')">使う</button>
-          <button class="btn link" style="margin-top:0;width:auto;padding:6px 8px" onclick="cProgDel('${g.id}')">消す</button>
-        </div>`;
-      }).join("")}`:""}
     <button class="btn" onclick="cStart()">走る（区間タイマーを動かす）</button>
     <div class="row">
-      <button class="btn ghost" onclick="cPlanOpen('cardio')">設定を編集</button>
+      <button class="btn ghost" onclick="go('cpick')">プログラムを選ぶ（${cProgs().length}）</button>
+      <button class="btn ghost" onclick="cPlanOpen('cardio')">このプログラムを編集</button>
+    </div>
+    <div class="row">
+      <button class="btn ghost" onclick="cImpOpen()">テキストから取り込む</button>
       <button class="btn ghost" onclick="cInOpen(null)">あとから記録する</button>
     </div>
-    <button class="btn ghost" onclick="cProgSave()">いまの構成に名前を付けて保存</button>
     <button class="btn ghost" onclick="go('cgraph')">推移と記録（${n}回）</button>
-    ${last?`<p class="note">前回 ${mdw(last.date)} ／ ${last.min}分 ${n1(last.dist)}km ${last.kcal}kcal ／ ${HARDS[(last.hard||2)-1]}</p>`:
-           `<p class="note">最初の1回を記録すると、次から「同じ設定で2回続けて余裕があれば1段上げる」の判定が始まります。</p>`}
+    ${last?`<p class="note">前回 ${mdw(last.date)} ／ ${last.min}分 ${n1(last.dist)}km ${last.kcal}kcal</p>`:
+           `<p class="note">走り終わるとブロックごとに「かるすぎる／ちょうどよい／きつすぎる」を聞きます。<strong>「かるすぎる」を選んだブロックは、次回ここで1段上げる提案が出ます。</strong></p>`}
   </div>`;
+}
+
+/* ---------- 今日のプログラムを選ぶ ---------- */
+function cProgPick(id){ cSet().curProg=id; cHold={}; save(); go("cardio"); }
+function cProgDel(id){
+  var g=cProgs().filter(function(x){return x.id===id;})[0]; if(!g) return;
+  if(cProgs().length<=1){ alert("プログラムは1つ以上必要です。"); return; }
+  if(!confirm("「"+g.name+"」を消しますか。\n\n過去の記録は残ります（記録の中にその日の内容が入っています）。")) return;
+  cSet().progs=cProgs().filter(function(x){return x.id!==id;});
+  if(cSet().curProg===id) cSet().curProg=cProgs()[0].id;
+  save(); render();
+}
+function cProgDup(id){
+  var g=cProgs().filter(function(x){return x.id===id;})[0]; if(!g) return;
+  var base=g.name+"（コピー）", nm=base, i=2;
+  while(cProgs().some(function(x){return x.name===nm;})){ nm=base+i; i++; }
+  var c=cClone(g); c.id=cUid(); c.name=nm;
+  cProgs().push(c); cSet().curProg=c.id; save(); go("cardio");
+}
+function cProgNew(){
+  var nm=prompt("新しいプログラムの名前", "");
+  if(nm===null) return; nm=String(nm).trim().slice(0,30);
+  if(!nm){ alert("名前を入れてください。"); return; }
+  var g={id:cUid(), name:nm, note:"", blocks:[
+    {type:"warm",lb:"ウォームアップ",min:5,sp:5.0,inc:2.0},
+    {type:"work",lb:"メイン",min:20,sp:6.5,inc:2.0},
+    {type:"cool",lb:"クールダウン",min:5,sp:4.5,inc:2.0}]};
+  cProgs().push(g); cSet().curProg=g.id; save(); cPlanOpen("cardio");
+}
+function viewCPick(){
+  var cur=cSet().curProg;
+  return `
+  <h1>今日のプログラム</h1>
+  <p class="sub">走るプログラムを選びます。<strong>時間の長さに決まりはありません。</strong>15分でも90分でも構いません。</p>
+  ${cProgs().map(function(g){
+    var bs=g.blocks||[], iv=bs.filter(function(b){return b.type==="interval"}).length;
+    return `<div class="card" style="${g.id===cur?"border-color:#e0a86a":""}">
+      <div class="bigsub" style="color:${g.id===cur?"#e0a86a":"#e8ecf2"};font-size:16px;font-weight:700">${esc(g.name)}${g.id===cur?"　← 今日はこれ":""}</div>
+      <div class="bigsub" style="margin:2px 0 7px">${blocksMin(bs)}分 ／ ${bs.length}ブロック${iv?" ／ インターバル"+iv+"本":""}</div>
+      ${bs.map(function(b,i){return `<div class="prev">${blockLine(b,i)}</div>`}).join("")}
+      ${g.note?`<p class="note">${esc(g.note)}</p>`:``}
+      <div class="row" style="margin-top:9px">
+        ${g.id===cur?`<button class="btn ghost" style="margin-top:0" onclick="cPlanOpen('cpick')">編集</button>`
+                    :`<button class="btn" style="margin-top:0" onclick="cProgPick('${g.id}')">これにする</button>`}
+        <button class="btn ghost" style="margin-top:0" onclick="cProgDup('${g.id}')">複製</button>
+        <button class="btn ghost" style="margin-top:0" onclick="cTextOpen('${g.id}')">テキスト</button>
+        <button class="btn link" style="margin-top:0" onclick="cProgDel('${g.id}')">消す</button>
+      </div>
+    </div>`;
+  }).join("")}
+  <button class="btn ghost" onclick="cProgNew()">＋ 新しいプログラムを作る</button>
+  <button class="btn ghost" onclick="cImpOpen()">テキストから取り込む</button>
+  <button class="btn link" onclick="go('cardio')">戻る</button>`;
 }
 
 /* ---------- 実行（区間タイマー） ----------
    経過はすべて **開始時刻からの実時間** で計算する（setTimeout の連鎖にしない）。
    iOSで画面を消したりバックグラウンドに回っても、戻れば正しい位置に自己修復するため。 */
-var cRun=null, cTimer=null, cWake=null, cHold=false, cRet="cardio", cSel=-1;
+var cRun=null, cTimer=null, cWake=null, cHold={}, cRet="cardio", cSel=-1;
 
 /* 走行中の状態は localStorage にも置く。33分のあいだにiOSがページを捨てても、
    開き直せば続きから動く（経過は開始時刻から計算しているので自己修復する）。 */
@@ -871,7 +957,9 @@ function cStart(){
   /* 区間の切り替え音・終了音は setInterval から鳴らすので、
      iOSでは押した瞬間に音を開通させておかないと無音になる（同日のv6と同じ理由）。 */
   unlockAudio();
-  cRun={start:Date.now(), plan:cClone(cPlan()), lost:0, paused:false, pauseAt:0, chimed:{}};
+  cRun={start:Date.now(), plan:cClone(cPlan()), blocks:cClone(cBlocks()),
+        progId:(curProg()||{}).id, progName:(curProg()||{}).name||"",
+        lost:0, paused:false, pauseAt:0, chimed:{}, rates:{}};
   cSaveRun();
   if(navigator.wakeLock&&navigator.wakeLock.request){
     navigator.wakeLock.request("screen").then(function(w){cWake=w}).catch(function(){});
@@ -912,6 +1000,20 @@ function cSkip(){
   cRun.chimed["s"+(q.i+1)]=true; /* 手で進めたときは合図を鳴らさない */
   cSaveRun(); render();
 }
+/* v8→v9: 走行中に、いまの区間の速度・傾斜を変える。
+   cRun.plan を直接書き換えるので、そのままこの回の記録に残る。
+   ★既定（プログラム側）は書き換えない。今日だけの変更。 */
+function cAdj(field, dir){
+  if(!cRun) return;
+  var q=cPos(); if(q.done) return;
+  var s=cRun.plan[q.i]; if(!s) return;
+  var step=(field==="sp")?cSet().spStep:cSet().incStep;
+  var v=(+s[field]||0)+step*dir;
+  if(field==="sp") v=Math.max(0.5, Math.min(25, v));
+  else             v=Math.max(0, Math.min(15, v));
+  s[field]=Math.round(v*10)/10;
+  cSaveRun(); render();
+}
 function cStopRun(){
   if(cTimer){ clearInterval(cTimer); cTimer=null; }
   DB.crun=null; save();
@@ -919,9 +1021,28 @@ function cStopRun(){
 }
 function cFinish(){
   var min=Math.max(1, Math.round(cElapsed()/60));
-  var plan=cRun?cClone(cRun.plan):cClone(cPlan());
+  var seed=cRun?{min:min, plan:cClone(cRun.plan), blocks:cClone(cRun.blocks),
+                 progId:cRun.progId, progName:cRun.progName, rates:cClone(cRun.rates||{})}
+               :{min:min, plan:cClone(cPlan()), blocks:cClone(cBlocks()),
+                 progId:(curProg()||{}).id, progName:(curProg()||{}).name||"", rates:{}};
   cStopRun(); cRun=null;
-  cInOpen({min:min, plan:plan});
+  cInOpen(seed);
+}
+/* v9: 走っている最中に、終わったブロックの評価を入れる。
+   ★時計は止めない。トレッドミルは動き続けているため。タップ1回だけ。
+   ★入れ忘れても、記録の画面でまとめて入れられる（催促はしない）。 */
+function cRate(bi, v){
+  if(!cRun) return;
+  cRun.rates=cRun.rates||{};
+  if(cRun.rates[bi]===v) delete cRun.rates[bi]; else cRun.rates[bi]=v;
+  cSaveRun(); render();
+}
+/* いま走り終わっているブロック（＝評価を聞いてよいもの）の番号 */
+function doneBlocks(){
+  if(!cRun) return [];
+  var q=cPos(), p=cRun.plan, cur=q.done? 1e9 : (p[q.i]?p[q.i].b:0), out=[];
+  (cRun.blocks||[]).forEach(function(b,i){ if(rateable(b) && i<cur) out.push(i); });
+  return out;
 }
 function cQuit(){
   if(!confirm("この回を記録せずにやめますか。")) return;
@@ -932,9 +1053,24 @@ function viewCRun(){
   var p=cRun.plan, q=cPos(), s=p[q.i], e=cElapsed(), tot=cTotal(p)*60;
   var nx=p[q.i+1];
   var pct=Math.min(100, tot? e/tot*100 : 0);
+  var curB = q.done ? null : (cRun.blocks||[])[s.b];
+  var dn = doneBlocks();
   return `
   <h1>${q.done?"走り終わりました":esc(s.lb||("区間"+(q.i+1)))}</h1>
-  <p class="sub">${q.i+1} / ${p.length} 区間 ／ 全体 ${mmss(e)} / ${cTotal(p)}分</p>
+  <p class="sub">${curB?esc(blockName(curB,s.b))+" ／ ":""}${q.i+1} / ${p.length} 区間 ／ 全体 ${mmss(e)} / ${cTotal(p)}分</p>
+  ${dn.length?`<div class="card" style="padding:12px 14px;border-color:#3a4152">
+    <div class="bigsub" style="margin-bottom:6px">終わったブロックの手ごたえ<span style="opacity:.65">（いつ押しても構いません。時計は止まりません）</span></div>
+    ${dn.map(function(bi){
+      var b=(cRun.blocks||[])[bi], v=(cRun.rates||{})[bi];
+      return `<div style="margin-top:7px"><b style="font-size:13.5px">${esc(blockName(b,bi))}</b>
+        <div class="row" style="margin-top:4px">
+          ${RATES.map(function(r,k){
+            return `<button class="btn ${v===k+1?"":"ghost"}" style="margin-top:0;font-size:13px;padding:7px 4px" onclick="cRate(${bi},${k+1})">${r}</button>`;
+          }).join("")}
+        </div></div>`;
+    }).join("")}
+    <p class="note" style="margin:8px 0 0">あとで記録の画面でも入れられます。<strong>空のままでも構いません。</strong></p>
+  </div>`:``}
   <div class="card">
     <div class="big" style="font-size:52px;margin:2px 0">${n1(s.sp)}<span style="font-size:20px"> km/h</span></div>
     <div class="bigsub">傾斜 ${n1(s.inc)}% ／ ${pace(s.sp)}</div>
@@ -965,8 +1101,19 @@ function viewCRun(){
 var cBuf=null;
 function cInOpen(seed){
   var p=(seed&&seed.plan)?seed.plan:cClone(cPlan());
-  cBuf={min:(seed&&seed.min)?seed.min:cTotal(p), plan:p, dist:"", kcal:"", hard:2, memo:""};
+  var bs=(seed&&seed.blocks)?seed.blocks:cClone(cBlocks());
+  cBuf={min:(seed&&seed.min)?seed.min:cTotal(p), plan:p, blocks:bs,
+        progId:(seed&&seed.progId)||(curProg()||{}).id,
+        progName:(seed&&seed.progName)||(curProg()||{}).name||"",
+        rates:(seed&&seed.rates)?seed.rates:{},
+        dist:"", kcal:"", memo:""};
   go("cin");
+}
+function cinRate(bi,v){
+  cinGrab(); if(!cBuf) return;
+  cBuf.rates=cBuf.rates||{};
+  if(cBuf.rates[bi]===v) delete cBuf.rates[bi]; else cBuf.rates[bi]=v;
+  render();
 }
 function cinGrab(){
   if(!cBuf) return;
@@ -974,15 +1121,20 @@ function cinGrab(){
   var m=parseFloat(g("c_min")); if(!isNaN(m)&&m>0) cBuf.min=m;
   cBuf.dist=g("c_dist"); cBuf.kcal=g("c_kcal"); cBuf.memo=g("c_memo");
 }
-function cinHard(h){ cinGrab(); cBuf.hard=h; render(); }
 function cinSave(){
   cinGrab();
   var d=parseFloat(cBuf.dist), k=parseFloat(cBuf.kcal);
   if(isNaN(d)||d<=0){ alert("距離を入れてください（トレッドミルの表示のままで大丈夫です）"); return; }
+  /* v9: hard（回ぜんぶで1つ）は、ブロックごとの評価の**まん中の値**を入れておく。
+     過去の記録・グラフが hard を見ているため、無くさない。 */
+  var vals=Object.keys(cBuf.rates||{}).map(function(kk){return cBuf.rates[kk];}).sort(function(a,b){return a-b;});
+  var mid = vals.length ? vals[Math.floor(vals.length/2)] : 2;
   DB.cardio.push({date:Date.now(), min:Math.round(cBuf.min), plan:cClone(cBuf.plan),
+                  blocks:cClone(cBuf.blocks||[]), progId:cBuf.progId, progName:cBuf.progName,
+                  rates:cClone(cBuf.rates||{}),
                   dist:Math.round(d*100)/100, kcal:(isNaN(k)?0:Math.round(k)),
-                  hard:cBuf.hard, memo:String(cBuf.memo||"").slice(0,120)});
-  save(); cBuf=null; cHold=false; go("cardio");
+                  hard:mid, memo:String(cBuf.memo||"").slice(0,120)});
+  save(); cBuf=null; cHold={}; go("cardio");
 }
 function viewCIn(){
   if(!cBuf) return viewCardio();
@@ -997,110 +1149,172 @@ function viewCIn(){
     <input id="c_dist" type="number" inputmode="decimal" step="0.01" value="${esc(cBuf.dist)}" placeholder="例 3.72">
     <label>消費カロリー（kcal）<small>機種と体重設定で変わるので、機械が変わった日は比べられません</small></label>
     <input id="c_kcal" type="number" inputmode="numeric" step="1" value="${esc(cBuf.kcal)}" placeholder="例 241">
-    <label>きつさ<small>次に上げるかどうかは、この3択だけで決めます</small></label>
-    <div class="row">
-      ${HARDS.map(function(h,i){
-        return `<button class="btn ${cBuf.hard===i+1?"":"ghost"}" style="margin-top:0" onclick="cinHard(${i+1})">${h}</button>`;
-      }).join("")}
-    </div>
     <label>メモ（任意）</label>
     <input id="c_memo" type="text" value="${esc(cBuf.memo)}" placeholder="機械が違った・膝の様子 など">
+  </div>
+  <div class="sec">ブロックごとの手ごたえ</div>
+  <div class="card">
+    <p class="note" style="margin:0 0 8px"><strong>「かるすぎる」を選んだブロックは、次回ここで1段上げる提案が出ます。</strong>
+    ウォームアップとクールダウンは聞きません（上げ下げの対象にしていないため）。<strong>空のままでも保存できます。</strong></p>
+    ${rateIdxs(cBuf.blocks).map(function(bi){
+      var b=cBuf.blocks[bi], v=(cBuf.rates||{})[bi];
+      return `<div style="margin-top:10px"><b style="font-size:14px">${esc(blockName(b,bi))}</b>
+        <div class="bigsub" style="margin:2px 0 5px">${blockLine(b,bi)}</div>
+        <div class="row">
+          ${RATES.map(function(r,k){
+            return `<button class="btn ${v===k+1?"":"ghost"}" style="margin-top:0;font-size:13px;padding:8px 4px" onclick="cinRate(${bi},${k+1})">${r}</button>`;
+          }).join("")}
+        </div></div>`;
+    }).join("") || `<p class="note" style="margin:0">評価の対象になるブロックがありません。</p>`}
   </div>
   <div class="sec">この回の設定</div>
   <div class="card">
     ${p.map(function(s){return `<div class="prev">${segLine(s)}</div>`}).join("")}
     <button class="btn ghost" onclick="cPlanOpen('cin')">設定を直す</button>
-    <p class="note">途中で速度や傾斜を変えた日は、ここを実際の値に直してから保存してください。<strong>次回の判定はこの値を見ます。</strong></p>
+    <p class="note">途中で速度や傾斜を変えた日は、ここを実際の値に直してから保存してください。<strong>次回の提案はこの値を見ます。</strong></p>
   </div>
   <button class="btn" onclick="cinSave()">保存する</button>
   <button class="btn link" onclick="cBuf=null;go('cardio')">やめる</button>`;
 }
 
-/* ---------- 区間の編集 ----------
-   routine.html v10 と同じ考え方：移動・追加・削除の前に必ず collect（cpGrab）する。
-   忘れると打ちかけの数字が消える。 */
+/* ---------- ブロックの編集（v9） ----------
+   v8までは「区間の平らな並び」を直す画面だった。v9はブロック単位で直す。
+   打ちかけの数字を消さないよう、移動・追加・削除の前に必ず cpGrab する。 */
 function cPlanOpen(ret){ cRet=ret||"cardio"; go("cplan"); }
 function cpGrab(){
-  var p=cPlan();
-  p.forEach(function(s,i){
-    var g=function(k){ var e=document.getElementById("cp_"+k+i); return e?e.value:null; };
-    var lb=g("lb"); if(lb!==null) s.lb=String(lb).slice(0,12);
-    var mn=parseFloat(g("mn")); if(!isNaN(mn)&&mn>0) s.min=Math.round(mn);
-    var sp=parseFloat(g("sp")); if(!isNaN(sp)&&sp>0) s.sp=Math.round(sp*10)/10;
-    var ic=parseFloat(g("ic")); if(!isNaN(ic)&&ic>=0) s.inc=Math.round(ic*10)/10;
+  var bs=cBlocks();
+  var g=function(id){ var e=document.getElementById(id); return e?e.value:null; };
+  bs.forEach(function(b,i){
+    var lb=g("cp_lb"+i); if(lb!==null) b.lb=String(lb).slice(0,16);
+    if(b.type==="interval"){
+      var rp=parseFloat(g("cp_rp"+i)); if(!isNaN(rp)&&rp>0) b.reps=Math.min(60,Math.round(rp));
+      (b.segs||[]).forEach(function(sg,j){
+        var s2=function(k){ var e=document.getElementById("cp_"+k+i+"_"+j); return e?e.value:null; };
+        var l2=s2("sl"); if(l2!==null) sg.lb=String(l2).slice(0,12);
+        var m2=parseFloat(s2("sm")); if(!isNaN(m2)&&m2>0) sg.min=Math.round(m2*10)/10;
+        var p2=parseFloat(s2("sp")); if(!isNaN(p2)&&p2>0) sg.sp=Math.round(p2*10)/10;
+        var i2=parseFloat(s2("si")); if(!isNaN(i2)&&i2>=0) sg.inc=Math.round(i2*10)/10;
+      });
+    }else{
+      var mn=parseFloat(g("cp_mn"+i)); if(!isNaN(mn)&&mn>0) b.min=Math.round(mn*10)/10;
+      var sp=parseFloat(g("cp_sp"+i)); if(!isNaN(sp)&&sp>0) b.sp=Math.round(sp*10)/10;
+      var ic=parseFloat(g("cp_ic"+i)); if(!isNaN(ic)&&ic>=0) b.inc=Math.round(ic*10)/10;
+    }
   });
-  if(cBuf) cBuf.plan=cClone(p);
 }
-function cpAdd(){
+function cpAdd(type){
   cpGrab();
-  var p=cPlan(), last=p[p.length-1]||{sp:5,inc:2};
-  p.push({lb:"",min:5,sp:last.sp,inc:last.inc});
+  var bs=cBlocks(), last=bs[bs.length-1]||{sp:6,inc:2};
+  var at=bs.length;
+  /* クールダウンの前に入れる（末尾がクールダウンなら、その1つ前へ） */
+  if(bs.length && bs[bs.length-1].type==="cool") at=bs.length-1;
+  if(type==="interval"){
+    bs.splice(at,0,{type:"interval", lb:"インターバル", reps:8,
+      segs:[{lb:"速い",min:1,sp:Math.round(((+last.sp||6)+2)*10)/10,inc:+last.inc||1},
+            {lb:"ゆるい",min:2,sp:Math.max(1,Math.round(((+last.sp||6)-1)*10)/10),inc:+last.inc||1}]});
+  }else{
+    bs.splice(at,0,{type:type, lb:"", min:5, sp:+last.sp||6, inc:+last.inc||2});
+  }
   save(); render();
 }
 function cpDel(i){
   cpGrab();
-  var p=cPlan();
-  if(p.length<=1){ alert("区間は1つ以上必要です。"); return; }
-  p.splice(i,1); save(); render();
+  var bs=cBlocks();
+  if(bs.length<=1){ alert("ブロックは1つ以上必要です。"); return; }
+  bs.splice(i,1); save(); render();
 }
 function cpMove(i,d){
   cpGrab();
-  var p=cPlan(), j=i+d;
-  if(j<0||j>=p.length) return;
-  var t=p[i]; p[i]=p[j]; p[j]=t; save(); render();
+  var bs=cBlocks(), j=i+d;
+  if(j<0||j>=bs.length) return;
+  var t=bs[i]; bs[i]=bs[j]; bs[j]=t; save(); render();
 }
-function cpSave(){ cpGrab(); save(); go(cRet); }
+function cpType(i,t){ cpGrab(); var b=cBlocks()[i]; if(!b) return;
+  if(t==="interval" && b.type!=="interval"){
+    b.segs=[{lb:"速い",min:1,sp:Math.round(((+b.sp||6)+2)*10)/10,inc:+b.inc||1},
+            {lb:"ゆるい",min:2,sp:Math.max(1,Math.round(((+b.sp||6)-1)*10)/10),inc:+b.inc||1}];
+    b.reps=8;
+  }
+  if(t!=="interval" && b.type==="interval"){
+    var f=targetOf(b)||{min:5,sp:6,inc:2}; b.min=+f.min||5; b.sp=+f.sp||6; b.inc=+f.inc||0;
+  }
+  b.type=t; save(); render();
+}
+function cpSegAdd(i){ cpGrab(); var b=cBlocks()[i]; if(!b||b.type!=="interval") return;
+  var l=(b.segs||[])[b.segs.length-1]||{sp:6,inc:1};
+  b.segs.push({lb:"", min:1, sp:+l.sp||6, inc:+l.inc||1}); save(); render(); }
+function cpSegDel(i,j){ cpGrab(); var b=cBlocks()[i]; if(!b||b.type!=="interval") return;
+  if((b.segs||[]).length<=1){ alert("インターバルの区間は1つ以上必要です。"); return; }
+  b.segs.splice(j,1); save(); render(); }
 function cpRecalc(){
   cpGrab();
   var e=document.getElementById("cp_total");
-  if(e) e.textContent=cTotal(cPlan())+"分";
+  if(e) e.textContent=blocksMin(cBlocks())+"分";
 }
+function cpRename(){
+  var g=curProg(); if(!g) return;
+  var nm=prompt("プログラムの名前", g.name); if(nm===null) return;
+  nm=String(nm).trim().slice(0,30); if(nm){ g.name=nm; save(); render(); }
+}
+const BTYPES=[{k:"warm",n:"ウォームアップ"},{k:"work",n:"セット"},{k:"interval",n:"インターバル"},{k:"cool",n:"クールダウン"}];
 function viewCPlan(){
-  var p=cPlan(), mi=mainIdx(p);
+  var g=curProg(), bs=cBlocks();
   return `
-  <h1>区間の設定</h1>
-  <p class="sub">上から順に走ります。<strong>いちばん長い区間を「メイン」とみなし、上げ下げの対象にします</strong>（いまは ${mi+1}番目）。ここ以外はアプリが勝手に動かしません。</p>
-  <div class="card">
-    ${p.map(function(s,i){
-      return `<div class="ex">
-        <div class="t"><h2>${i+1}${i===mi?" ・ メイン":""}</h2>
-          <span class="pill">${pace(s.sp)}</span></div>
-        <label>区間名</label>
-        <input id="cp_lb${i}" type="text" value="${esc(s.lb||"")}" placeholder="ウォームアップ など">
-        <div class="row">
-          <div><label>分</label><input id="cp_mn${i}" type="number" inputmode="numeric" step="1" value="${s.min}" oninput="cpRecalc()"></div>
-          <div><label>速度 km/h</label><input id="cp_sp${i}" type="number" inputmode="decimal" step="0.1" value="${n1(s.sp)}"></div>
-          <div><label>傾斜 %</label><input id="cp_ic${i}" type="number" inputmode="decimal" step="0.5" value="${n1(s.inc)}"></div>
-        </div>
-        <div class="row" style="margin-top:8px">
-          <button class="btn ghost" style="margin-top:0" onclick="cpMove(${i},-1)">↑</button>
-          <button class="btn ghost" style="margin-top:0" onclick="cpMove(${i},1)">↓</button>
-          <button class="btn ghost" style="margin-top:0" onclick="cpDel(${i})">削除</button>
-        </div>
+  <h1>${esc(g?g.name:"プログラム")}</h1>
+  <p class="sub">上から順に走ります。<strong>時間の長さに決まりはありません。</strong>
+  評価と次回の調整は<strong>セットとインターバルだけ</strong>が対象で、ウォームアップとクールダウンは動かしません。</p>
+  <button class="btn ghost" onclick="cpRename()">プログラムの名前を直す</button>
+  ${bs.map(function(b,i){
+    var head = `<div class="t"><h2>${i+1}　${esc(blockName(b,i))}</h2>
+        <span class="pill">${blockMin(b)}分</span></div>`;
+    var typeRow = `<div class="row" style="margin-bottom:6px">
+        ${BTYPES.map(function(t){
+          return `<button class="btn ${b.type===t.k?"":"ghost"}" style="margin-top:0;font-size:12px;padding:6px 3px" onclick="cpType(${i},'${t.k}')">${t.n}</button>`;
+        }).join("")}
       </div>`;
-    }).join("")}
-    <div class="bigsub" style="margin-top:12px">合計 <b id="cp_total">${cTotal(p)}分</b></div>
-    <button class="btn ghost" onclick="cpAdd()">＋ 区間を足す</button>
-  </div>
-  <div class="sec">繰り返しをまとめて足す</div>
+    var body;
+    if(b.type==="interval"){
+      body = `<label>この組を何回くり返すか</label>
+        <input id="cp_rp${i}" type="number" inputmode="numeric" step="1" value="${Math.max(1,Math.round(+b.reps||1))}" oninput="cpRecalc()">
+        <p class="note" style="margin:6px 0 2px"><strong>下の組み合わせ1回ぶん × この回数＝1つのインターバル（1ループ）</strong>として扱います。評価も1ループまとめて1回だけ聞きます。</p>
+        ${(b.segs||[]).map(function(sg,j){
+          return `<div class="card" style="margin:8px 0 0;padding:10px 12px;background:#12151c">
+            <input class="inp" id="cp_sl${i}_${j}" type="text" value="${esc(sg.lb||"")}" placeholder="速い／ゆるい など">
+            <div class="row" style="margin-top:6px">
+              <div><label>分</label><input id="cp_sm${i}_${j}" type="number" inputmode="decimal" step="0.5" value="${sg.min}" oninput="cpRecalc()"></div>
+              <div><label>速度</label><input id="cp_sp${i}_${j}" type="number" inputmode="decimal" step="0.1" value="${n1(sg.sp)}"></div>
+              <div><label>傾斜</label><input id="cp_si${i}_${j}" type="number" inputmode="decimal" step="0.5" value="${n1(sg.inc)}"></div>
+            </div>
+            <button class="btn link" style="padding:5px" onclick="cpSegDel(${i},${j})">この区間を消す</button>
+          </div>`;
+        }).join("")}
+        <button class="btn ghost" onclick="cpSegAdd(${i})">＋ 組に区間を足す</button>`;
+    }else{
+      body = `<div class="row">
+          <div><label>分</label><input id="cp_mn${i}" type="number" inputmode="decimal" step="1" value="${b.min}" oninput="cpRecalc()"></div>
+          <div><label>速度 km/h</label><input id="cp_sp${i}" type="number" inputmode="decimal" step="0.1" value="${n1(b.sp)}"></div>
+          <div><label>傾斜 %</label><input id="cp_ic${i}" type="number" inputmode="decimal" step="0.5" value="${n1(b.inc)}"></div>
+        </div>`;
+    }
+    return `<div class="ex">
+      ${head}${typeRow}
+      <label>名前</label>
+      <input class="inp" id="cp_lb${i}" type="text" value="${esc(b.lb||"")}" placeholder="${esc(blockName({type:b.type},i))}">
+      ${body}
+      <div class="row" style="margin-top:8px">
+        <button class="btn ghost" style="margin-top:0" onclick="cpMove(${i},-1)">↑</button>
+        <button class="btn ghost" style="margin-top:0" onclick="cpMove(${i},1)">↓</button>
+        <button class="btn ghost" style="margin-top:0" onclick="cpDel(${i})">削除</button>
+      </div>
+    </div>`;
+  }).join("")}
   <div class="card">
-    <p class="note">「速い1分＋ゆるい2分」のような組を、指定した回数ぶん<strong>下に足します</strong>。いまある区間は消えません。</p>
-    <label>速い側</label>
-    <div class="row">
-      <div><label>分</label><input id="cr_fmin" type="number" inputmode="decimal" step="0.5" value="1"></div>
-      <div><label>速度 km/h</label><input id="cr_fsp" type="number" inputmode="decimal" step="0.1" value="${n1(mainOf(p).sp)}"></div>
-      <div><label>傾斜 %</label><input id="cr_finc" type="number" inputmode="decimal" step="0.5" value="${n1(mainOf(p).inc)}"></div>
+    <div class="bigsub">合計 <b id="cp_total">${blocksMin(bs)}分</b></div>
+    <div class="row" style="margin-top:8px">
+      <button class="btn ghost" style="margin-top:0" onclick="cpAdd('work')">＋ セット</button>
+      <button class="btn ghost" style="margin-top:0" onclick="cpAdd('interval')">＋ インターバル</button>
     </div>
-    <label style="margin-top:10px">ゆるい側</label>
-    <div class="row">
-      <div><label>分</label><input id="cr_emin" type="number" inputmode="decimal" step="0.5" value="2"></div>
-      <div><label>速度 km/h</label><input id="cr_esp" type="number" inputmode="decimal" step="0.1" value="${n1(Math.max(1,mainOf(p).sp-1.5))}"></div>
-      <div><label>傾斜 %</label><input id="cr_einc" type="number" inputmode="decimal" step="0.5" value="${n1(mainOf(p).inc)}"></div>
-    </div>
-    <label style="margin-top:10px">繰り返す回数</label>
-    <input id="cr_n" type="number" inputmode="numeric" step="1" value="8">
-    <button class="btn ghost" onclick="cRepAdd()">この組を足す</button>
-    <p class="note">足したあとは上の一覧で1つずつ直せます。<strong>よく使う形になったら、ホームの「いまの構成に名前を付けて保存」で残しておけます。</strong></p>
+    <p class="note">追加したブロックは<strong>クールダウンの前</strong>に入ります。順番は↑↓で変えられます。</p>
   </div>
   <div class="sec">上げ方の設定</div>
   <div class="card">
@@ -1109,11 +1323,14 @@ function viewCPlan(){
       <div><label>傾斜の1段</label><input id="cp_is" type="number" inputmode="decimal" step="0.1" value="${n1(cSet().incStep)}"></div>
       <div><label>傾斜の上限</label><input id="cp_ic" type="number" inputmode="decimal" step="0.5" value="${n1(cSet().incCap)}"></div>
     </div>
-    <p class="note"><strong>傾斜を先に上げます。</strong>着地の衝撃は速度を上げるほうが大きく、傾斜なら衝撃を増やさずに強度だけ上げられるためです。上限に届いたら速度に切り替わります。</p>
+    <p class="note"><strong>傾斜を先に上げます。</strong>着地の衝撃は速度を上げるほうが大きく、傾斜なら衝撃を増やさずに強度だけ上げられるためです。上限に届いたら速度に切り替わります。
+    <br>インターバルは<strong>いちばん速い区間</strong>だけを動かします。</p>
   </div>
   <button class="btn" onclick="cpSaveAll()">保存する</button>
-  <button class="btn link" onclick="go(cRet)">やめる</button>`;
+  <button class="btn ghost" onclick="cTextOpen(curProg().id)">テキストで見る・コピーする</button>
+  <button class="btn link" onclick="cpSave()">やめる</button>`;
 }
+function cpSave(){ cpGrab(); save(); go(cRet); }
 function cpSaveAll(){
   cpGrab();
   var g=function(id){ var e=document.getElementById(id); return e?parseFloat(e.value):NaN; };
@@ -1122,6 +1339,198 @@ function cpSaveAll(){
   if(!isNaN(b)&&b>0) cSet().incStep=b;
   if(!isNaN(c)&&c>=0) cSet().incCap=c;
   save(); go(cRet);
+}
+
+/* ---------- テキストでの取り込み・書き出し（v9） ----------
+   ストレッチアプリと同じ考え方。AIに書式を渡して書いてもらい、貼り付ける。
+   ★アプリの中にAIは載せない。ここでできるのは読み書きだけ。 */
+const CFMT_SAMPLE=[
+"#BMC-CARDIO v1",
+"プログラム名: 坂インターバル 45分",
+"説明: 傾斜で上げる日。速度は控えめに。",
+"---",
+"ウォームアップ | 6分 | 5.0 | 2.0",
+"セット | 前半のペース走 | 12分 | 6.6 | 2.0",
+"インターバル | 坂ダッシュ | 8回",
+"  速い | 1分 | 8.6 | 4.0",
+"  ゆるい | 2分 | 5.2 | 1.0",
+"セット | 締めのペース走 | 8分 | 6.8 | 2.0",
+"クールダウン | 5分 | 4.5 | 1.0"
+].join("\n");
+const CFMT=[
+"【B.M.C. 有酸素（トレッドミル）取り込みフォーマット v1】",
+"",
+"1行目に #BMC-CARDIO v1 と書き、--- の下にブロックを上から順に並べてください。",
+"",
+"■ ブロックは4種類",
+"  ウォームアップ | 分 | 速度 | 傾斜",
+"  クールダウン   | 分 | 速度 | 傾斜",
+"  セット | 名前 | 分 | 速度 | 傾斜",
+"  インターバル | 名前 | 回数",
+"    （次の行から、字下げして組み合わせの区間を並べる）",
+"    名前 | 分 | 速度 | 傾斜",
+"",
+"■ 決まりごと",
+"・速度は km/h、傾斜は %、時間は分（小数可）。単位は書いても書かなくても構いません。",
+"・インターバルは「組み合わせ1回ぶん × 回数」で1つのブロック（1ループ）です。",
+"・全体の長さに上限はありません。15分でも90分でも構いません。",
+"・ウォームアップとクールダウンは、手ごたえの評価と次回の調整の対象外です。",
+"・名前は省略できます（省略すると種別の名前が入ります）。",
+"",
+"■ 例",
+CFMT_SAMPLE
+].join("\n");
+var cImpText="", cImpBuf=null, cTextBuf="";
+function cImpOpen(){ cImpBuf=null; go("cimp"); }
+function cTextOpen(id){
+  var g=cProgs().filter(function(x){return x.id===id;})[0]; if(!g) return;
+  cTextBuf=progToCText(g); go("ctext");
+}
+function progToCText(g){
+  var L=["#BMC-CARDIO v1","プログラム名: "+g.name];
+  if(g.note) L.push("説明: "+g.note);
+  L.push("---");
+  (g.blocks||[]).forEach(function(b){
+    if(b.type==="warm") L.push("ウォームアップ | "+b.min+"分 | "+n1(b.sp)+" | "+n1(b.inc));
+    else if(b.type==="cool") L.push("クールダウン | "+b.min+"分 | "+n1(b.sp)+" | "+n1(b.inc));
+    else if(b.type==="interval"){
+      L.push("インターバル | "+(b.lb||"インターバル")+" | "+Math.max(1,Math.round(+b.reps||1))+"回");
+      (b.segs||[]).forEach(function(sg){
+        L.push("  "+(sg.lb||"")+" | "+sg.min+"分 | "+n1(sg.sp)+" | "+n1(sg.inc));
+      });
+    }else L.push("セット | "+(b.lb||"セット")+" | "+b.min+"分 | "+n1(b.sp)+" | "+n1(b.inc));
+  });
+  return L.join("\n");
+}
+function num(x){ var v=parseFloat(String(x==null?"":x).replace(/[^0-9.\-]/g,"")); return isNaN(v)?null:v; }
+function parseCImport(text){
+  var lines=String(text||"").replace(/\r/g,"").split("\n");
+  var name="", note="", blocks=[], errs=[], started=false, cur=null;
+  lines.forEach(function(raw){
+    var indented=/^[ 　\t]/.test(raw);
+    var line=raw.replace(/^[ 　\t]+|[ 　\t]+$/g,"");
+    if(!line) return;
+    if(/^```/.test(line) || /^#BMC-CARDIO/i.test(line)) return;
+    if(/^プログラム名\s*[:：]/.test(line)){ name=line.split(/[:：]/).slice(1).join(":").trim(); return; }
+    if(/^説明\s*[:：]/.test(line)){ note=line.split(/[:：]/).slice(1).join(":").trim(); return; }
+    if(/^-{3,}$/.test(line)){ started=true; return; }
+    if(!started && !/\|/.test(line)) return;
+    var c=line.split("|").map(function(x){return x.trim();});
+    var head=c[0];
+    if(/^ウォームアップ|^warm/i.test(head)){
+      cur=null;
+      blocks.push({type:"warm", lb:(c.length>=5?c[1]:"ウォームアップ"),
+        min:num(c.length>=5?c[2]:c[1])||5, sp:num(c.length>=5?c[3]:c[2])||5, inc:num(c.length>=5?c[4]:c[3])||0});
+      return;
+    }
+    if(/^クールダウン|^cool/i.test(head)){
+      cur=null;
+      blocks.push({type:"cool", lb:(c.length>=5?c[1]:"クールダウン"),
+        min:num(c.length>=5?c[2]:c[1])||5, sp:num(c.length>=5?c[3]:c[2])||4.5, inc:num(c.length>=5?c[4]:c[3])||0});
+      return;
+    }
+    if(/^セット|^set/i.test(head)){
+      cur=null;
+      blocks.push({type:"work", lb:c[1]||"セット", min:num(c[2])||5, sp:num(c[3])||6, inc:num(c[4])||0});
+      return;
+    }
+    if(/^インターバル|^interval/i.test(head)){
+      cur={type:"interval", lb:c[1]||"インターバル", reps:Math.max(1,Math.round(num(c[2])||1)), segs:[]};
+      blocks.push(cur); return;
+    }
+    /* 字下げ、または直前がインターバルなら、その組の区間として読む */
+    if(cur && (indented || cur.segs.length<24)){
+      var mn=num(c[1]), sp=num(c[2]), ic=num(c[3]);
+      if(mn===null && c.length<2){ return; }
+      cur.segs.push({lb:c[0]||"", min:mn||1, sp:sp||6, inc:ic||0});
+      return;
+    }
+    errs.push(line);
+  });
+  blocks.forEach(function(b){
+    if(b.type==="interval" && !b.segs.length){
+      b.segs=[{lb:"速い",min:1,sp:8,inc:1},{lb:"ゆるい",min:2,sp:5,inc:1}];
+      errs.push("「"+(b.lb||"インターバル")+"」に組み合わせの行がなかったので、仮の値を入れました");
+    }
+  });
+  return {name:name, note:note, blocks:blocks, errs:errs};
+}
+function cImpCheck(){
+  var e=document.getElementById("cimp_t");
+  cImpText=e?e.value:"";
+  cImpBuf=parseCImport(cImpText);
+  go("cimpc");
+}
+function cImpSave(){
+  if(!cImpBuf || !cImpBuf.blocks.length) return;
+  var nm=(cImpBuf.name||"").trim() || ("取り込み "+new Date().toLocaleDateString("sv-SE"));
+  var ex=cProgs().filter(function(x){return x.name===nm;})[0];
+  if(ex){
+    if(!confirm("「"+nm+"」はすでにあります。上書きしますか。")) return;
+    ex.blocks=cClone(cImpBuf.blocks); ex.note=cImpBuf.note||"";
+    cSet().curProg=ex.id;
+  }else{
+    var g={id:cUid(), name:nm, note:cImpBuf.note||"", blocks:cClone(cImpBuf.blocks)};
+    cProgs().push(g); cSet().curProg=g.id;
+  }
+  cHold={}; save(); cImpBuf=null; cImpText=""; go("cardio");
+}
+function viewCImp(){
+  return `
+  <h1>テキストから取り込む</h1>
+  <p class="sub">AIに書いてもらったプログラムを、テキストのまま貼り付けて取り込みます。
+  はじめに下の「AIに渡すフォーマット」をコピーしてAIに見せてください。</p>
+  <button class="btn ghost" onclick="go('cspec')">AIに渡すフォーマットを見る・コピーする</button>
+  <label>プログラムのテキスト<small>前後に余計な文章やコードブロックが付いていても取り込めます</small></label>
+  <textarea id="cimp_t" style="min-height:200px;font-family:ui-monospace,monospace;font-size:12.5px">${esc(cImpText)}</textarea>
+  <button class="btn" onclick="cImpCheck()">内容を確認する</button>
+  <button class="btn link" onclick="go('cardio')">戻る</button>`;
+}
+function viewCImpC(){
+  if(!cImpBuf) return viewCImp();
+  var b=cImpBuf;
+  return `
+  <h1>この内容で取り込みます</h1>
+  <div class="card">
+    <div class="bigsub" style="font-size:16px;font-weight:700;color:#e0a86a">${esc(b.name||"（名前なし）")}</div>
+    <div class="bigsub" style="margin:2px 0 7px">合計 ${blocksMin(b.blocks)}分 ／ ${b.blocks.length}ブロック</div>
+    ${b.blocks.map(function(x,i){return `<div class="prev">${blockLine(x,i)}</div>`}).join("")}
+    ${b.note?`<p class="note">${esc(b.note)}</p>`:``}
+  </div>
+  ${b.errs.length?`<div class="warn"><b>読み取れなかった行があります。</b>取り込みは進められますが、下の行は無視されます。
+    <br>${b.errs.map(function(x){return esc(x)}).join("<br>")}</div>`:``}
+  ${b.blocks.length?`<button class="btn" onclick="cImpSave()">取り込んで、今日のプログラムにする</button>`
+                   :`<div class="warn">ブロックが1つも読み取れませんでした。フォーマットを確認してください。</div>`}
+  <button class="btn ghost" onclick="go('cimp')">テキストを直す</button>
+  <button class="btn link" onclick="cImpBuf=null;go('cardio')">やめる</button>`;
+}
+function viewCText(){
+  return `
+  <h1>プログラムのテキスト</h1>
+  <p class="sub">この形式のままAIに渡して直してもらえます。直したテキストを取り込み画面に貼り付けると、同じ名前のまま上書きされます。</p>
+  <textarea id="ctext_t" style="min-height:220px;font-family:ui-monospace,monospace;font-size:12.5px" readonly>${esc(cTextBuf)}</textarea>
+  <button class="btn" onclick="cCopy('ctext_t')">コピー</button>
+  <button class="btn ghost" onclick="cImpOpen()">取り込み画面へ</button>
+  <button class="btn link" onclick="go('cardio')">戻る</button>`;
+}
+function viewCSpec(){
+  return `
+  <h1>AIに渡すフォーマット</h1>
+  <p class="sub">下の文章をまるごとコピーしてAIに貼り付け、「この書式でトレッドミルのプログラムを作って」と伝えてください。</p>
+  <textarea id="cspec_t" style="min-height:320px;font-family:ui-monospace,monospace;font-size:12px" readonly>${esc(CFMT)}</textarea>
+  <button class="btn" onclick="cCopy('cspec_t')">フォーマットをコピー</button>
+  <button class="btn link" onclick="go('cimp')">戻る</button>`;
+}
+function cCopy(id){
+  var t=document.getElementById(id); if(!t) return;
+  t.removeAttribute("readonly");
+  try{ t.select(); t.setSelectionRange(0,999999); }catch(e){}
+  var ok=false; try{ ok=document.execCommand("copy"); }catch(e){}
+  t.setAttribute("readonly","");
+  var done=function(r){ alert(r?"コピーしました":"コピーできませんでした。長押しで選択してコピーしてください"); };
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(t.value).then(function(){done(true)},function(){done(ok)});
+  }else done(ok);
 }
 
 /* ---------- 推移 ----------
@@ -1213,7 +1622,7 @@ function viewCGraph(){
 function viewCardio(){
   return `
   <h1>有酸素（トレッドミル）</h1>
-  <p class="sub">30分あたりの距離とカロリーを伸ばすための画面です。<strong>目標は距離ではなく「今日この速度・傾斜で走り切ること」</strong>に置いています（距離は速度×時間で決まるので、直接は動かせないためです）。</p>
+  <p class="sub"><strong>目標は距離ではなく「今日この速度・傾斜で走り切ること」</strong>です（距離は速度×時間で決まるので、直接は動かせないためです）。<br><strong>時間の長さに決まりはありません。</strong>グラフだけは、長さのちがう回を並べるために30分あたりへ換算しています。</p>
   ${cardioCard(true)}
   <button class="btn ghost" onclick="go('home')">筋トレの画面に戻る</button>`;
 }
@@ -1224,7 +1633,7 @@ function go(v){ view=v; render(); }
 /* v5: 文字を打ち込む画面では、1秒ごとの自動再描画を止める（打っている途中で消えないように）。
    経過時間そのものは Date.now() から計算しているので、戻れば正しい値に追いつく。 */
 function isTyping(){ return view==="backup" || view==="edlist" || view==="edex" || view==="bands"
-    || view==="cin" || view==="cplan"; }
+    || view==="cin" || view==="cplan" || view==="cimp" || view==="ctext" || view==="cspec"; }
 
 /* ===== バックアップ（書き出し・読み込み）　2026-08-15追加 =====================
    記録はこの端末のブラウザの中だけにあります。ここのテキストを控えておけば、
@@ -1505,6 +1914,11 @@ function render(){
   if(view==="crun")   return void(A.innerHTML=viewCRun());
   if(view==="cin")    return void(A.innerHTML=viewCIn());
   if(view==="cplan")  return void(A.innerHTML=viewCPlan());
+  if(view==="cpick")  return void(A.innerHTML=viewCPick());
+  if(view==="cimp")   return void(A.innerHTML=viewCImp());
+  if(view==="cimpc")  return void(A.innerHTML=viewCImpC());
+  if(view==="ctext")  return void(A.innerHTML=viewCText());
+  if(view==="cspec")  return void(A.innerHTML=viewCSpec());
   if(view==="cgraph") return void(A.innerHTML=viewCGraph());
   if(view==="cardio") return void(A.innerHTML=viewCardio());
   if(view==="work" && DB.active) return void(A.innerHTML=viewWork());
