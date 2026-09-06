@@ -115,6 +115,9 @@ label{display:block;font-size:12.5px;color:#8a94a6;margin:12px 0 5px}
 .nline .x{flex:none;background:none;border:none;color:#6f7a8c;font-size:15px;cursor:pointer;padding:0 2px;font-family:inherit}
 
 /* v11: 区切りの合図で画面全体を2回光らせる */
+.lxb{flex:none;background:none;border:1px solid #3a4152;color:#8a94a6;border-radius:9px;
+  font-size:13px;padding:5px 9px;margin-left:8px;font-family:inherit}
+.lxb.armed{border-color:#c07a7a;color:#e8b4b4}
 .flash{position:fixed;top:0;left:0;right:0;bottom:0;z-index:20;pointer-events:none;background:#e0a86a;opacity:0;animation:fl 1.5s ease-out}
 @keyframes fl{0%{opacity:0}6%{opacity:.8}22%{opacity:.08}40%{opacity:.75}60%{opacity:.06}80%{opacity:.5}100%{opacity:0}}
 
@@ -651,7 +654,7 @@ function defaults(){ return [
 var FOCUS_DEF = { len:{am:120,pm:90,ev:50,kids:15}, from:{pm:12,ev:16}, seg:[15,25,40], segKids:[5,5,5], sound:false, native:true, notify:true, lastBreak:"",
   /* v20 (2026-09-03): 集中ブロックのプレイリスト。spMode は "default"（既定URL）か "own"（専用URL）。 */
   spotify:false, spMode:"default", spotifyUrl:"" };
-var DB = { v:19, sets:null, chime:true, voice:true, spotifyUrl:"", scName:"ルーティンタイマー", log:[], count:0, focus:null, notes:[], times:[], sleepActive:false, sleepStartAt:0,
+var DB = { v:19, sets:null, chime:true, voice:true, third:true, spotifyUrl:"", scName:"ルーティンタイマー", log:[], count:0, focus:null, notes:[], times:[], sleepActive:false, sleepStartAt:0,
   /* v20 (2026-09-03): 就寝のプレイリスト。spMode は "default"（既定URL）か "own"（専用URL）。 */
   sleepSpotify:false, sleepSpMode:"default", sleepSpotifyUrl:"",
   /* v22 (2026-09-05): 実行中の途中経過の控え（詳細は save() の下のコメント） */
@@ -684,6 +687,20 @@ try{
     if(typeof p.sleepSpotifyUrl==="string") DB.sleepSpotifyUrl = p.sleepSpotifyUrl;
     /* v22: 実行中の途中経過の控え。無い保存データ（v21以前）はそのまま null。 */
     if(p.run && typeof p.run==="object") DB.run = p.run;
+    /* v30（2026-09-06 ご報告「ユーザーが変更したタグが、版が変わるたびに初期値に戻る」）
+       ------------------------------------------------------------------
+       ここは「保存してあるものの中から、名前を挙げたものだけを読み戻す」形。
+       v23でタブ（DB.scenes / DB.sceneCur）、v27でストレッチの置き場（DB.sxProgs）を
+       足したときに、この読み戻しへ足すのを忘れていた。save() は DB をまるごと
+       書き出すので保存はされていたが、開き直すと読まれないまま、すぐ下の
+       既定値で上書きされていた。＝タブの名前とタグは毎回「仕事（平日）／休日」に
+       戻り、取り込んだストレッチのプログラムも毎回消えていた。版を上げたときだけ
+       ではなく、**開き直すたびに**起きていた。
+       ★DBに新しい入れ物を足したら、必ずこの読み戻しにも足すこと。 */
+    if(Array.isArray(p.scenes)) DB.scenes = p.scenes;
+    if(typeof p.sceneCur==="string") DB.sceneCur = p.sceneCur;
+    if(Array.isArray(p.sxProgs)) DB.sxProgs = p.sxProgs;
+    if(typeof p.third==="boolean") DB.third = p.third;
     if(DB.count < DB.log.length) DB.count = DB.log.length;
     if(Array.isArray(p.sets)) DB.sets = p.sets;
     else if(p.sets && typeof p.sets==="object"){
@@ -846,6 +863,7 @@ function loadRun(r){
      そのため**開き直す前に済みにした項目の取り消し**では、記録済みの実績は
      消えずに残る（済みの印だけが外れる）。二重に足すことは無い。 */
   runTimes = {};
+  thirdSaid = {};   /* v30: 開き直した回は印を持たない。通り過ぎている場合は thirdCheck 側で黙る */
   runIdx = (typeof r.runIdx==="number") ? r.runIdx : null;
   fromPreSleep = !!r.fromPreSleep;
   fromWake = !!r.fromWake;
@@ -878,7 +896,7 @@ function finishPending(){
 
 /* --- 状態 --- */
 /* v27: 版の表示（ホーム最下部）。中身を変えたら、ここも必ず上げる。 */
-var APPVER = "切り替えルーティン v29 ・ 2026-09-06";
+var APPVER = "切り替えルーティン v30 ・ 2026-09-06";
 var view = "home";
 var curId = null;
 var startAt = 0;
@@ -894,6 +912,10 @@ var stepAt = 0, stepExtra = {}, runTimes = {};
    順番が前後しても、その項目に居た時間はすべてその項目に積まれる。 */
 var stepAcc = {};
 var clearArmed = false; /* 履歴の消去も2回押し */
+/* v30（2026-09-06 ご依頼）: 記録を1件ずつ消す。押し間違いを消せないと、
+   試しに1回押しただけの回が「今週」に残り続けるため（ご記入のとおり）。
+   全消しと同じく2回押し。armed には DB.log の位置を入れる。 */
+var logDelArmed = null;
 
 /* --- v4: auto セット（4-7-8呼吸法）の状態 ---------------------
    setTimeoutを連鎖させず、常に「いま何ステップ目にいるべきか」を
@@ -1043,6 +1065,8 @@ function tickRender(){
   /* v22: 実行中は10秒ごとに途中経過を控える（入力欄を開いていても止めない）。
      項目を進めるたびの保存だけだと、1つの項目に長く居るあいだが無防備になる。 */
   if(view==="run" && curId && Date.now()-lastRunSave > 10000) saveRun();
+  /* v30: 項目の1/3を過ぎたら残り時間を読み上げる（入力欄を開いていても数える） */
+  if(view==="run" && curId) thirdCheck();
   if(inputOpen && view==="run") return;
   /* v27: テキストを打ち込む画面では描き直さない（打っている途中で消えないように）。
      セットを走らせたままホーム経由でここへ来ることがあるため、必要な保険。 */
@@ -1198,6 +1222,34 @@ function speak(text){
     u.lang = "ja-JP"; u.rate = 0.95;
     window.speechSynthesis.speak(u);
   }catch(e){}
+}
+
+/* ===== v30（2026-09-06 ご依頼）: 項目の1/3を過ぎたら、残り時間を声で知らせる =====
+   ご記入は「セットの設定時間が1/3を経過したら、残り時間を音声で知らせる」。
+   ★1/3の基準は**いま実行している1項目の設定時間**（2026-09-06 ご指示）。
+     セット全体ではない。
+   ★**延長（＋1分／＋5分）を押したら1/3の位置も計算し直す**（同ご指示）。
+     延長後の1/3にまだ届いていなければ、そこでもう一度知らせる。
+   ★自動で進むセット（呼吸法など）には出さない。項目が数十秒しかなく、
+     項目の読み上げと重なって、かえって邪魔になるため。
+   ★短い項目にも出さない（THIRD_MIN 未満）。「のこり40秒です」を毎回言われても
+     手が止まるだけなので、1分以上の項目だけにしてある。
+   ★大きく過ぎてから開き直したとき（控えからの再開）は言わない。
+     開いた瞬間にいきなり喋ると、何の音か分からないため。 */
+var THIRD_MIN = 60;      /* この秒数より短い項目では知らせない */
+var thirdSaid = {};      /* この回、どの項目でもう知らせたか */
+function thirdCheck(){
+  if(!DB.voice || DB.third===false) return;
+  var s = setOf(curId); if(!s || s.auto || !s.voice) return;
+  if(curStep==null || curStep<0) return;
+  var st = stepsOf(s); if(!st[curStep]) return;
+  var t = stepSec(curStep); if(t < THIRD_MIN) return;
+  var used = stepUsed();
+  if(used < t/3) return;
+  if(thirdSaid[curStep]) return;
+  thirdSaid[curStep] = true;
+  if(used > t/3 + 10) return;   /* 通り過ぎてから来た場合は黙る（印だけ立てる） */
+  speak("のこり " + durLabel(Math.max(0, t - used)) + "です");
 }
 
 /* --- v5: Spotifyのプレイリストを開く ----------------------------
@@ -1574,7 +1626,7 @@ function left(){ var s = setOf(curId); return s ? limitOf(s) - elapsed() : 0; }
 function allDone(){ var s=setOf(curId); for(var i=0;i<s.steps.length;i++){ if(!doneSet[i]) return false; } return true; }
 function newId(){ return "s" + Date.now().toString(36) + Math.floor(Math.random()*900+100); }
 
-function go(v){ armed = null; clearArmed = false; if(v==="edit") editId = null; view = v; render(); }
+function go(v){ armed = null; clearArmed = false; logDelArmed = null; if(v==="edit") editId = null; view = v; render(); }
 
 /* ===== バックアップ（書き出し・読み込み）　2026-08-15追加 =====================
    記録はこの端末のブラウザの中だけにあります。ここのテキストを控えておけば、
@@ -1657,7 +1709,7 @@ function start(id, fromIndex){
   curId = id; doneSet = {}; curStep = fromIndex||0;
   for(var i=0;i<curStep;i++) doneSet[i] = "skip";
   startAt = Date.now();
-  stepAt = startAt; stepExtra = {}; runTimes = {}; stepAcc = {};
+  stepAt = startAt; stepExtra = {}; runTimes = {}; stepAcc = {}; thirdSaid = {};
   runIdx = null;
   autoPaused = false; pauseAt = 0; autoFinished = false;
   var s = setOf(id);
@@ -1808,6 +1860,9 @@ function etaLabel(){ return hhmm(Date.now() + etaSec()*1000); }
 function extendStep(sec){
   if(curStep==null) return;
   stepExtra[curStep] = (stepExtra[curStep]||0) + sec;
+  /* v30（2026-09-06 ご指示）: 延長すると1/3の位置も後ろへ動く。
+     新しい1/3にまだ届いていなければ、印を外してもう一度知らせる。 */
+  if(thirdSaid[curStep] && stepUsed() < stepSec(curStep)/3) delete thirdSaid[curStep];
   saveRun();   /* v22 */
   render();
 }
@@ -2014,6 +2069,33 @@ function angerReturn(){
 }
 function angerDone(){ if(!angerReturn()) go("home"); }
 function inDetour(){ return !!(detour || DB.detour); }
+/* ===== v30（2026-09-06 ご報告）: 🛟 も「寄り道」として扱う =====
+   ご報告は「表示される崩れたボタンを押してそのセットを完了したら、途中だった
+   セットに戻りたいのに戻れない」。**崩れたボタン＝🛟 崩れたあとの復帰**。
+   実行中の画面の 🛟 は start() を直に呼んでいたため、
+     ①いまのセットの控え（DB.run）が 🛟 の控えで上書きされ、
+     ②🛟 を終えた時点の clearRun() でその控えごと消えていた。
+   その結果、ホームの「途中のセットがあります」も出ず、戻る道が無くなっていた。
+   画面には「どちらも いまのセットはそのまま残り、終わるとこの続きに戻ります」と
+   書いてあったのに、実際にそうなっていたのは 🧸 だけ（v25の作りのまま）。
+   ★ここで 🛟 も 🧸 と同じ控え（DB.detour）を取る。
+   ★戻し方は 🧸 と変える。🛟 は「今日をここで終わらせて、次の合図まで戻る」
+     ためのものなので、**自動では戻さない**。完了画面とホームに「続きに戻る」を
+     出し、押したときだけ戻す（2026-09-06 ご指示）。 */
+function rescueGo(id){
+  if(!id) return;
+  if(curId === id) return;
+  if(curId){
+    commitSeg();                 /* いま数えている区間をそこまでで確定 */
+    detour = runSnap();
+    DB.detour = detour; save();
+  }
+  start(id);
+}
+/* 寄り道の戻り先のセット（完了画面・ホームのボタンに名前を出す） */
+function detourSet(){ var b = detour || DB.detour; return b ? setOf(b.id) : null; }
+function detourBack(){ if(!angerReturn()) go("home"); }
+function detourDrop(){ detour = null; DB.detour = null; save(); render(); }
 
 function leaveRun(){
   /* v25: 🧸 を途中でやめた場合も、元のセットへ戻す（記録は残さない）。 */
@@ -2148,6 +2230,16 @@ function viewHome(){
        + '（'+hhmm(pr.at)+' で中断）<br>タップすると<b>続きから</b>再開します。離れていた時間は数えません。</small></button>';
     h += '<button class="btn ghost" onclick="finishPending()">ここまでを記録して終える</button>';
   }
+  /* v30（2026-09-06）: 🛟 の前にやっていたセットへの戻り口。完了画面で
+     「最初に戻る」を押した場合・🛟 を途中でやめた場合の受け皿。
+     押さないかぎり戻らない。「戻らずに閉じる」で消せる（消しても記録は消えない）。 */
+  var bkS = (!curId && !pr) ? detourSet() : null;
+  if(bkS){
+    h += '<button class="setb" style="border-color:#c4a06a;background:#211e18" onclick="detourBack()">▶ 続きに戻る（'
+       + esc(bkS.icon)+' '+esc(bkS.name)+'）'
+       + '<small>🛟 の前にやっていたセットです。済んだ項目とかかった時間は残っています。<br>離れていた時間は数えません。</small></button>';
+    h += '<button class="btn link" style="padding:7px" onclick="detourDrop()">戻らずに閉じる</button>';
+  }
   /* v7: 集中が続いたままホームへ戻ってきたとき（呼吸のあと等）の戻り口 */
   if(fStart && !fDone){
     h += '<button class="setb" style="border-color:#e0a86a;background:#211d18" onclick="focusBack()">▶ 集中に戻る（'+SLOTN[fSlotNow()]+'）'
@@ -2241,6 +2333,11 @@ function viewHome(){
      + '<button class="sw'+(DB.chime?' on':'')+'" onclick="DB.chime=!DB.chime;save();render()"><i></i></button></div>'
      + '<div class="toggle" style="margin-top:8px"><b>音声で切り替えを案内する</b>'
      + '<button class="sw'+(DB.voice?' on':'')+'" onclick="DB.voice=!DB.voice;save();render()"><i></i></button></div>'
+     /* v30（2026-09-06 ご依頼）: 項目の1/3で残り時間を知らせる */
+     + '<div class="toggle" style="margin-top:8px"><b>項目の1/3で残り時間を知らせる</b>'
+     + '<button class="sw'+(DB.third!==false?' on':'')+'" onclick="DB.third=(DB.third===false);save();render()"><i></i></button></div>'
+     + '<p class="note">タップで進めるセットだけ、いまの項目の設定時間の1/3を過ぎたときに「のこり◯分です」と読み上げます。'
+     + '<b>延長を押したら、1/3の位置も計算し直します。</b>1分より短い項目と、自動で進むセットでは鳴りません。</p>'
      + '<p class="note">ここは<b>全体のスイッチ</b>です。これを切ると、どのセットでも読み上げません。'
      + '<br>セットごとのオンオフと読み上げる文言は「セットを編集」の中にあります。対応していない端末では何も起きません。</p></div>';
   h += '<div class="card"><label>Spotifyプレイリストの既定URL</label>'
@@ -2340,7 +2437,7 @@ function viewLog(){
   for(var i=DB.log.length-1;i>=0;i--){
     var r = DB.log[i], k = dayKey(r.t);
     if(!byDay[k]){ byDay[k] = []; order.push(k); }
-    byDay[k].push(r);
+    byDay[k].push({r:r, i:i});   /* v30: 1件ずつ消せるように、DB.log の位置も持たせる */
   }
   var wk = dayKey(Date.now() - 6*86400000);
   var recent = order.filter(function(k){ return k >= wk; });
@@ -2350,9 +2447,10 @@ function viewLog(){
     var s = "";
     keys.forEach(function(k){
       var rs = byDay[k];
-      s += '<div class="sec">'+dayLabel(rs[0].t)+'　<span class="tag">'+rs.length+'回</span></div>';
+      s += '<div class="sec">'+dayLabel(rs[0].r.t)+'　<span class="tag">'+rs.length+'回</span></div>';
       s += '<div class="card" style="padding:6px 14px">';
-      rs.forEach(function(r){
+      rs.forEach(function(o){
+        var r = o.r, gi = o.i;
         /* 0ステップの回は数字を出さない（「押した」という事実だけを残す） */
         var what = r.d>0 ? (r.d+' / '+r.n) : '押しました';
         s += '<div class="lrow"><span class="lt">'+hhmm(r.t)+'</span>'
@@ -2360,7 +2458,9 @@ function viewLog(){
            + (r.items && r.items.length ? '<em style="display:block;font-style:normal;color:#8a94a6;font-size:12.5px;margin-top:3px">'+esc(r.items.join(' → '))+'</em>' : '')
            + (r.memo ? '<em style="display:block;font-style:normal;color:#8a94a6;font-size:12.5px;margin-top:3px">'+esc(r.memo)+'</em>' : '')
            + '</span>'
-           + '<span class="ld">'+what+'</span></div>';
+           + '<span class="ld">'+what+'</span>'
+           + '<button class="lxb'+(logDelArmed===gi?' armed':'')+'" onclick="delLog('+gi+')">'
+           + (logDelArmed===gi?'消す？':'✕')+'</button></div>';
       });
       s += '</div>';
     });
@@ -2372,11 +2472,26 @@ function viewLog(){
   if(older.length){
     h += '<div class="sec" style="color:#e0a86a">それより前</div>' + block(older);
   }
+  h += '<p class="note">1件だけ消すときは、その行の <b>✕</b> を2回押してください（1回目で「消す？」に変わります）。'
+     + '消した回は<b>上の「今週」の表からも消えます</b>。項目ごとの実施時間（📊 振り返り）は別に持っているので、そちらは残ります。</p>';
   h += '<button class="btn ghost" onclick="go(\'home\')">戻る</button>';
   h += '<button class="btn danger'+(clearArmed?' armed':'')+'" onclick="clearLog()">'
      + (clearArmed ? 'もう一度押すと記録をすべて消します' : '記録をすべて消す')+'</button>';
   if(clearArmed) h += '<div class="warn">回数も履歴も0に戻ります。<b>元に戻せません。</b>やめるときは「戻る」を押してください。</div>';
   return h;
+}
+/* v30: 1件だけ消す。2回押し。走っている最中でも矛盾しないよう、
+   この回の記録の位置（runIdx / fIdx）もずらす。 */
+function delLog(i){
+  if(logDelArmed!==i){ logDelArmed = i; render(); return; }
+  if(i>=0 && i<DB.log.length){
+    DB.log.splice(i,1);
+    if(DB.count>0) DB.count--;
+    if(runIdx!==null){ if(i===runIdx) runIdx = null; else if(i<runIdx) runIdx--; }
+    if(typeof fIdx!=="undefined" && fIdx!==null){ if(i===fIdx) fIdx = null; else if(i<fIdx) fIdx--; }
+    save();
+  }
+  logDelArmed = null; render();
 }
 function clearLog(){
   if(!clearArmed){ clearArmed = true; render(); return; }
@@ -2426,14 +2541,15 @@ function viewRun(){
        スクロールを挟ませない。並びは横2つで、指が届く位置に置く。 */
     var em = [];
     if(!s.rescue && rescues().length)
-      em.push('<button class="btn ghost" style="margin-top:0;border-color:#c4a06a;color:#e8c99a" onclick="start(\''+rescues()[0].id+'\')">🛟 崩れた</button>');
+      em.push('<button class="btn ghost" style="margin-top:0;border-color:#c4a06a;color:#e8c99a" onclick="rescueGo(\''+rescues()[0].id+'\')">🛟 崩れた</button>');
     if(curId !== "anger" && angerSet())
       em.push('<button class="btn ghost" style="margin-top:0;border-color:#c98b8b;color:#e8b4b4" onclick="angerGo()">🧸 イライラした</button>');
     if(em.length){
       h += '<div class="row" style="margin-top:9px">'+em.join("")+'</div>';
       h += '<p class="note" style="margin-top:4px">'
          + (em.length>1 ? '<b>🛟</b>は復帰の1手へ、<b>🧸</b>は1分だけ離れる形へ。' : (curId!=="anger"&&angerSet() ? '<b>🧸</b>は1分だけ離れる形へ。' : '<b>🛟</b>は復帰の1手へ。'))
-         + 'どちらも<b>いまのセットはそのまま残り</b>、終わるとこの続きに戻ります。</p>';
+         + 'どちらも<b>いまのセットはそのまま残ります</b>。🧸 は終わるとそのまま続きに戻り、'
+         + '🛟 は終わったあとに<b>「続きに戻る」</b>が出ます（押さなければ戻りません）。</p>';
     }
     var ap = appOf(cur);
     if(ap) h += '<button class="btn ghost" onclick="openApp(\''+esc(cur.app)+'\')">'+ap.icon+' '+esc(ap.name)+'を開く</button>';
@@ -2678,6 +2794,15 @@ function viewDone(){
     h += '<p class="note">触った項目は、順番が前後していても<b>合計時間</b>で残しています（中断して戻った分も足しています）。飛ばした項目（–）は記録しません。<br>この時間は「📊 このルーティンの振り返り」で平均になり、予定の秒数を合わせ直す材料になります。</p>';
   }
   h += '<p class="note">この記録はこの端末の中だけに残ります。Obsidian・Points Tracker には入りません。<br>連続日数と達成率は数えていません。</p>';
+  /* v30（2026-09-06 ご指示）: 🛟 を終えたあと、元のセットの続きへ戻る口。
+     自動では戻さない（🛟 は「今日をここで終わらせる」ためのものなので、
+     押した人が選べる形にする）。押さずに「最初に戻る」を押しても、
+     ホームに同じ戻り口が残る。 */
+  var _bk = (curId!=="anger") ? detourSet() : null;
+  if(_bk){
+    h += '<button class="btn" onclick="detourBack()">▶ 続きに戻る（'+esc(_bk.icon)+' '+esc(_bk.name)+'）</button>';
+    h += '<p class="note">🛟 の前にやっていたセットです。済んだ項目と、項目ごとにかかった時間はそのまま残っています。<b>離れていた時間は数えません。</b><br>いま戻らなくても、ホームに同じボタンが出ます。</p>';
+  }
   if(!s.rescue && d<n) h += '<button class="btn ghost" onclick="go(\'run\');tick=setInterval(tickRender,250)">続きに戻る</button>';
   if(fromFocus && fStart){
     h += '<button class="btn" onclick="focusResume()">▶ 集中に戻る（休憩まで '+mmss(fLeftAll())+'）</button>';

@@ -43,6 +43,36 @@ h2{font-size:15px;margin:0 0 3px}
 .restdone .big{color:#9ec8a4}
 @keyframes rdpulse{0%,100%{background:#243024}50%{background:#33472f}}
 
+/* ===== v12（2026-09-06 ご依頼）: 有酸素の実行画面 =====
+   ご記入は4つ。①傾斜を速度と同じ大きさに ②傾斜が左・速度が右で、＋−は上下に
+   大きく ③区間が切り替わったら画面を光らせる ④YouTubeのピクチャインピクチャを
+   下に出しながら使うので、**iPhoneの画面の上2/3に収める**。
+   ★④のために、走っている最中に要る情報（傾斜・速度・残り・調整・一時停止）を
+     すべて .crun の中へ入れ、文字の大きさを画面の高さ（vh）に連れて縮むように
+     している。手ごたえの評価・次の区間の案内・「終わった（記録する）」は
+     **意図的に下へ置いた**（走りながら押すものではないため）。 */
+.crun{max-height:66vh}
+.crun h1{font-size:17px;margin:2px 0 1px}
+.crun .sub{font-size:12px;margin:0 0 7px}
+.crun .card{padding:11px 12px;margin-bottom:8px}
+.ctwo{display:flex;gap:9px}
+.ctwo>div{flex:1;min-width:0;text-align:center}
+.cval{font-size:clamp(28px,7vh,48px);font-weight:200;line-height:1.05;
+  font-variant-numeric:tabular-nums;letter-spacing:-.03em}
+.cval span{font-size:clamp(12px,1.9vh,16px);font-weight:400;color:#8a94a6;margin-left:2px}
+.clab{color:#8a94a6;font-size:12px;margin:1px 0 6px}
+.cadj{display:flex;flex-direction:column;gap:6px}
+.cadj button{display:block;width:100%;border:none;border-radius:11px;background:#232b38;
+  color:#e8ecf2;font-family:inherit;font-size:19px;font-weight:700;
+  padding:clamp(8px,1.7vh,15px) 0;cursor:pointer}
+.cadj button:active{background:#2c3644}
+.ctimer{font-size:clamp(24px,6vh,40px);font-weight:200;text-align:center;
+  font-variant-numeric:tabular-nums;letter-spacing:-.02em;margin:9px 0 0;line-height:1.1}
+/* 区間が切り替わったときの合図。急かす色は使わない（休憩終わりの合図と同じ考え方）。 */
+.cflash{position:fixed;top:0;left:0;right:0;bottom:0;z-index:30;pointer-events:none;
+  background:#e0a86a;opacity:0;animation:cfl 1.5s ease-out}
+@keyframes cfl{0%{opacity:0}6%{opacity:.75}22%{opacity:.07}40%{opacity:.7}60%{opacity:.05}80%{opacity:.45}100%{opacity:0}}
+
 .pill{display:inline-block;background:#232b38;border:1px solid #303a4a;border-radius:999px;padding:3px 10px;font-size:12px;color:#cbd5e3;margin-right:6px}
 .prev{color:#8a94a6;font-size:13px;margin-top:5px;line-height:1.6}
 .prev b{color:#cbd5e3;font-weight:600}
@@ -314,7 +344,7 @@ const CARDIO_DEF={
 const RATES=["かるすぎる","ちょうどよい","きつすぎる"];
 /* v9（2026-09-05）: 版の表示（ホーム最下部）。開いて1秒で新旧を見分けるため。
    中身を変えたら、ここも必ず上げる。 */
-const APPVER="B.M.C. ジム v11 ・ 2026-09-06";
+const APPVER="B.M.C. ジム v12 ・ 2026-09-06";
 const NORM=30;                    /* グラフの換算基準（30分あたり） */
 const HARDS=["余裕","ちょうどよい","きつい"];
 
@@ -1024,8 +1054,21 @@ function cPos(){
 }
 function cTick(){
   var q=cPos();
-  if(q.done){ if(!cRun.chimed.end){ cRun.chimed.end=true; chimeDone(); } return; }
-  if(!cRun.chimed["s"+q.i] && q.i>0){ cRun.chimed["s"+q.i]=true; chimeMark(); }
+  if(q.done){ if(!cRun.chimed.end){ cRun.chimed.end=true; chimeDone(); cFlash(); } return; }
+  if(!cRun.chimed["s"+q.i] && q.i>0){ cRun.chimed["s"+q.i]=true; chimeMark(); cFlash(); }
+}
+/* v12（2026-09-06 ご依頼）: 区間が切り替わったら画面全体を光らせる。
+   走っているあいだは音が聞こえないことがある（トレッドミルの音・イヤホンで
+   別の音を流している）ため、目で分かる合図を足す。#app の中に入れると
+   再描画で消えるので、body直下に置いて時間で片づける
+   （routine.html の flashScreen と同じ手）。 */
+function cFlash(){
+  try{
+    var d=document.createElement("div");
+    d.className="cflash";
+    document.body.appendChild(d);
+    setTimeout(function(){ if(d.parentNode) d.parentNode.removeChild(d); }, 1600);
+  }catch(e){}
 }
 function cPause(){
   if(!cRun) return;
@@ -1095,9 +1138,44 @@ function viewCRun(){
   var pct=Math.min(100, tot? e/tot*100 : 0);
   var curB = q.done ? null : (cRun.blocks||[])[s.b];
   var dn = doneBlocks();
+  /* v12（2026-09-06 ご依頼）: 画面の作り直し。
+     ・傾斜と速度を**同じ大きさ**で、**傾斜が左・速度が右**に並べる
+     ・＋と−はそれぞれの下に**上下**に置き、指1本で押せる大きさにする
+     ・走っているあいだに要るものだけを .crun にまとめ、**画面の上2/3**に収める
+       （YouTubeのピクチャインピクチャを下に出したまま使うため）
+     ・手ごたえの評価・次の区間の案内・記録へ進むボタンは、意図して下に置く */
   return `
+  <div class="crun">
   <h1>${q.done?"走り終わりました":esc(s.lb||("区間"+(q.i+1)))}</h1>
   <p class="sub">${curB?esc(blockName(curB,s.b))+" ／ ":""}${q.i+1} / ${p.length} 区間 ／ 全体 ${mmss(e)} / ${cTotal(p)}分</p>
+  <div class="card">
+    <div class="ctwo">
+      <div>
+        <div class="cval">${n1(s.inc)}<span>%</span></div>
+        <div class="clab">傾斜</div>
+        ${q.done?"":`<div class="cadj">
+          <button onclick="cAdj('inc',1)">＋</button>
+          <button onclick="cAdj('inc',-1)">−</button>
+        </div>`}
+      </div>
+      <div>
+        <div class="cval">${n1(s.sp)}<span>km/h</span></div>
+        <div class="clab">速度 ・ ${pace(s.sp)}</div>
+        ${q.done?"":`<div class="cadj">
+          <button onclick="cAdj('sp',1)">＋</button>
+          <button onclick="cAdj('sp',-1)">−</button>
+        </div>`}
+      </div>
+    </div>
+    <div class="ctimer" style="color:${q.done?"#7fd1c1":"#e8ecf2"}">${q.done?"おつかれさまでした":mmss(q.left)}</div>
+    <div class="bigsub">${q.done?"下のボタンから記録に進めます":"この区間の残り"}</div>
+    <div class="bar"><i style="width:${pct}%"></i></div>
+    ${q.done?"":`<div class="row" style="margin-top:9px">
+      <button class="btn ghost" style="margin-top:0" onclick="cPause()">${cRun.paused?"再開":"一時停止"}</button>
+      <button class="btn ghost" style="margin-top:0" onclick="cSkip()">次の区間へ</button>
+    </div>`}
+  </div>
+  </div>
   ${dn.length?`<div class="card" style="padding:12px 14px;border-color:#3a4152">
     <div class="bigsub" style="margin-bottom:6px">終わったブロックの手ごたえ<span style="opacity:.65">（いつ押しても構いません。時計は止まりません）</span></div>
     ${dn.map(function(bi){
@@ -1112,26 +1190,9 @@ function viewCRun(){
     <p class="note" style="margin:8px 0 0">あとで記録の画面でも入れられます。<strong>空のままでも構いません。</strong></p>
   </div>`:``}
   <div class="card">
-    <div class="big" style="font-size:52px;margin:2px 0">${n1(s.sp)}<span style="font-size:20px"> km/h</span></div>
-    <div class="bigsub">傾斜 ${n1(s.inc)}% ／ ${pace(s.sp)}</div>
-    <div class="big" style="font-size:40px;margin:14px 0 0;color:${q.done?"#7fd1c1":"#e8ecf2"}">${q.done?"おつかれさまでした":mmss(q.left)}</div>
-    <div class="bigsub">${q.done?"下のボタンから記録に進めます":"この区間の残り"}</div>
-    <div class="bar"><i style="width:${pct}%"></i></div>
-    ${q.done?"":`<div class="row" style="margin-top:12px">
-      <button class="btn ghost" style="margin-top:0" onclick="cAdj('sp',-1)">速度 −</button>
-      <button class="btn ghost" style="margin-top:0" onclick="cAdj('sp',1)">速度 ＋</button>
-    </div>
-    <div class="row">
-      <button class="btn ghost" style="margin-top:0" onclick="cAdj('inc',-1)">傾斜 −</button>
-      <button class="btn ghost" style="margin-top:0" onclick="cAdj('inc',1)">傾斜 ＋</button>
-    </div>
-    <p class="note">実際に変えたら、ここも合わせて動かしてください。<strong>この回の記録にそのまま残ります</strong>（あとで直さなくて大丈夫です）。いまの区間だけに効きます。</p>`}
-    <p class="note">${nx?`次は <strong>${segLine(nx)}</strong>`:`これが最後の区間です`}
-    <br>トレッドミルの操作はご自分で。ここは<strong>いま何に設定するかを出すだけ</strong>です。</p>
-  </div>
-  <div class="row">
-    <button class="btn ghost" onclick="cPause()">${cRun.paused?"再開":"一時停止"}</button>
-    <button class="btn ghost" onclick="cSkip()">次の区間へ</button>
+    <p class="note" style="margin:0">${nx?`次は <strong>${segLine(nx)}</strong>`:`これが最後の区間です`}
+    <br>トレッドミルの操作はご自分で。ここは<strong>いま何に設定するかを出すだけ</strong>です。${q.done?"":`
+    <br>実際に速度や傾斜を変えたら、上の＋−も合わせて動かしてください。<strong>この回の記録にそのまま残ります</strong>（あとで直さなくて大丈夫です）。いまの区間だけに効きます。`}</p>
   </div>
   <button class="btn" onclick="cFinish()">終わった（記録する）</button>
   <button class="btn link" onclick="cQuit()">この回を残さずにやめる</button>`;
