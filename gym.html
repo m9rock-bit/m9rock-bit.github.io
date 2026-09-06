@@ -344,7 +344,7 @@ const CARDIO_DEF={
 const RATES=["かるすぎる","ちょうどよい","きつすぎる"];
 /* v9（2026-09-05）: 版の表示（ホーム最下部）。開いて1秒で新旧を見分けるため。
    中身を変えたら、ここも必ず上げる。 */
-const APPVER="B.M.C. ジム v12 ・ 2026-09-06";
+const APPVER="B.M.C. ジム v13 ・ 2026-09-07";
 const NORM=30;                    /* グラフの換算基準（30分あたり） */
 const HARDS=["余裕","ちょうどよい","きつい"];
 
@@ -2081,6 +2081,7 @@ function viewHome(){
   ${cardioCard()}
 
   <button class="btn ghost" onclick="go('log')">これまでの記録（${d.length}回）</button>
+  <a class="btn ghost" href="log.html" style="display:block;text-decoration:none">📤 記録を送る（記録ハブ）</a>
   <button class="btn ghost" onclick="bkGo()">💾 バックアップ（書き出し・読み込み）</button>
   ${showProgress() ? "" : `<p class="note">重さを上げるルール（3セットとも上限回数を2回続けたら1段上げる）は、<strong>9/1から</strong>案内します。それまでは記録だけ残ります。</p>`}
   <p class="note" style="text-align:center;opacity:.45;margin-top:14px">${APPVER}</p>`;
@@ -2263,11 +2264,13 @@ function viewLog(){
     }).join("") : '<p class="note">まだ記録はありません。</p>'}
   </div>
   <p class="note">所要時間は記録として並べているだけです。<strong>速さの順位づけ・最短の表示はしません。</strong>${TARGET_MIN}分を超えた回にも印は付きません。</p>
+  <a class="btn" href="log.html" style="display:block;text-decoration:none">📤 記録を送る（記録ハブ）</a>
+  <p class="note">今日の分をObsidianの実施ログ（<code>20_Projects/Private/B.M.C/logs/</code>）へ追記します。<strong>送っても記録はこのアプリから消えません。</strong>送信済みの印はハブ側だけが持っています。</p>
   <button class="btn ghost" onclick="go('home')">戻る</button>
 
   <div class="hr"></div>
   <button class="btn ghost" onclick="bkGo()">💾 バックアップ（書き出し・読み込み）</button>
-  <p class="note">記録はこの端末のブラウザ内にだけ保存されています。ときどき書き出して、控えを取っておいてください。</p>`;
+  <p class="note">記録はこの端末のブラウザ内に保存されています。<strong>ハブから送った分はObsidianにも残りますが、控えとしてときどき書き出しておいてください</strong>（ハブが送るのは実施の一覧で、設定や種目の中身は入りません）。</p>`;
 }
 
 /* ===================== 操作 ===================== */

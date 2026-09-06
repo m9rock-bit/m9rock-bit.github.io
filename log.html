@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="記録ハブ">
+<title>B.M.C. 記録ハブ</title>
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'%3E%3Crect width='180' height='180' rx='40' fill='%2312151c'/%3E%3Cpath d='M52 46h58l20 20v68a10 10 0 0 1-10 10H52a10 10 0 0 1-10-10V56a10 10 0 0 1 10-10z' fill='none' stroke='%23e0a86a' stroke-width='9' stroke-linejoin='round'/%3E%3Cpath d='M64 92h52M64 112h34' stroke='%23e0a86a' stroke-width='9' stroke-linecap='round'/%3E%3C/svg%3E">
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:#0d1016;color:#e8ecf2;
+  font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif;
+  font-size:15px;line-height:1.6}
+.wrap{max-width:560px;margin:0 auto;padding:16px 16px calc(28px + env(safe-area-inset-bottom))}
+h1{font-size:21px;margin:2px 0 4px}
+.sub{color:#8a94a6;font-size:13.5px;margin:0 0 12px}
+.sec{color:#e0a86a;font-size:12.5px;font-weight:700;margin:18px 0 7px;letter-spacing:.04em}
+.card{background:#12151c;border:1px solid #232b38;border-radius:13px;padding:14px;margin-bottom:10px}
+.big{font-size:34px;font-weight:800;text-align:center;font-variant-numeric:tabular-nums}
+.bigsub{text-align:center;color:#8a94a6;font-size:13px;margin-top:2px}
+.btn{display:block;width:100%;padding:15px;margin-top:9px;border-radius:12px;
+  border:1px solid #2f3947;background:#1a1f29;color:#e8ecf2;font-size:15.5px;font-weight:600;
+  font-family:inherit;cursor:pointer;text-align:center}
+.btn:active{background:#232b38}
+.btn.ghost{background:#12151c;color:#cbd5e3;font-weight:500;font-size:14px;padding:12px}
+.btn.warn{color:#e08a8a}
+.send{display:block;width:100%;padding:17px;border-radius:12px;background:#e0a86a;
+  color:#20160c;font-size:17px;font-weight:700;text-align:center;text-decoration:none;
+  margin-top:10px;font-family:inherit}
+.note{color:#8a94a6;font-size:12.5px;margin:8px 0 0}
+.warnbox{background:#1c1620;border:1px solid #3a2a33;border-radius:12px;padding:12px;margin-top:10px;
+  color:#d8c3cc;font-size:12.5px}
+.ta{width:100%;height:150px;font-size:11px;line-height:1.5;color:#8a94a6;background:#171c25;
+  border:1px solid #262d3a;border-radius:10px;padding:9px;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;-webkit-user-select:text;user-select:text}
+.inp{width:100%;padding:12px;margin-top:6px;border-radius:11px;border:1px solid #2f3947;
+  background:#171c25;color:#e8ecf2;font-size:16px;font-family:inherit}
+.lb{display:block;color:#8a94a6;font-size:12px;margin-top:10px}
+.row{font-size:12.5px;color:#cbd5e3;padding:6px 0;border-bottom:1px solid #1e2531;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;word-break:break-all}
+.row:last-child{border-bottom:none}
+.row .m{color:#6f7a8c}
+.row.sent{color:#5f6a7c}
+#toast{position:fixed;left:16px;right:16px;bottom:calc(20px + env(safe-area-inset-bottom));
+  z-index:50;background:#232b38;color:#e8ecf2;border:1px solid #2f3947;border-radius:11px;
+  padding:12px 14px;font-size:13.5px;text-align:center;display:none;max-width:528px;margin:0 auto}
+#toast.on{display:block}
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+<div id="toast"></div>
+<script>
+/* ============================================================
+   B.M.C. 記録ハブ (log.html)
+   作成: B.M.C.(Claude) / 2026-09-07
+   版:   v1
+
+   なにをするページか
+     routine.html・gym.html と**同じドメインに置く**ことで、同じ保存領域
+     （localStorage）を読める。各アプリに散らばっている実施記録を1枚に集め、
+     まだ送っていない分だけを Obsidian へ追記する。
+
+   設計上の約束（後から変える人へ）
+     1. **アプリ本体の保存データ（bmc_routine_v1 / bmc_gym_v1）に書き込まない。**
+        読むだけ。送信済みの印はこのページ自身の引き出し（HKEY）に持つ。
+        理由: アプリが裏で開いたままだと、あちらの save() が丸ごと上書きする。
+        本体に印を書くと、その瞬間に消える。バックアップの貼り戻しでも同じ。
+     2. **送信は <a href> のタップで行う。**JSでの location.href は、ホーム画面
+        から開いたアプリでは無視されることがある（2026-09-06に実機で確認）。
+     3. **リンクを押した瞬間に画面を作り直さない。**開こうとしているリンクが
+        消えるため。戻ってきた時（visibilitychange）に作り直す。
+     4. vault名は必須。`My Valut`（Vaultの実名。綴りもこのまま）。
+     5. 届いたかどうかは機械では分からない。送信後も記録は消さず、印だけ付ける。
+   ============================================================ */
+
+var HKEY = "bmc_log_hub_v1";
+var RKEY = "bmc_routine_v1";
+var GKEY = "bmc_gym_v1";
+var APPVER = "B.M.C. 記録ハブ v1 ・ 2026-09-07";
+
+var H = {
+  vault: "My Valut",
+  file:  "20_Projects/Private/B.M.C/logs/実施ログ_{YYYY-MM}.md",
+  mode:  "append",
+  maxRows: 15,      /* 1回の送信に入れる行数の上限 */
+  maxLen: 6000,     /* 組み上がったURIの長さの上限（これを超える前に切る） */
+  sent: []          /* 送信済みのID。古いものから捨てる */
+};
+var SENTMAX = 3000;
+var view = "home", cfg = false, justSent = 0;
+
+/* ---------- 保存 ---------- */
+function hLoad(){
+  try{
+    var o = JSON.parse(localStorage.getItem(HKEY));
+    if(o && typeof o==="object"){
+      if(typeof o.vault==="string") H.vault = o.vault;
+      if(typeof o.file==="string" && o.file) H.file = o.file;
+      if(o.mode==="append"||o.mode==="prepend") H.mode = o.mode;
+      if(typeof o.maxRows==="number" && o.maxRows>0) H.maxRows = o.maxRows;
+      if(Array.isArray(o.sent)) H.sent = o.sent;
+    }
+  }catch(e){}
+}
+function hSave(){
+  try{
+    if(H.sent.length > SENTMAX) H.sent = H.sent.slice(H.sent.length - SENTMAX);
+    localStorage.setItem(HKEY, JSON.stringify(H));
+  }catch(e){ toast("この端末に保存できませんでした。送信済みの印が残りません。"); }
+}
+/* アプリ本体は**読むだけ**。ここで setItem は絶対に書かないこと。 */
+function readApp(key){
+  try{
+    var o = JSON.parse(localStorage.getItem(key));
+    return (o && typeof o==="object") ? o : null;
+  }catch(e){ return null; }
+}
+
+/* ---------- 文字の道具 ---------- */
+function p2(n){ return (n<10?"0":"")+n; }
+function ymd(d){ return d.getFullYear()+"-"+p2(d.getMonth()+1)+"-"+p2(d.getDate()); }
+function hm(d){ return p2(d.getHours())+":"+p2(d.getMinutes()); }
+function esc(s){ return String(s==null?"":s)
+  .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+/* 列がずれないよう、半角パイプと改行は置き換える */
+function cell(s){ return String(s==null?"":s).replace(/\|/g,"｜").replace(/[\r\n]+/g," ").trim(); }
+function mins(sec){
+  sec = Math.max(0, Math.round(sec||0));
+  if(!sec) return "";
+  if(sec < 60) return "1分未満";
+  return Math.round(sec/60)+"分";
+}
+function num(x){ var n = Number(x); return isFinite(n) ? n : 0; }
+
+/* ---------- 記録を1行に組む ---------- */
+/* 8列: 日付 時刻 | アプリ | 種別 | 名前 | 結果 | 所要 | メモ | #ID  */
+function line(t, app, kind, name, result, dur, memo, id){
+  var d = new Date(t);
+  return "- "+ymd(d)+" "+hm(d)
+       + " | "+cell(app) + " | "+cell(kind) + " | "+cell(name)
+       + " | "+cell(result) + " | "+cell(dur) + " | "+cell(memo)
+       + " | #"+id;
+}
+
+var GYMNAME = {tri:"トライセッププッシュダウン", bul:"ブルガリアンスクワット",
+  lat:"ラットプルダウン", add:"ヒップアダクション", abd:"ヒップアブダクション",
+  crm:"クランチ（マシン）", che:"チェストプレス（マシン）",
+  rdl:"ルーマニアンデッドリフト", bic:"バイシクルクランチ"};
+/* ご本人が書き換えた種目名があればそちらを優先する（gym側 DB.settings.alt）。
+   alt の形は環境ごと（alt[env][id]）だが、古い形（alt[id]）も念のため見る。 */
+function gymName(g, id){
+  try{
+    var alt = g && g.settings && g.settings.alt;
+    var env = (g && g.settings && g.settings.env) || "gym";
+    if(alt){
+      if(alt[env] && alt[env][id] && alt[env][id].name) return alt[env][id].name;
+      if(alt[id] && alt[id].name) return alt[id].name;
+    }
+  }catch(e){}
+  return GYMNAME[id] || id;
+}
+
+function collect(){
+  var out = [];
+
+  /* --- routine --- */
+  var r = readApp(RKEY);
+  if(r){
+    (r.log||[]).forEach(function(x){
+      if(!x || !x.t) return;
+      out.push({ id:"r"+x.t, t:x.t, s:line(x.t, "routine", "セット",
+        (x.icon?x.icon+" ":"")+(x.name||""), num(x.d)+"/"+num(x.n), mins(x.sec), "", "r"+x.t) });
+    });
+    (r.notes||[]).forEach(function(x){
+      if(!x || !x.t) return;
+      out.push({ id:"n"+x.t, t:x.t, s:line(x.t, "routine", "メモ",
+        x.step||"", "", "", x.v||"", "n"+x.t) });
+    });
+    /* 就寝の見守りと中途覚醒だけ拾う。項目ごとの実測（sid がセットのもの）は
+       件数が多く、行が読めなくなるので入れない。 */
+    (r.times||[]).forEach(function(x){
+      if(!x || !x.t) return;
+      if(x.sid !== "sleep" && x.sid !== "wake") return;
+      out.push({ id:"t"+x.t, t:x.t, s:line(x.t, "routine",
+        (x.sid==="sleep" ? "就寝" : "中途覚醒"), x.step||"", "", mins(x.act), "", "t"+x.t) });
+    });
+  }
+
+  /* --- gym --- */
+  var g = readApp(GKEY);
+  if(g){
+    (g.sessions||[]).forEach(function(s){
+      if(!s || !s.date || !s.sets || !s.sets.length) return;
+      var order = [], by = {};
+      s.sets.forEach(function(st){
+        if(!by[st.id]){ by[st.id] = []; order.push(st.id); }
+        by[st.id].push(st);
+      });
+      var parts = order.map(function(id){
+        var w = by[id][0] && by[id][0].w;
+        var reps = by[id].map(function(st){ return num(st.reps); }).join("/");
+        return gymName(g,id) + " " + (num(w) ? num(w)+"kg×" : "自重×") + reps;
+      });
+      out.push({ id:"g"+s.date, t:s.date, s:line(s.date, "gym", "筋トレ",
+        "ルーティン"+(s.routine||""), parts.join(" ・ "), mins(s.sec), "", "g"+s.date) });
+    });
+    (g.cardio||[]).forEach(function(c){
+      if(!c || !c.date) return;
+      var res = [];
+      if(num(c.dist)) res.push(num(c.dist)+"km");
+      if(num(c.hard)) res.push("きつさ"+num(c.hard));
+      if(num(c.kcal)) res.push(num(c.kcal)+"kcal");
+      out.push({ id:"c"+c.date, t:c.date, s:line(c.date, "gym", "有酸素",
+        c.progName||"有酸素", res.join("・"), (num(c.min)?num(c.min)+"分":""),
+        c.memo||"", "c"+c.date) });
+    });
+  }
+
+  out.sort(function(a,b){ return a.t - b.t; });
+  return out;
+}
+
+function isSent(id){ return H.sent.indexOf(id) >= 0; }
+function unsent(){ return collect().filter(function(x){ return !isSent(x.id); }); }
+
+/* ---------- 送信 ---------- */
+function fileName(){
+  var d = new Date();
+  return String(H.file)
+    .replace(/\{YYYY-MM\}/g, d.getFullYear()+"-"+p2(d.getMonth()+1))
+    .replace(/\{YYYY\}/g, String(d.getFullYear()))
+    .replace(/\{MM\}/g, p2(d.getMonth()+1));
+}
+function uriOf(text){
+  var u = "obsidian://advanced-uri?";
+  if(H.vault) u += "vault="+encodeURIComponent(H.vault)+"&";
+  u += "filepath="+encodeURIComponent(fileName());
+  u += "&mode="+H.mode+"&data="+encodeURIComponent(text);
+  return u;
+}
+/* 今回送る分を、行数と URI の長さの両方で切る。
+   長すぎるURIは端末側で黙って落ちることがあるため、必ず分ける。 */
+function batch(){
+  var un = unsent(), take = [], text = "";
+  for(var i=0;i<un.length;i++){
+    if(take.length >= H.maxRows) break;
+    var next = text + un[i].s + "\n";
+    if(take.length && uriOf(next).length > H.maxLen) break;
+    text = next; take.push(un[i]);
+  }
+  return { rows:take, text:text };
+}
+/* リンクを押した瞬間に呼ばれる。印を付けるだけ。画面は作り直さない。 */
+function markSent(ids){
+  ids.forEach(function(id){ if(!isSent(id)) H.sent.push(id); });
+  justSent = ids.length;
+  hSave();
+  return true;
+}
+function resend(n){
+  var k = Math.min(n, H.sent.length);
+  H.sent = H.sent.slice(0, H.sent.length - k);
+  hSave(); render();
+  toast(k ? ("直近"+k+"件を未送信に戻しました。") : "戻すものがありません。");
+}
+function markAllSent(){
+  var un = unsent();
+  un.forEach(function(x){ H.sent.push(x.id); });
+  hSave(); render();
+  toast(un.length+"件を「送信済み」にしました（送ってはいません）。");
+}
+function copyOut(){
+  var t = document.getElementById("out"); if(!t) return;
+  var ok = false;
+  try{ t.focus(); t.select(); t.setSelectionRange(0,999999); ok = document.execCommand("copy"); }catch(e){}
+  var yes = "コピーしました。実施ログのファイルに貼ってください。";
+  var no  = "コピーできませんでした。上の枠を長押し →「すべてを選択」→「コピー」でも同じことができます。";
+  if(!ok && navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(t.value).then(function(){ toast(yes); }, function(){ toast(no); });
+    return;
+  }
+  toast(ok?yes:no);
+}
+function toast(msg){
+  var t = document.getElementById("toast"); if(!t) return;
+  t.innerHTML = esc(msg); t.className = "on";
+  setTimeout(function(){ var x=document.getElementById("toast"); if(x) x.className=""; }, 2400);
+}
+
+/* ---------- 設定 ---------- */
+function grabCfg(){
+  var v = document.getElementById("c_vault"); if(v) H.vault = v.value.trim();
+  var f = document.getElementById("c_file");  if(f) H.file  = f.value.trim();
+  var m = document.getElementById("c_rows");  if(m){ var n = parseInt(m.value,10); if(n>0) H.maxRows = n; }
+}
+function cfgGo(){ if(cfg) grabCfg(); cfg = !cfg; hSave(); render(); }
+function modeGo(){ grabCfg(); H.mode = (H.mode==="append") ? "prepend" : "append"; hSave(); render(); }
+function testSend(){ /* 画面の組み立て用。実体はリンク側にある */ }
+
+/* ---------- 画面 ---------- */
+function render(){
+  var el = document.getElementById("app"); if(!el) return;
+  var all = collect(), un = unsent(), b = batch();
+  var h = '<h1>記録ハブ</h1>';
+  h += '<p class="sub">routine と gym の実施記録を、Obsidianの実施ログへ追記します。'
+     + '<b>記録そのものは各アプリの中に残ります。</b>ここが消えても記録は消えません。</p>';
+
+  h += '<div class="card"><div class="big">'+un.length+'</div>'
+     + '<div class="bigsub">未送信（全'+all.length+'件のうち）</div></div>';
+
+  if(justSent){
+    h += '<div class="card"><p class="note">前回 '+justSent+'件を送りました。'
+       + '<b>Obsidianの実施ログに入っているか、いちど確かめてください。</b>'
+       + '入っていなければ、下の「未送信に戻す」で送り直せます。</p></div>';
+  }
+
+  if(!un.length){
+    h += '<div class="card"><p class="note">送るものはありません。</p></div>';
+  }else{
+    h += '<div class="sec">今回送る分（'+b.rows.length+'件）</div>';
+    h += '<div class="card">';
+    h += '<a class="send" href="'+esc(uriOf(b.text))+'" onclick="return markSent('
+       + JSON.stringify(b.rows.map(function(x){return x.id;})).replace(/"/g,"&quot;") + ')">'
+       + 'Obsidianへ送る（'+b.rows.length+'件）</a>';
+    h += '<p class="note">送り先： <b>'+esc(fileName())+'</b> の末尾'
+       + (H.mode==="prepend" ? '（いまは先頭に入る設定）' : '')
+       + '<br>残り '+(un.length-b.rows.length)+'件は、送ったあとにもう一度押してください。'
+       + '<b>1回に入れる件数を増やすと届かないことがあるため、分けています。</b></p>';
+    h += '<textarea id="out" class="ta" readonly onclick="this.select()">'+esc(b.text)+'</textarea>';
+    h += '<button class="btn ghost" onclick="copyOut()">コピーする（Obsidianが開かないとき）</button>';
+    h += '</div>';
+
+    if(un.length > 40){
+      h += '<div class="warnbox">未送信が'+un.length+'件あります。'
+         + 'アプリを使い始めてからの記録がまとめて残っているためで、こわれてはいません。'
+         + '<b>全部を残す必要がなければ、下の「過去の分は送らずに送信済みにする」で今日から始められます。</b></div>';
+    }
+  }
+
+  h += '<div class="sec">たまっているもの（新しい順に20件）</div>';
+  h += '<div class="card">';
+  if(!all.length){
+    h += '<p class="note">まだ1件もありません。routine か gym で1回使うと、ここに出ます。</p>';
+  }else{
+    all.slice(-20).reverse().forEach(function(x){
+      h += '<div class="row'+(isSent(x.id)?' sent':'')+'">'
+         + (isSent(x.id) ? '<span class="m">済 </span>' : '<span>未 </span>')
+         + esc(x.s.replace(/^- /,"")) + '</div>';
+    });
+  }
+  h += '</div>';
+
+  h += '<button class="btn ghost" onclick="cfgGo()">'+(cfg?'設定を閉じる':'⚙ 設定・送り直し')+'</button>';
+  if(cfg){
+    h += '<div class="card">';
+    h += '<label class="lb">Vault名（この綴りのまま。空にすると届きません）</label>'
+       + '<input class="inp" id="c_vault" type="text" value="'+esc(H.vault)+'">';
+    h += '<label class="lb">送り先のファイル（{YYYY-MM} は今月に置き換わります）</label>'
+       + '<input class="inp" id="c_file" type="text" value="'+esc(H.file)+'">';
+    h += '<label class="lb">1回に送る件数の上限</label>'
+       + '<input class="inp" id="c_rows" type="number" min="1" max="60" value="'+H.maxRows+'">';
+    h += '<button class="btn ghost" onclick="modeGo()">入れる位置： '
+       + (H.mode==="append" ? "ファイルの末尾" : "ファイルの先頭") + '（押すと切り替え）</button>';
+    h += '<button class="btn ghost" onclick="cfgGo()">この内容で保存する</button>';
+    h += '<p class="note">実績のある書き方は <b>末尾（append）</b>です。届かないときだけ先頭を試してください。</p>';
+    h += '<div class="sec">送り直し</div>';
+    h += '<button class="btn ghost" onclick="resend(15)">直近15件を未送信に戻す</button>';
+    h += '<button class="btn ghost" onclick="resend(999999)">全部を未送信に戻す</button>';
+    h += '<button class="btn ghost warn" onclick="markAllSent()">過去の分は送らずに送信済みにする</button>';
+    h += '<p class="note">送信済みの印は<b>このページだけ</b>が持っています。'
+       + 'アプリ本体の記録には何も書き込んでいないので、ここを戻しても記録は壊れません。<br>'
+       + '同じ記録を二重に送っても、行の末尾の <b>#ID</b> が同じなので後から片方を消せます。</p>';
+    h += '</div>';
+  }
+
+  h += '<div class="sec">アプリへ戻る</div>';
+  h += '<a class="btn" href="routine.html">🕒 切り替えルーティン</a>';
+  h += '<a class="btn" href="gym.html">🏋️ ジム</a>';
+  h += '<p class="note" style="text-align:center;opacity:.45;margin-top:14px">'+APPVER+'</p>';
+
+  el.innerHTML = h;
+}
+
+/* Obsidianから戻ってきたら作り直す（リンクを押した時には作り直さない） */
+try{
+  document.addEventListener("visibilitychange", function(){
+    if(!document.hidden) render();
+  });
+}catch(e){}
+
+hLoad();
+render();
+</script>
+</body>
+</html>

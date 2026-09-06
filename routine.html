@@ -896,7 +896,7 @@ function finishPending(){
 
 /* --- 状態 --- */
 /* v27: 版の表示（ホーム最下部）。中身を変えたら、ここも必ず上げる。 */
-var APPVER = "切り替えルーティン v32 ・ 2026-09-07";
+var APPVER = "切り替えルーティン v33 ・ 2026-09-07";
 var view = "home";
 var curId = null;
 var startAt = 0;
@@ -2399,6 +2399,12 @@ function viewHome(){
      + '<p class="note">作り方は <b>行動計画_2026-08-14 §10</b> にあります。未作成でも、このアプリ自体は使えます。</p></div>';
   h += '<button class="btn ghost" onclick="go(\'scale\')">📏 満腹度のものさし（食後に見る）</button>';
   h += '<button class="btn ghost" onclick="go(\'log\')">📖 これまでの記録</button>';
+  /* v33（2026-09-07）: 実施記録をObsidianへ送る「記録ハブ」への導線。
+     送る仕組み自体はこのファイルには入れていない（log.html にある）。
+     理由: ①このファイルは既に310KBあり、同じ処理をgym側にも複製すると
+     直す場所が2か所に割れる ②ハブは routine と gym の両方の記録を
+     同じドメインの保存領域から読めるので、送り口は1つで足りる。 */
+  h += '<button class="btn ghost" onclick="location.href=\'log.html\'">📤 記録を送る（記録ハブ）</button>';
   h += '<button class="btn ghost" onclick="revGo(null)">📊 ルーティンの振り返り（実績とメモ）</button>';
   h += '<button class="btn ghost" onclick="go(\'edit\')">セットを編集・追加・削除</button>';
   h += '<button class="btn ghost" onclick="sxLibGo()">🧘 ストレッチのプログラム（登録・AIに渡す書式）</button>';
@@ -2565,6 +2571,7 @@ function viewLog(){
   h += '<div class="card">'+weekGrid()+'</div>';
   h += '<p class="note">やった日に印が付きます（同じ日に2回以上なら回数が出ます）。'
      + '空いた日は「・」のままで、×も赤字も付きません。<b>連続日数と達成率は数えていません。</b></p>';
+  h += '<button class="btn ghost" onclick="location.href=\'log.html\'">📤 記録を送る（記録ハブ）</button>';
 
   /* 新しい順に、日ごとにまとめる */
   var byDay = {}, order = [];
@@ -2940,7 +2947,13 @@ function viewDone(){
     h += '</div>';
     h += '<p class="note">触った項目は、順番が前後していても<b>合計時間</b>で残しています（中断して戻った分も足しています）。飛ばした項目（–）は記録しません。<br>この時間は「📊 このルーティンの振り返り」で平均になり、予定の秒数を合わせ直す材料になります。</p>';
   }
-  h += '<p class="note">この記録はこの端末の中だけに残ります。Obsidian・Points Tracker には入りません。<br>連続日数と達成率は数えていません。</p>';
+  /* v33: 「Obsidianには入りません」は、記録ハブ（log.html）ができた時点で
+     事実ではなくなった。送るのは実施の一覧だけで、Points Tracker には
+     いまも入らない（点数はあちらが正）。 */
+  h += '<p class="note">この記録はこの端末の中に残ります。<b>Points Tracker には入りません</b>（点数はあちらが正です）。<br>連続日数と達成率は数えていません。</p>';
+  h += '<button class="btn ghost" onclick="location.href=\'log.html\'">📤 記録を送る（記録ハブ）</button>';
+  h += '<p class="note">この回を、Obsidianの実施ログ（<b>20_Projects/Private/B.M.C/logs/</b>）へ追記できます。'
+     + '<b>送っても記録はこのアプリから消えません。</b>あとでまとめて送っても同じです。</p>';
   /* v30（2026-09-06 ご指示）: 🛟 を終えたあと、元のセットの続きへ戻る口。
      自動では戻さない（🛟 は「今日をここで終わらせる」ためのものなので、
      押した人が選べる形にする）。押さずに「最初に戻る」を押しても、
