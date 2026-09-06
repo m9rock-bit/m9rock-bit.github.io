@@ -896,7 +896,7 @@ function finishPending(){
 
 /* --- 状態 --- */
 /* v27: 版の表示（ホーム最下部）。中身を変えたら、ここも必ず上げる。 */
-var APPVER = "切り替えルーティン v30 ・ 2026-09-06";
+var APPVER = "切り替えルーティン v32 ・ 2026-09-07";
 var view = "home";
 var curId = null;
 var startAt = 0;
@@ -1237,6 +1237,10 @@ function speak(text){
    ★大きく過ぎてから開き直したとき（控えからの再開）は言わない。
      開いた瞬間にいきなり喋ると、何の音か分からないため。 */
 var THIRD_MIN = 60;      /* この秒数より短い項目では知らせない */
+/* v32（2026-09-07 ご指示）: この秒数より長い項目では、1/3で鳴る
+   iPhone標準タイマーを仕掛けるボタンを実行画面に出す（押したときだけ）。
+   ご指示は「5分以下は音と画面で、それ以上の項目なら標準タイマーも取りたい」。 */
+var THIRD_LONG = 300;
 var thirdSaid = {};      /* この回、どの項目でもう知らせたか */
 function thirdCheck(){
   if(!DB.voice || DB.third===false) return;
@@ -1249,7 +1253,43 @@ function thirdCheck(){
   if(thirdSaid[curStep]) return;
   thirdSaid[curStep] = true;
   if(used > t/3 + 10) return;   /* 通り過ぎてから来た場合は黙る（印だけ立てる） */
-  speak("のこり " + durLabel(Math.max(0, t - used)) + "です");
+  thirdAlert("のこり " + durLabel(Math.max(0, t - used)) + "です");
+}
+/* ===== v32（2026-09-07 ご指摘「読み上げが気づきにくい」）=====
+   読み上げだけだと、他の音（YouTube・プレイリスト）を聞いているときに
+   言葉が埋もれる。人は言葉より**短くて特徴のある音**に先に気づくので、
+   ①チャイム2音（項目の切り替え音とも終了音とも違う高さ）→ ②画面全体を光らせる
+   → ③少し置いてから読み上げ → ④間をあけてもう一度読み上げ、の順にする。
+   ★チャイムは「終了音を鳴らす」（DB.chime）に従う。音を切ってある日にいきなり
+     鳴らさない（画面と読み上げは残るので、合図が消えるわけではない）。
+   ★2回目の読み上げは、まだ同じ項目にいるときだけ。speak は前の発話を止めるので、
+     続けて2回呼ぶと1回目が消える。必ず間を置く。 */
+function chimeThird(){
+  beep(784,.16);
+  setTimeout(function(){ beep(1046,.22); }, 170);
+}
+function thirdAlert(text){
+  chimeThird();
+  flashScreen();
+  var id0 = curId, st0 = curStep;
+  setTimeout(function(){ speak(text); }, 700);
+  setTimeout(function(){
+    if(curId===id0 && curStep===st0 && view==="run") speak(text);
+  }, 4600);
+}
+/* v32: 1/3の時点で鳴る iPhone標準タイマーを仕掛ける（長い項目だけ・押したときだけ）。
+   ページは裏に回ると時計ごと止まるため、**他のアプリを使っているあいだに鳴らせるのは
+   標準タイマーだけ**。ただし仕掛ける瞬間にショートカットAppへ画面が飛ぶので、
+   自動では絶対に走らせない（毎回画面を奪われるほうが害が大きい）。 */
+function thirdLeft(){
+  var s = setOf(curId); if(!s || s.auto) return -1;
+  if(curStep==null || curStep<0) return -1;
+  return Math.floor(stepSec(curStep)/3) - stepUsed();
+}
+function thirdTimer(){
+  var t3 = thirdLeft();
+  if(t3 < 1) return;
+  nativeTimer(t3);
 }
 
 /* --- v5: Spotifyのプレイリストを開く ----------------------------
@@ -2336,8 +2376,11 @@ function viewHome(){
      /* v30（2026-09-06 ご依頼）: 項目の1/3で残り時間を知らせる */
      + '<div class="toggle" style="margin-top:8px"><b>項目の1/3で残り時間を知らせる</b>'
      + '<button class="sw'+(DB.third!==false?' on':'')+'" onclick="DB.third=(DB.third===false);save();render()"><i></i></button></div>'
-     + '<p class="note">タップで進めるセットだけ、いまの項目の設定時間の1/3を過ぎたときに「のこり◯分です」と読み上げます。'
-     + '<b>延長を押したら、1/3の位置も計算し直します。</b>1分より短い項目と、自動で進むセットでは鳴りません。</p>'
+     + '<p class="note">タップで進めるセットだけ、いまの項目の設定時間の1/3を過ぎたときに、'
+     + '<b>チャイム2音 → 画面が光る → 「のこり◯分です」を間をあけて2回</b>の順で知らせます（チャイムは「終了音を鳴らす」に従います）。'
+     + '<b>延長を押したら、1/3の位置も計算し直します。</b>1分より短い項目と、自動で進むセットでは鳴りません。'
+     + '<br><b>5分より長い項目</b>では、実行中の画面に「⏰ 1/3で鳴るタイマーを仕掛ける」が出ます。'
+     + '他のアプリを使っているあいだ、このアプリは止まっていて自分では鳴らせないため、iPhone標準のタイマーに肩代わりさせるものです（押したときだけ飛びます）。</p>'
      + '<p class="note">ここは<b>全体のスイッチ</b>です。これを切ると、どのセットでも読み上げません。'
      + '<br>セットごとのオンオフと読み上げる文言は「セットを編集」の中にあります。対応していない端末では何も起きません。</p></div>';
   h += '<div class="card"><label>Spotifyプレイリストの既定URL</label>'
@@ -2419,6 +2462,97 @@ function viewScale(){
 }
 
 /* --------- これまでの記録 --------- */
+/* ============================================================
+   v31（2026-09-07 ご依頼）: その日の実績を、日次ノートに貼れる形で書き出す
+   ------------------------------------------------------------
+   ねらいは「翌朝の振り返りを、記憶ではなく事実から書けるようにする」こと。
+   翌朝に思い出して書くと再構成が入るため、時刻の並びだけを事実として渡す。
+
+   ★出すのは「やったこと」だけ。やらなかった項目・達成率・連続日数は出さない。
+     自己嫌悪を書いた欄のとなりに未実施の一覧が並ぶ形にしないため
+     （2026-09-04〜05に決めた「自己受容のワークは点数化しない」と同じ線）。
+     この方針は、あとから「達成率も出したい」と言われても、先にB.M.C.へ
+     相談してから変えること。ここだけの表示の話ではない。
+   ★貼り先は日次ノートの「📍 そのときの状況・原因やきっかけ」の下。
+     🫧・🤝（自己受容の2行）の近くには置かないこと。
+   ★日付をまたいだ分（中途覚醒・夜間の記録）は、時刻どおり翌日側の日に入る。
+     前夜のことを書くときは、2日ぶんコピーして続けて貼ってよい。
+   ★コピー欄（textarea）は必ず画面の中に置くこと。画面の外へ逃がすと
+     iOSでは選択もコピーもできない（2026-09-06の不具合と同じ原因）。 */
+var copyDay = null;
+function logCopyGo(k){ copyDay = (copyDay===k ? null : k); render(); }
+function sameDayK(t, k){ return dayKey(t)===k; }
+function looseLabel(sid, text){
+  /* ぶら下げ先の回が無いもの（就寝・中途覚醒など）の見出し。
+     step の文言に「中途覚醒対応（書く）」のように名前が入っているので、
+     セット名を前に足すと二重になる。絵文字だけ添える。 */
+  var s = setOf(sid);
+  if(s) return s.icon+" "+s.name+" ／ "+text;
+  if(sid==="wake")  return "🌃 "+text;
+  if(sid==="sleep") return "🛌 "+text;
+  return text;
+}
+/* その日の記録を、Obsidianの折りたたみカラウト1個にまとめる。
+   記録が1件も無い日は空文字を返す（空のカラウトを貼らせないため）。 */
+function dayMd(k){
+  var runs = DB.log.filter(function(r){ return r && sameDayK(r.t,k); })
+                   .slice().sort(function(a,b){ return a.t-b.t; });
+  var times = (DB.times||[]).filter(function(r){ return r && sameDayK(r.t,k); })
+                   .slice().sort(function(a,b){ return a.t-b.t; });
+  var notes = (DB.notes||[]).filter(function(r){ return r && sameDayK(r.t,k); })
+                   .slice().sort(function(a,b){ return a.t-b.t; });
+  var kids = [], i;
+  for(i=0;i<runs.length;i++) kids.push([]);
+  var loose = [];
+  /* 項目の実測とメモは、その直前に始まった同じセットの回にぶら下げる。
+     ぶら下げ先が無いもの（就寝・中途覚醒など）は、時刻の順にそのまま並べる。 */
+  function attach(r, text){
+    var at = -1;
+    for(var j=0;j<runs.length;j++){ if(runs[j].id===r.sid && runs[j].t <= r.t+1000) at = j; }
+    if(at<0) return false;
+    kids[at].push({ t:r.t, s:text });
+    return true;
+  }
+  times.forEach(function(r){
+    var t = noteKey(r.step) + " … " + durLabel(r.act||0)
+          + (r.plan ? "（予定 "+durLabel(r.plan)+"）" : "");
+    if(!attach(r, t)) loose.push({ t:r.t, s:looseLabel(r.sid, t) });
+  });
+  notes.forEach(function(r){
+    var t = "💬 " + noteKey(r.step) + ": " + noteKey(r.v);
+    if(!attach(r, t)) loose.push({ t:r.t, s:t });
+  });
+  var rows = [];
+  runs.forEach(function(r, idx){
+    var head = hhmm(r.t)+" "+String(r.icon||"")+" "+String(r.name||"")
+             + (r.sec ? " ／ "+durLabel(r.sec) : "");
+    if(r.items && r.items.length) head += " ／ "+r.items.join(" → ");
+    if(r.memo) head += " ／ "+r.memo;
+    kids[idx].sort(function(a,b){ return a.t-b.t; });
+    rows.push({ t:r.t, s:head, sub:kids[idx] });
+  });
+  loose.forEach(function(x){ rows.push({ t:x.t, s:hhmm(x.t)+" "+x.s, sub:[] }); });
+  rows.sort(function(a,b){ return a.t-b.t; });
+  if(!rows.length) return "";
+  var out = "> [!abstract]- 🕒 ルーティン実績 "+dayLabel(rows[0].t)+"\n";
+  rows.forEach(function(x){
+    out += "> - "+x.s+"\n";
+    x.sub.forEach(function(y){ out += ">     - "+hhmm(y.t)+" "+y.s+"\n"; });
+  });
+  return out;
+}
+function dayCopyPanel(k){
+  var md = dayMd(k);
+  return '<div class="card">'
+    + '<p class="note">この日に<b>やったこと</b>だけを書き出しました。日次ノートの'
+    + '「📍 そのときの状況・原因やきっかけ」の下に貼ってください。<br>'
+    + 'やらなかった項目・達成率は入れていません。<b>🫧・🤝（自己受容の2行）の近くには貼らないでください。</b><br>'
+    + '夜中に日付をまたいだ分は<b>翌日の日</b>に入ります。前夜のことを書くときは、2日ぶん続けて貼ってください。</p>'
+    + '<textarea id="lgc_t" class="fbta" style="height:150px" readonly onclick="this.select()">'
+    + esc(md || "（この日は記録がありません）") + '</textarea>'
+    + (md ? '<button class="btn" onclick="sxCopy(\'lgc_t\')">コピーする</button>' : '')
+    + '</div>';
+}
 function viewLog(){
   var h = '<h1>これまでの記録</h1>';
   if(!DB.log.length){
@@ -2447,7 +2581,10 @@ function viewLog(){
     var s = "";
     keys.forEach(function(k){
       var rs = byDay[k];
-      s += '<div class="sec">'+dayLabel(rs[0].r.t)+'　<span class="tag">'+rs.length+'回</span></div>';
+      s += '<div class="sec">'+dayLabel(rs[0].r.t)+'　<span class="tag">'+rs.length+'回</span>'
+         + ' <button class="btn link" style="padding:2px 8px;font-size:12.5px" onclick="logCopyGo(\''+k+'\')">'
+         + (copyDay===k ? '閉じる' : '📋 この日をコピー') + '</button></div>';
+      if(copyDay===k) s += dayCopyPanel(k);
       s += '<div class="card" style="padding:6px 14px">';
       rs.forEach(function(o){
         var r = o.r, gi = o.i;
@@ -2534,6 +2671,16 @@ function viewRun(){
        + '<button class="btn ghost" style="margin-top:0" onclick="extendStep(60)">＋1分 延長</button>'
        + '<button class="btn ghost" style="margin-top:0" onclick="extendStep(300)">＋5分 延長</button>'
        + '</div>';
+    /* v32（2026-09-07 ご指示）: 5分より長い項目のときだけ、1/3で鳴る
+       iPhone標準タイマーを仕掛けられるようにする。押したときだけ飛ぶ。 */
+    if(!s.auto && DB.third!==false && stepSec(curStep) > THIRD_LONG){
+      var t3 = thirdLeft();
+      if(t3 > 5){
+        h += '<button class="btn ghost" onclick="thirdTimer()">⏰ 1/3で鳴るタイマーを仕掛ける（あと'+durLabel(t3)+'）</button>';
+        h += '<p class="note" style="margin-top:4px">押すと<b>iPhoneの標準タイマー</b>を'+durLabel(t3)+'で仕掛けます（ショートカットAppへ一度飛びます）。'
+           + '<b>他のアプリを使っていても鳴り、ロック画面にも出ます。</b>この画面の時計は止まりません（離れていた分もそのまま数えます）。</p>';
+      }
+    }
     h += '<button class="btn ghost" onclick="skipStep()">↷ この項目をスキップ</button>';
     /* v26（2026-09-05 ご指摘）: 🧸 と 🛟 は画面のいちばん下にあり、
        **いちばん急いで押したいときに、いちばん遠かった。**スキップの直下へ移した。
