@@ -658,7 +658,10 @@ var DB = { v:19, sets:null, chime:true, voice:true, third:true, spotifyUrl:"", s
   /* v20 (2026-09-03): 就寝のプレイリスト。spMode は "default"（既定URL）か "own"（専用URL）。 */
   sleepSpotify:false, sleepSpMode:"default", sleepSpotifyUrl:"",
   /* v22 (2026-09-05): 実行中の途中経過の控え（詳細は save() の下のコメント） */
-  run:null };
+  run:null,
+  /* v34 (2026-09-08): 🔋 今日は畳む — 畳んだあとに選ぶ「積極的な休養」の候補。
+     null のあいだは REST_DEF を使う。編集画面はまだ無い（第2回で足す）。 */
+  rest:null };
 try{
   var raw = localStorage.getItem(KEY);
   if(raw){
@@ -697,6 +700,8 @@ try{
        戻り、取り込んだストレッチのプログラムも毎回消えていた。版を上げたときだけ
        ではなく、**開き直すたびに**起きていた。
        ★DBに新しい入れ物を足したら、必ずこの読み戻しにも足すこと。 */
+    /* v34: 休養の候補（★入れ物を足したらこの読み戻しにも足すこと） */
+    if(Array.isArray(p.rest)) DB.rest = p.rest;
     if(Array.isArray(p.scenes)) DB.scenes = p.scenes;
     if(typeof p.sceneCur==="string") DB.sceneCur = p.sceneCur;
     if(Array.isArray(p.sxProgs)) DB.sxProgs = p.sxProgs;
@@ -834,7 +839,8 @@ function runSnap(){
   return { id:curId, at:Date.now(), elapsed:Math.max(0, elapsed()),
            doneSet:doneSet, curStep:curStep, acc:acc, extra:stepExtra,
            runIdx:runIdx, fromPreSleep:fromPreSleep, fromWake:fromWake,
-           autoPaused:autoPaused, autoFinished:autoFinished, autoShift:autoShift };
+           autoPaused:autoPaused, autoFinished:autoFinished, autoShift:autoShift,
+           fold:foldOn };   /* v34: 畳んだ状態も控える（開き直しても畳んだまま） */
 }
 function saveRun(){ if(!curId) return; DB.run = runSnap(); save(); lastRunSave = Date.now(); }
 function clearRun(){ if(DB.run){ DB.run = null; save(); } }
@@ -870,6 +876,8 @@ function loadRun(r){
   autoPaused = !!r.autoPaused;
   autoFinished = !!r.autoFinished;
   autoShift = (typeof r.autoShift==="number") ? r.autoShift : 0;
+  foldOn = !!r.fold;   /* v34: 無い控え（v33以前）は false のまま */
+  foldAsking = false; foldRest = "";
   startAt = Date.now() - Math.max(0, r.elapsed||0)*1000;
   pauseAt = autoPaused ? Date.now() : 0;
 }
@@ -896,7 +904,7 @@ function finishPending(){
 
 /* --- 状態 --- */
 /* v27: 版の表示（ホーム最下部）。中身を変えたら、ここも必ず上げる。 */
-var APPVER = "切り替えルーティン v33 ・ 2026-09-07";
+var APPVER = "切り替えルーティン v34 ・ 2026-09-08";
 var view = "home";
 var curId = null;
 var startAt = 0;
@@ -1124,6 +1132,9 @@ function logRun(){
   var n = s.steps.length, d = 0;
   for(var i=0;i<n;i++){ if(doneSet[i]==="done") d++; }
   var rec = { t:Date.now(), id:s.id, icon:s.icon, name:s.name, d:d, n:n, sec:Math.abs(elapsed()) };
+  /* v34: 畳んだ回であることを記録に残す。**残さないと「28/29できた日」と読み違える**
+     （畳んだ回の「済み」は「手をつけた」であって、やり切ったではない）。 */
+  if(foldOn) rec.fold = 1;
   if(runIdx===null){
     DB.log.push(rec);
     DB.count++;
@@ -1662,7 +1673,9 @@ function spBlock(on, mode, url, fnOn, fnMode, inputId){
   return h;
 }
 function elapsed(){ return startAt ? Math.floor((Date.now()-startAt)/1000) : 0; }
-function left(){ var s = setOf(curId); return s ? limitOf(s) - elapsed() : 0; }
+/* v34: 畳んだ回は全体の目安も畳んだ合計で見る（完了画面の「時間の中でやり切れた」
+   の判定もここを通る）。畳んでいない回・他のセットは今までどおり。 */
+function left(){ var s = setOf(curId); return s ? foldSum(s) - elapsed() : 0; }
 function allDone(){ var s=setOf(curId); for(var i=0;i<s.steps.length;i++){ if(!doneSet[i]) return false; } return true; }
 function newId(){ return "s" + Date.now().toString(36) + Math.floor(Math.random()*900+100); }
 
@@ -1747,6 +1760,7 @@ function start(id, fromIndex){
   unlockAudio();   /* v11: 押した操作の中で音を開通させる（自動進行のチャイム対策） */
   fromBreak = false;   /* v12: 休憩から始めた場合は breakStart() が押し直す */
   curId = id; doneSet = {}; curStep = fromIndex||0;
+  foldOn = false; foldAsking = false; foldRest = "";   /* v34: 畳みは回ごと。始めたら必ず素の状態から */
   for(var i=0;i<curStep;i++) doneSet[i] = "skip";
   startAt = Date.now();
   stepAt = startAt; stepExtra = {}; runTimes = {}; stepAcc = {}; thirdSaid = {};
@@ -1765,7 +1779,7 @@ function start(id, fromIndex){
   if(s && s.timer && limitOf(s)>0) nativeTimer(limitOf(s));
   else openSpotify(s);   /* set.spotify が入っているセットだけ開く（中で判定） */
 }
-function stop(){ clearRun(); if(tick) clearInterval(tick); tick=null; startAt=0; curId=null; doneSet={}; curStep=0; runIdx=null; autoPaused=false; pauseAt=0; autoFinished=false; stepAt=0; stepExtra={}; runTimes={}; stepAcc={}; inputOpen=null; autoShift=0; }
+function stop(){ clearRun(); if(tick) clearInterval(tick); tick=null; startAt=0; curId=null; doneSet={}; curStep=0; runIdx=null; autoPaused=false; pauseAt=0; autoFinished=false; stepAt=0; stepExtra={}; runTimes={}; stepAcc={}; inputOpen=null; autoShift=0; foldOn=false; foldAsking=false; foldRest=""; }
 
 /* ============================================================
    v16: 🛌就寝＋🌃中途覚醒対応
@@ -1855,11 +1869,61 @@ function sleepEnd(){
   go("home");
 }
 /* v14: いまの項目に許された秒数（この回の延長を足したもの）と、その残り */
+/* ===== v34（2026-09-08 ご依頼）: 🔋 今日は畳む =========================
+   「ダラダラしたい日」の受け皿。**項目は1つも減らさず、順番も変えない**
+   （流れをなぞること自体が習慣化の中身、というご指定）。変えるのは2つだけ。
+
+   ① 完了基準：「やり切ったら済み」→「**手をつけたら済み**」
+   ② 目安時間：**いまの半分・下限30秒**（元より長くはしない）
+
+   ★セットの定義（s.steps）は1文字も書き換えない。畳むのは「この回だけ」で、
+     明日は元どおりに始まる。だから編集画面（stepRows）はこの変換を通さない。
+     ここを stepsOf() 側でやると、実行中に編集画面を開いて保存したときに
+     **半分になった秒数がセットに焼き付く**（データを壊す）。絶対に移さないこと。
+
+   ★秒の変換は stepSec() の1か所だけに置いてある。残り時間・完了予定・
+     1/3のタイマー・完了画面の「目安」・実績に残す plan は、すべてここを
+     通っているため、1か所直せば全部そろう。 */
+var foldOn = false;      /* この回を畳んでいるか */
+var foldAsking = false;  /* 押した直後の確認パネルを出しているか */
+var foldRest = "";       /* 完了画面で選んだ休養（この回かぎり） */
+var FOLD_SCALE = 0.5, FOLD_MIN = 30;
+var REST_DEF = ["決めた動画・ドラマを1本","音楽を1曲、最後まで","温かい飲み物を1杯、座って",
+                "子どもと一緒にごろごろ","何もしないで5分横になる","ゲーム"];
+function restList(){ return (DB.rest && DB.rest.length) ? DB.rest : REST_DEF; }
+/* 畳んだときの目安秒。半分にして、下限30秒。ただし**元より長くはしない**
+   （20秒の項目が30秒に伸びると、畳んだのに増える、という妙なことになる）。 */
+function foldSecOf(sec){
+  sec = Math.max(0, sec||0);
+  var v = Math.round(sec * FOLD_SCALE);
+  if(v < FOLD_MIN) v = FOLD_MIN;
+  return Math.min(sec, v);
+}
+/* 畳んだときのセット全体の目安。left() と実行画面の表示に使う。 */
+function foldSum(s){
+  if(!s) return 1;
+  if(!foldOn || s.id !== curId) return limitOf(s);
+  var t = 0;
+  stepsOf(s).forEach(function(x){ t += foldSecOf(x.sec); });
+  return Math.max(1, t);
+}
+function foldAsk(){ foldAsking = true; render(); }
+function foldCancel(){ foldAsking = false; render(); }
+function foldGo(){
+  foldAsking = false; foldOn = true;
+  saveRun();            /* 開き直しても畳んだままにする */
+  render();
+}
+function foldUndo(){ foldOn = false; foldAsking = false; saveRun(); render(); }
+function foldPickRest(i){ foldRest = (i<0) ? "" : (restList()[i] || ""); render(); }
+function foldRestTimer(){ nativeTimer(900); }
+
 function stepSec(i){
   var s = setOf(curId); if(!s) return 60;
   var st = stepsOf(s);
   if(!st[i]) return 60;
-  return st[i].sec + (stepExtra[i]||0);
+  var base = foldOn ? foldSecOf(st[i].sec) : st[i].sec;
+  return base + (stepExtra[i]||0);
 }
 /* v21: いま数えている区間の秒数（中断中は0） */
 function segUsed(){ return stepAt ? Math.floor((Date.now()-stepAt)/1000) : 0; }
@@ -2645,14 +2709,21 @@ function clearLog(){
 function viewRun(){
   var s = setOf(curId);
   if(s && s.auto) return viewRunAuto(s);
-  var st = stepsOf(s), lim = limitOf(s), l = left();
+  var st = stepsOf(s), lim = foldSum(s), l = left();   /* v34: 畳んだ回は畳んだ合計 */
   /* v14: 数字はその項目の残り時間にする（全体は下に小さく添える）。
      全体の残りを大きく出しても、いま何分使っているかは分からないため。 */
   var cur = st[Math.min(curStep, st.length-1)];
   var sl = (curStep < st.length) ? stepLeft() : 0;
   var sSec = (curStep < st.length) ? stepSec(curStep) : 1;
   var spct = Math.max(0, Math.min(100, (stepUsed()/Math.max(1,sSec))*100));
-  var h = '<h1>'+esc(s.icon)+' '+esc(s.name)+'</h1>'+(s.note ? '<p class="sub">'+esc(s.note)+'</p>' : '');
+  var h = '<h1>'+esc(s.icon)+' '+esc(s.name)+(foldOn?' 🔋':'')+'</h1>'+(s.note ? '<p class="sub">'+esc(s.note)+'</p>' : '');
+  /* v34: 畳んでいる回は、いちばん上でそう言い切る。基準が変わっていることを
+     画面のどこかに常に出しておかないと、あとで記録を読み違える。 */
+  if(foldOn){
+    h += '<div class="hint" style="border-color:#7a9ec4;color:#bcd6ee">'
+       + '<b>🔋 今日は畳んでいます。</b>項目は減らしていません。<b>手をつけたら済み</b>でかまいません。'
+       + '目安の時間は<b>いまの半分</b>にしてあります。</div>';
+  }
   h += '<div class="card">';
   h += '<div class="bigsub" style="margin-bottom:2px">'+(curStep<st.length ? (curStep+1)+' / '+st.length+'　'+esc(cur?cur.text:"") : 'ぜんぶ終わりました')+'</div>';
   h += '<div class="big'+(sl<0?' over':'')+'">'+mmss(sl)+'</div>';
@@ -2672,7 +2743,7 @@ function viewRun(){
       h += '<button class="btn big" onclick="undoStep('+curStep+')">↩ この項目の「'
          + (doneSet[curStep]==="skip" ? 'スキップ' : 'できた') + '」を取り消す</button>';
     }else{
-      h += '<button class="btn big" onclick="toggleStep('+curStep+')">✓ できた — 次へ</button>';
+      h += '<button class="btn big" onclick="toggleStep('+curStep+')">✓ '+(foldOn?'手をつけた':'できた')+' — 次へ</button>';
     }
     h += '<div class="row" style="margin-top:9px">'
        + '<button class="btn ghost" style="margin-top:0" onclick="extendStep(60)">＋1分 延長</button>'
@@ -2698,12 +2769,34 @@ function viewRun(){
       em.push('<button class="btn ghost" style="margin-top:0;border-color:#c4a06a;color:#e8c99a" onclick="rescueGo(\''+rescues()[0].id+'\')">🛟 崩れた</button>');
     if(curId !== "anger" && angerSet())
       em.push('<button class="btn ghost" style="margin-top:0;border-color:#c98b8b;color:#e8b4b4" onclick="angerGo()">🧸 イライラした</button>');
+    /* v34: 🔋 今日は畳む。**どのセットでも押せる**（2026-09-08 ご指定）。
+       🛟 と違って別のセットへは飛ばない。いまのセットをそのまま、基準だけゆるめる。 */
+    if(!foldOn) em.push('<button class="btn ghost" style="margin-top:0;border-color:#7a9ec4;color:#bcd6ee" onclick="foldAsk()">🔋 今日は畳む</button>');
+    else        em.push('<button class="btn ghost" style="margin-top:0;border-color:#7a9ec4;color:#bcd6ee" onclick="foldUndo()">🔋 畳みをやめる</button>');
     if(em.length){
       h += '<div class="row" style="margin-top:9px">'+em.join("")+'</div>';
       h += '<p class="note" style="margin-top:4px">'
          + (em.length>1 ? '<b>🛟</b>は復帰の1手へ、<b>🧸</b>は1分だけ離れる形へ。' : (curId!=="anger"&&angerSet() ? '<b>🧸</b>は1分だけ離れる形へ。' : '<b>🛟</b>は復帰の1手へ。'))
          + 'どちらも<b>いまのセットはそのまま残ります</b>。🧸 は終わるとそのまま続きに戻り、'
          + '🛟 は終わったあとに<b>「続きに戻る」</b>が出ます（押さなければ戻りません）。</p>';
+    }
+    /* v34: 押した直後の確認。**チェックの意味が変わることを、ここで1回だけはっきり出す。**
+       黙って変えると、あとで記録を読み違える（「済み」がやり切ったのか手をつけただけなのか
+       分からなくなる）。 */
+    if(foldAsking){
+      h += '<div class="iobox" style="border-color:#7a9ec4">'
+         + '<label style="margin-top:0">🔋 今日は畳みますか</label>'
+         + '<p class="note" style="margin-top:5px">'
+         + '<b>やめることを、いま決めてください。</b>作り置き／書類／片づけ／自己研鑽 — 声に出すか、指で数えるだけでかまいません。<br>'
+         + '押すと、この回だけこうなります。<b>明日は元どおりに始まります。</b><br>'
+         + '・項目は<b>1つも減りません。順番も変わりません</b><br>'
+         + '・「できた」の意味が <b>やり切ったら済み → 手をつけたら済み</b> に変わります<br>'
+         + '・目安の時間が<b>いまの半分</b>になります（下限30秒）<br>'
+         + '・終わったあとに<b>「今日はこれをやって休む」</b>を選びます</p>'
+         + '<div class="row" style="margin-top:8px">'
+         + '<button class="btn ghost" style="margin-top:0" onclick="foldCancel()">やめる</button>'
+         + '<button class="btn save" style="margin-top:0" onclick="foldGo()">決めた — 畳む</button>'
+         + '</div></div>';
     }
     var ap = appOf(cur);
     if(ap) h += '<button class="btn ghost" onclick="openApp(\''+esc(cur.app)+'\')">'+ap.icon+' '+esc(ap.name)+'を開く</button>';
@@ -2716,7 +2809,7 @@ function viewRun(){
     h += '<div class="'+cls+'" onclick="gotoStep('+i+')"><div class="n">'+mark+'</div>'
        + '<div class="t">'+(doneSet[i]==="skip"?'<s>'+esc(x.text)+'</s>':esc(x.text))
        + (ap0 ? ' <span class="tag">'+ap0.icon+' '+esc(ap0.name)+'</span>' : '')
-       + '<em>目安 '+durLabel(x.sec)+(stepExtra[i]?'（延長 +'+durLabel(stepExtra[i])+'）':'')
+       + '<em>目安 '+durLabel(foldOn?foldSecOf(x.sec):x.sec)+(foldOn?'（畳み中）':'')+(stepExtra[i]?'（延長 +'+durLabel(stepExtra[i])+'）':'')
        + (usedOf(i) ? '　／　'+(doneSet[i] ? '実際 ' : (i===curStep ? '使用中 ' : '中断中 '))+mmss(usedOf(i)) : '')
        + '</em></div></div>';
     /* v13: いまの項目にだけ、メモと「次に足す」を出す。
@@ -2922,11 +3015,33 @@ function viewDone(){
   var within = left() >= 0;
   var h = '<h1>'+(d===n ? '完了' : 'ここまで')+'</h1>';
   h += '<div class="card"><div class="big ok">'+d+' / '+n+'</div>';
-  h += '<div class="bigsub">'+esc(s.name)+' ・ '+mmss(Math.abs(elapsed()))+'</div></div>';
+  h += '<div class="bigsub">'+esc(s.name)+(foldOn?' 🔋':'')+' ・ '+mmss(Math.abs(elapsed()))+'</div></div>';
   if(d===n && within) h += '<div class="hint">タイマーの中でやり切れました。</div>';
   else if(d===n) h += '<div class="hint">全部やれました。時間は超えましたが、見ているのは順番ではなく「やったかどうか」です。</div>';
   else if(d>0) h += '<div class="hint">'+d+'つやれました。<b>0か1かではありません。</b>次の合図でまた押せます。</div>';
   else h += '<div class="hint">今日はここまで。押したこと自体は残っています。次の合図でまた押してください。</div>';
+  /* ===== v34（2026-09-08 ご依頼）: 畳んだ回の「積極的な休養」 =====================
+     参考資料の3ステップ目「受動的な暇つぶし（無限スクロール）ではなく、自分で決めた
+     休み方」をここに置く。**畳んだあとを空けたままにすると、そこが無限スクロールに
+     吸われる。**だから第1回から入れてある（後回しにしない）。
+     ★項目としては差し込んでいない（s.steps は1文字も変えない）。完了画面の1ブロック。 */
+  if(foldOn){
+    h += '<div class="sec">🔋 今日はこれをやって休む</div>';
+    if(!foldRest){
+      h += '<p class="note" style="margin-top:0">1つ選んでください。<b>決めてから休むこと</b>が、この機能の中身です。</p>';
+      h += '<div class="dnrow">';
+      restList().forEach(function(r,i){
+        h += '<button class="btn ghost" style="margin-top:6px" onclick="foldPickRest('+i+')">'+esc(r)+'</button>';
+      });
+      h += '</div>';
+    }else{
+      h += '<div class="hint" style="border-color:#7a9ec4;color:#bcd6ee"><b>'+esc(foldRest)+'</b><br>これをやって休むと決めました。</div>';
+      h += '<button class="btn ghost" onclick="foldRestTimer()">⏰ 15分のタイマーを仕掛ける</button>';
+      h += '<p class="note" style="margin-top:4px">押すと<b>iPhoneの標準タイマー</b>を15分で仕掛けます（ショートカットAppへ一度飛びます）。'
+         + '<b>タイマーは終わりの合図で、やめる合図ではありません。</b>まだ続けたければ続けてください。</p>';
+      h += '<button class="btn ghost" onclick="foldPickRest(-1)">選び直す</button>';
+    }
+  }
   /* v20 (2026-09-03 ご依頼): 「これで N 回目です」の累計表示は取りやめ。 */
   /* v21 (2026-09-03 ご依頼): 完了後のメモ入力欄は廃止した。
      「メモは実施中に書くことがほとんどなので、セット完了後のメモ書きは不要」
@@ -2951,6 +3066,8 @@ function viewDone(){
      事実ではなくなった。送るのは実施の一覧だけで、Points Tracker には
      いまも入らない（点数はあちらが正）。 */
   h += '<p class="note">この記録はこの端末の中に残ります。<b>Points Tracker には入りません</b>（点数はあちらが正です）。<br>連続日数と達成率は数えていません。</p>';
+  /* v34: 畳んだ回は「済み」の意味が違うので、記録の読み方をここにも書いておく。 */
+  if(foldOn) h += '<p class="note">🔋 <b>この回は畳んでいます。</b>「済み」は<b>手をつけた</b>という意味で残ります（やり切った、ではありません）。記録の一覧にも 🔋 が付きます。</p>';
   h += '<button class="btn ghost" onclick="location.href=\'log.html\'">📤 記録を送る（記録ハブ）</button>';
   h += '<p class="note">この回を、Obsidianの実施ログ（<b>20_Projects/Private/B.M.C/logs/</b>）へ追記できます。'
      + '<b>送っても記録はこのアプリから消えません。</b>あとでまとめて送っても同じです。</p>';

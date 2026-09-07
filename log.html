@@ -91,7 +91,7 @@ h1{font-size:21px;margin:2px 0 4px}
 var HKEY = "bmc_log_hub_v1";
 var RKEY = "bmc_routine_v1";
 var GKEY = "bmc_gym_v1";
-var APPVER = "B.M.C. 記録ハブ v3 ・ 2026-09-07";
+var APPVER = "B.M.C. 記録ハブ v4 ・ 2026-09-08";
 
 var H = {
   vault: "My Valut",
@@ -258,8 +258,12 @@ function collect(){
     var map = setMap(r);
     (r.log||[]).forEach(function(x){
       if(!x || !x.t) return;
+      /* v4 (2026-09-08): 🔋 今日は畳んだ回は、名前の後ろに 🔋 を付ける。
+         **付けないと「28/29できた日」と読み違える。**畳んだ回の「済み」は
+         「手をつけた」であって、やり切ったではない（routine.html v34）。
+         列は8列のまま増やしていない。 */
       add("r"+x.t, x.t, line(x.t, "routine", "セット",
-        (x.icon?x.icon+" ":"")+(x.name||""), num(x.d)+"/"+num(x.n), mins(x.sec), "", "r"+x.t));
+        (x.icon?x.icon+" ":"")+(x.name||"")+(x.fold?" 🔋":""), num(x.d)+"/"+num(x.n), mins(x.sec), "", "r"+x.t));
     });
     /* v2: 項目ごとの実測。ここが「何をやったか」の本体。
        アプリは**触った項目だけ**を DB.times に入れる（飛ばした項目は入らない）。
