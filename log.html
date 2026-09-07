@@ -29,6 +29,7 @@ h1{font-size:21px;margin:2px 0 4px}
 .send{display:block;width:100%;padding:17px;border-radius:12px;background:#e0a86a;
   color:#20160c;font-size:17px;font-weight:700;text-align:center;text-decoration:none;
   margin-top:10px;font-family:inherit}
+.send.alt{background:#7fd1c1;color:#0c1e1a}
 .note{color:#8a94a6;font-size:12.5px;margin:8px 0 0}
 .warnbox{background:#1c1620;border:1px solid #3a2a33;border-radius:12px;padding:12px;margin-top:10px;
   color:#d8c3cc;font-size:12.5px}
@@ -56,12 +57,21 @@ h1{font-size:21px;margin:2px 0 4px}
 /* ============================================================
    B.M.C. 記録ハブ (log.html)
    作成: B.M.C.(Claude) / 2026-09-07
-   版:   v1
+   版:   v3（2026-09-07）
 
    なにをするページか
      routine.html・gym.html と**同じドメインに置く**ことで、同じ保存領域
      （localStorage）を読める。各アプリに散らばっている実施記録を1枚に集め、
      まだ送っていない分だけを Obsidian へ追記する。
+
+   送り先は2つある（v2で分けた）
+     ① 実施ログ  … いつ何をやったか。1行1件。月別のファイルへ追記
+     ② 設計       … そのとき各セットが何項目・各項目何秒だったか（routine）と、
+                     有酸素プログラムのブロック構成（gym・速度と傾斜）。
+                     **変わったときだけ**別ファイルへ追記
+     ②が要る理由: 飛ばした項目はアプリ側に記録が残らない（触った項目だけが
+     DB.times に入る）。定義と突き合わせて初めて「記録に無い＝やらなかった」
+     と読める。①だけでは「やらなかった項目」が永久に見えない。
 
    設計上の約束（後から変える人へ）
      1. **アプリ本体の保存データ（bmc_routine_v1 / bmc_gym_v1）に書き込まない。**
@@ -74,23 +84,27 @@ h1{font-size:21px;margin:2px 0 4px}
         消えるため。戻ってきた時（visibilitychange）に作り直す。
      4. vault名は必須。`My Valut`（Vaultの実名。綴りもこのまま）。
      5. 届いたかどうかは機械では分からない。送信後も記録は消さず、印だけ付ける。
+     6. **開始日（H.since）より前の記録は「対象外」として数えない。**捨てては
+        いない（アプリ側にはある）ので、日付を戻せばいつでも出てくる。
    ============================================================ */
 
 var HKEY = "bmc_log_hub_v1";
 var RKEY = "bmc_routine_v1";
 var GKEY = "bmc_gym_v1";
-var APPVER = "B.M.C. 記録ハブ v1 ・ 2026-09-07";
+var APPVER = "B.M.C. 記録ハブ v3 ・ 2026-09-07";
 
 var H = {
   vault: "My Valut",
   file:  "20_Projects/Private/B.M.C/logs/実施ログ_{YYYY-MM}.md",
+  defFile: "20_Projects/Private/B.M.C/logs/セット定義.md",
   mode:  "append",
+  since: "",        /* YYYY-MM-DD。空なら初回に今日を入れる */
   maxRows: 15,      /* 1回の送信に入れる行数の上限 */
   maxLen: 6000,     /* 組み上がったURIの長さの上限（これを超える前に切る） */
   sent: []          /* 送信済みのID。古いものから捨てる */
 };
-var SENTMAX = 3000;
-var view = "home", cfg = false, justSent = 0;
+var SENTMAX = 4000;
+var cfg = false, justSent = 0, justWhat = "";
 
 /* ---------- 保存 ---------- */
 function hLoad(){
@@ -99,11 +113,16 @@ function hLoad(){
     if(o && typeof o==="object"){
       if(typeof o.vault==="string") H.vault = o.vault;
       if(typeof o.file==="string" && o.file) H.file = o.file;
+      if(typeof o.defFile==="string" && o.defFile) H.defFile = o.defFile;
       if(o.mode==="append"||o.mode==="prepend") H.mode = o.mode;
+      if(typeof o.since==="string") H.since = o.since;
       if(typeof o.maxRows==="number" && o.maxRows>0) H.maxRows = o.maxRows;
       if(Array.isArray(o.sent)) H.sent = o.sent;
     }
   }catch(e){}
+  /* 初回だけ、開始日を今日にする。過去の記録は対象外として数えない
+     （2026-09-07 ご選択）。設定でいつでも戻せる。 */
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(H.since)){ H.since = ymd(new Date()); hSave(); }
 }
 function hSave(){
   try{
@@ -133,7 +152,31 @@ function mins(sec){
   if(sec < 60) return "1分未満";
   return Math.round(sec/60)+"分";
 }
+/* 項目の秒数は丸めない。「4分12秒（目安5分）」の形で読みたいため。 */
+function durLabel(sec){
+  sec = Math.max(0, Math.round(sec||0));
+  var h = Math.floor(sec/3600), m = Math.floor((sec%3600)/60), s2 = sec%60, o = "";
+  if(h) o += h+"時間";
+  if(m) o += m+"分";
+  if(s2 && !h) o += s2+"秒";
+  return o || "0秒";
+}
 function num(x){ var n = Number(x); return isFinite(n) ? n : 0; }
+function cut(s, n){ s = String(s==null?"":s); return s.length>n ? s.slice(0,n)+"…" : s; }
+/* 速度・傾斜・分は小数1桁まで（6.8km/h・傾斜3%）。gym側の n1 と同じ見せ方。 */
+function n1(x){ return String(Math.round(num(x)*10)/10); }
+var RATES = ["かるすぎる","ちょうどよい","きつすぎる"];
+/* 定義が変わったかどうかを見るだけの短い印。暗号用途ではない。 */
+function hash(s){
+  var h = 5381, i;
+  for(i=0;i<s.length;i++){ h = ((h*33) ^ s.charCodeAt(i)) >>> 0; }
+  return h.toString(36);
+}
+function sinceMs(){
+  var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(H.since||"");
+  if(!m) return 0;
+  return new Date(+m[1], +m[2]-1, +m[3], 0, 0, 0, 0).getTime();
+}
 
 /* ---------- 記録を1行に組む ---------- */
 /* 8列: 日付 時刻 | アプリ | 種別 | 名前 | 結果 | 所要 | メモ | #ID  */
@@ -162,30 +205,82 @@ function gymName(g, id){
   }catch(e){}
   return GYMNAME[id] || id;
 }
+/* v3: 有酸素の「区間」を、続けて同じ設定のものはひとまとめにする。
+   インターバルは同じ設定が回数ぶん並ぶだけなので、10ループを10行にすると読めない。
+   逆に、走行中に速度・傾斜を変えた区間はそこで別の行に割れる＝**その日に上げた事実が残る。**
+   （gym側は「いまの区間だけに効く」変更を記録の plan にそのまま書いている） */
+function segRows(c){
+  var pl = (c && c.plan) || [];
+  if(!pl.length) return [];
+  var out = [], by = {};
+  /* インターバルの区間名は「速い 3/10」の形。番号を外したものが同じ区間。
+     ★続けて並んでいるものだけをまとめる形にしてはいけない。速い→ゆるめ→速い…と
+       交互に並ぶので、それでは1つもまとまらない（10ループが20行になる）。 */
+  function base(lb){ return String(lb==null?"":lb).replace(/\s*\d+\s*\/\s*\d+\s*$/,"").trim(); }
+  function loopNo(lb){ var m = /(\d+)\s*\/\s*\d+\s*$/.exec(String(lb==null?"":lb)); return m ? +m[1] : 0; }
+  pl.forEach(function(x){
+    var k = num(x.b)+"|"+base(x.lb)+"|"+num(x.sp)+"|"+num(x.inc)+"|"+num(x.min);
+    if(!by[k]){
+      by[k] = { lb:base(x.lb), sp:num(x.sp), inc:num(x.inc), min:num(x.min), b:num(x.b), n:0, lps:[] };
+      out.push(by[k]);
+    }
+    by[k].n++;
+    var lp = loopNo(x.lb);
+    if(lp && by[k].lps.length < 12) by[k].lps.push(lp);
+  });
+  return out;
+}
 
+/* routine のセット id → 見出しの名前 */
+function setMap(r){
+  var m = {};
+  (r && r.sets || []).forEach(function(s){
+    if(s && s.id) m[s.id] = (s.icon ? s.icon+" " : "") + (s.name || s.id);
+  });
+  return m;
+}
+/* routine のステップ文字列 "秒|文言|読み上げ|開くアプリ" を分解する
+   （routine.html の parseStep と同じ規則。あちらを変えたらここも変える） */
+function parseStep(str){
+  var p = String(str).split("|");
+  if(p.length < 2) return { sec:60, text:String(str).trim(), say:"" };
+  return { sec: parseInt(p[0],10)||60, text:(p[1]||"").trim(), say:(p[2]||"").trim() };
+}
+
+/* ---------- ① 実施ログ ---------- */
 function collect(){
-  var out = [];
+  var out = [], since = sinceMs();
+  function add(id, t, s){ if(t >= since) out.push({ id:id, t:t, s:s }); }
 
   /* --- routine --- */
   var r = readApp(RKEY);
   if(r){
+    var map = setMap(r);
     (r.log||[]).forEach(function(x){
       if(!x || !x.t) return;
-      out.push({ id:"r"+x.t, t:x.t, s:line(x.t, "routine", "セット",
-        (x.icon?x.icon+" ":"")+(x.name||""), num(x.d)+"/"+num(x.n), mins(x.sec), "", "r"+x.t) });
+      add("r"+x.t, x.t, line(x.t, "routine", "セット",
+        (x.icon?x.icon+" ":"")+(x.name||""), num(x.d)+"/"+num(x.n), mins(x.sec), "", "r"+x.t));
+    });
+    /* v2: 項目ごとの実測。ここが「何をやったか」の本体。
+       アプリは**触った項目だけ**を DB.times に入れる（飛ばした項目は入らない）。
+       したがって「セット定義にあるのに、この回の項目行が無い」＝やらなかった、
+       と読む。就寝・中途覚醒は別の種別として下で拾う。 */
+    (r.times||[]).forEach(function(x){
+      if(!x || !x.t) return;
+      if(x.sid === "sleep" || x.sid === "wake") return;
+      var nm = (map[x.sid] || x.sid || "") + " › " + (x.step||"");
+      var dur = durLabel(x.act) + (x.plan ? "（目安"+durLabel(x.plan)+"）" : "");
+      add("x"+x.t, x.t, line(x.t, "routine", "項目", nm, "済", dur, "", "x"+x.t));
     });
     (r.notes||[]).forEach(function(x){
       if(!x || !x.t) return;
-      out.push({ id:"n"+x.t, t:x.t, s:line(x.t, "routine", "メモ",
-        x.step||"", "", "", x.v||"", "n"+x.t) });
+      add("n"+x.t, x.t, line(x.t, "routine", "メモ", x.step||"", "", "", x.v||"", "n"+x.t));
     });
-    /* 就寝の見守りと中途覚醒だけ拾う。項目ごとの実測（sid がセットのもの）は
-       件数が多く、行が読めなくなるので入れない。 */
     (r.times||[]).forEach(function(x){
       if(!x || !x.t) return;
       if(x.sid !== "sleep" && x.sid !== "wake") return;
-      out.push({ id:"t"+x.t, t:x.t, s:line(x.t, "routine",
-        (x.sid==="sleep" ? "就寝" : "中途覚醒"), x.step||"", "", mins(x.act), "", "t"+x.t) });
+      add("t"+x.t, x.t, line(x.t, "routine",
+        (x.sid==="sleep" ? "就寝" : "中途覚醒"), x.step||"", "", mins(x.act), "", "t"+x.t));
     });
   }
 
@@ -204,8 +299,8 @@ function collect(){
         var reps = by[id].map(function(st){ return num(st.reps); }).join("/");
         return gymName(g,id) + " " + (num(w) ? num(w)+"kg×" : "自重×") + reps;
       });
-      out.push({ id:"g"+s.date, t:s.date, s:line(s.date, "gym", "筋トレ",
-        "ルーティン"+(s.routine||""), parts.join(" ・ "), mins(s.sec), "", "g"+s.date) });
+      add("g"+s.date, s.date, line(s.date, "gym", "筋トレ",
+        "ルーティン"+(s.routine||""), parts.join(" ・ "), mins(s.sec), "", "g"+s.date));
     });
     (g.cardio||[]).forEach(function(c){
       if(!c || !c.date) return;
@@ -213,18 +308,105 @@ function collect(){
       if(num(c.dist)) res.push(num(c.dist)+"km");
       if(num(c.hard)) res.push("きつさ"+num(c.hard));
       if(num(c.kcal)) res.push(num(c.kcal)+"kcal");
-      out.push({ id:"c"+c.date, t:c.date, s:line(c.date, "gym", "有酸素",
+      add("c"+c.date, c.date, line(c.date, "gym", "有酸素",
         c.progName||"有酸素", res.join("・"), (num(c.min)?num(c.min)+"分":""),
-        c.memo||"", "c"+c.date) });
+        c.memo||"", "c"+c.date));
+      /* v3: その回に実際に走った速度・傾斜。記録の plan は**その回のコピー**なので、
+         あとで既定を変えても過去は動かない（gym側の原則）。 */
+      var rates = c.rates || {};
+      segRows(c).forEach(function(x, i){
+        var rt = RATES[num(rates[x.b])-1] || "";
+        add("v"+c.date+"-"+i, c.date, line(c.date, "gym", "有酸素区間",
+          (c.progName||"有酸素")+" › "+(x.lb||"区間"),
+          n1(x.sp)+"km/h・傾斜"+n1(x.inc)+"%"+(x.n>1 ? " ×"+x.n : ""),
+          (x.min ? n1(x.min)+"分"+(x.n>1 ? "×"+x.n+"＝"+n1(x.min*x.n)+"分" : "") : ""),
+          (x.lps.length ? x.lps.join("・")+"回目" : "")
+            + (x.lps.length && rt ? " ／ " : "") + (rt ? "手ごたえ: "+rt : ""),
+          "v"+c.date+"-"+i));
+      });
     });
   }
 
   out.sort(function(a,b){ return a.t - b.t; });
   return out;
 }
+/* 開始日より前にある件数（数えないだけで、捨ててはいない） */
+function skippedCount(){
+  var since = sinceMs(), n = 0;
+  var r = readApp(RKEY), g = readApp(GKEY);
+  function cnt(arr, key){ (arr||[]).forEach(function(x){ if(x && x[key] && x[key] < since) n++; }); }
+  if(r){ cnt(r.log,"t"); cnt(r.times,"t"); cnt(r.notes,"t"); }
+  if(g){ cnt(g.sessions,"date"); cnt(g.cardio,"date"); }
+  return n;
+}
+
+/* ---------- ② セット定義 ---------- */
+/* いま各セットが何項目・各項目が何秒か。変わったときだけ送る。
+   IDに中身の印（hash）を入れてあるので、**中身が変わった瞬間だけ未送信になる。** */
+function defLines(){
+  var r = readApp(RKEY); if(!r) return [];
+  var now = Date.now(), out = [];
+  (r.sets||[]).forEach(function(s){
+    if(!s || !s.id) return;
+    var steps = (s.steps||[]).map(parseStep);
+    var label = (s.icon ? s.icon+" " : "") + (s.name || s.id);
+    var body = JSON.stringify([label, steps.map(function(x){ return [x.sec, x.text]; })]);
+    var h = hash(body);
+    var total = steps.reduce(function(a,b){ return a + (b.sec||0); }, 0);
+    out.push({ id:"s"+h+"-0", t:now, s:line(now, "routine", "セット定義", label,
+      steps.length+"項目・合計"+durLabel(total), "", cut(s.note||"", 80), "s"+h+"-0") });
+    steps.forEach(function(x, i){
+      out.push({ id:"s"+h+"-"+(i+1), t:now, s:line(now, "routine", "セット定義",
+        label+" › "+(i+1)+"/"+steps.length, x.text, "目安"+durLabel(x.sec),
+        x.say ? "読み上げ: "+cut(x.say,40) : "", "s"+h+"-"+(i+1)) });
+    });
+  });
+  return out;
+}
+
+/* v3: 有酸素プログラムの設計（ブロック構成）。routineのセット定義と同じ扱いで、
+   変わったときだけ送る。実績（有酸素区間）と突き合わせると、
+   「設計は6.8km/hなのに、その日は7.0で走った」が読める。 */
+function defLinesGym(){
+  var g = readApp(GKEY); if(!g) return [];
+  var progs = (g.settings && g.settings.cardio && g.settings.cardio.progs) || [];
+  var now = Date.now(), out = [];
+  progs.forEach(function(pg){
+    var bl = pg.blocks || [], total = 0;
+    bl.forEach(function(b){
+      if(b.type==="interval"){
+        var reps = Math.max(1, Math.round(num(b.reps)||1));
+        (b.segs||[]).forEach(function(sg){ total += num(sg.min)*reps; });
+      }else total += num(b.min);
+    });
+    var h = hash(JSON.stringify([pg.name||pg.id, bl]));
+    var nm = pg.name || pg.id;
+    out.push({ id:"p"+h+"-0", t:now, s:line(now, "gym", "有酸素プログラム", nm,
+      bl.length+"ブロック・合計"+n1(total)+"分", "", cut(pg.note||"", 80), "p"+h+"-0") });
+    bl.forEach(function(b, i){
+      var res, dur;
+      if(b.type==="interval"){
+        var reps = Math.max(1, Math.round(num(b.reps)||1)), t2 = 0;
+        var segs = (b.segs||[]).map(function(sg){
+          t2 += num(sg.min)*reps;
+          return (sg.lb||"")+" "+n1(sg.min)+"分 "+n1(sg.sp)+"km/h・傾斜"+n1(sg.inc)+"%";
+        });
+        res = "インターバル ×"+reps+"（"+segs.join(" → ")+"）";
+        dur = n1(t2)+"分";
+      }else{
+        res = (b.lb||"")+" "+n1(b.sp)+"km/h・傾斜"+n1(b.inc)+"%";
+        dur = n1(b.min)+"分";
+      }
+      out.push({ id:"p"+h+"-"+(i+1), t:now, s:line(now, "gym", "有酸素プログラム",
+        nm+" › "+(i+1)+"/"+bl.length, res, dur, "", "p"+h+"-"+(i+1)) });
+    });
+  });
+  return out;
+}
 
 function isSent(id){ return H.sent.indexOf(id) >= 0; }
-function unsent(){ return collect().filter(function(x){ return !isSent(x.id); }); }
+function unsentLog(){ return collect().filter(function(x){ return !isSent(x.id); }); }
+function unsentDef(){ return defLines().concat(defLinesGym()).filter(function(x){ return !isSent(x.id); }); }
 
 /* ---------- 送信 ---------- */
 function fileName(){
@@ -234,29 +416,29 @@ function fileName(){
     .replace(/\{YYYY\}/g, String(d.getFullYear()))
     .replace(/\{MM\}/g, p2(d.getMonth()+1));
 }
-function uriOf(text){
+function uriOf(text, path){
   var u = "obsidian://advanced-uri?";
   if(H.vault) u += "vault="+encodeURIComponent(H.vault)+"&";
-  u += "filepath="+encodeURIComponent(fileName());
+  u += "filepath="+encodeURIComponent(path);
   u += "&mode="+H.mode+"&data="+encodeURIComponent(text);
   return u;
 }
 /* 今回送る分を、行数と URI の長さの両方で切る。
    長すぎるURIは端末側で黙って落ちることがあるため、必ず分ける。 */
-function batch(){
-  var un = unsent(), take = [], text = "";
-  for(var i=0;i<un.length;i++){
+function batchOf(list, path){
+  var take = [], text = "";
+  for(var i=0;i<list.length;i++){
     if(take.length >= H.maxRows) break;
-    var next = text + un[i].s + "\n";
-    if(take.length && uriOf(next).length > H.maxLen) break;
-    text = next; take.push(un[i]);
+    var next = text + list[i].s + "\n";
+    if(take.length && uriOf(next, path).length > H.maxLen) break;
+    text = next; take.push(list[i]);
   }
   return { rows:take, text:text };
 }
 /* リンクを押した瞬間に呼ばれる。印を付けるだけ。画面は作り直さない。 */
-function markSent(ids){
+function markSent(ids, what){
   ids.forEach(function(id){ if(!isSent(id)) H.sent.push(id); });
-  justSent = ids.length;
+  justSent = ids.length; justWhat = what || "";
   hSave();
   return true;
 }
@@ -267,22 +449,21 @@ function resend(n){
   toast(k ? ("直近"+k+"件を未送信に戻しました。") : "戻すものがありません。");
 }
 function markAllSent(){
-  var un = unsent();
+  var un = unsentLog();
   un.forEach(function(x){ H.sent.push(x.id); });
   hSave(); render();
   toast(un.length+"件を「送信済み」にしました（送ってはいません）。");
 }
-function copyOut(){
-  var t = document.getElementById("out"); if(!t) return;
+function copyId(id, okmsg){
+  var t = document.getElementById(id); if(!t) return;
   var ok = false;
   try{ t.focus(); t.select(); t.setSelectionRange(0,999999); ok = document.execCommand("copy"); }catch(e){}
-  var yes = "コピーしました。実施ログのファイルに貼ってください。";
-  var no  = "コピーできませんでした。上の枠を長押し →「すべてを選択」→「コピー」でも同じことができます。";
+  var no = "コピーできませんでした。枠を長押し →「すべてを選択」→「コピー」でも同じことができます。";
   if(!ok && navigator.clipboard && navigator.clipboard.writeText){
-    navigator.clipboard.writeText(t.value).then(function(){ toast(yes); }, function(){ toast(no); });
+    navigator.clipboard.writeText(t.value).then(function(){ toast(okmsg); }, function(){ toast(no); });
     return;
   }
-  toast(ok?yes:no);
+  toast(ok?okmsg:no);
 }
 function toast(msg){
   var t = document.getElementById("toast"); if(!t) return;
@@ -294,50 +475,66 @@ function toast(msg){
 function grabCfg(){
   var v = document.getElementById("c_vault"); if(v) H.vault = v.value.trim();
   var f = document.getElementById("c_file");  if(f) H.file  = f.value.trim();
+  var d = document.getElementById("c_def");   if(d) H.defFile = d.value.trim();
+  var s = document.getElementById("c_since"); if(s && /^\d{4}-\d{2}-\d{2}$/.test(s.value.trim())) H.since = s.value.trim();
   var m = document.getElementById("c_rows");  if(m){ var n = parseInt(m.value,10); if(n>0) H.maxRows = n; }
 }
 function cfgGo(){ if(cfg) grabCfg(); cfg = !cfg; hSave(); render(); }
 function modeGo(){ grabCfg(); H.mode = (H.mode==="append") ? "prepend" : "append"; hSave(); render(); }
-function testSend(){ /* 画面の組み立て用。実体はリンク側にある */ }
 
 /* ---------- 画面 ---------- */
+function sendBlock(list, path, label, cls, taid, what){
+  var b = batchOf(list, path);
+  var h = '<div class="card">';
+  h += '<a class="send'+(cls?" "+cls:"")+'" href="'+esc(uriOf(b.text, path))+'" onclick="return markSent('
+     + JSON.stringify(b.rows.map(function(x){return x.id;})).replace(/"/g,"&quot;") + ',\''+what+'\')">'
+     + label+'（'+b.rows.length+'件）</a>';
+  h += '<p class="note">送り先： <b>'+esc(path)+'</b> の末尾'
+     + (H.mode==="prepend" ? '（いまは先頭に入る設定）' : '')
+     + (list.length > b.rows.length
+        ? '<br>残り '+(list.length-b.rows.length)+'件は、送ったあとにもう一度押してください。'
+        : '')
+     + '</p>';
+  h += '<textarea id="'+taid+'" class="ta" readonly onclick="this.select()">'+esc(b.text)+'</textarea>';
+  h += '<button class="btn ghost" onclick="copyId(\''+taid+'\',\'コピーしました。'+esc(path)+' に貼ってください。\')">コピーする（Obsidianが開かないとき）</button>';
+  h += '</div>';
+  return h;
+}
+
 function render(){
   var el = document.getElementById("app"); if(!el) return;
-  var all = collect(), un = unsent(), b = batch();
+  var all = collect(), un = unsentLog(), ud = unsentDef(), sk = skippedCount();
   var h = '<h1>記録ハブ</h1>';
-  h += '<p class="sub">routine と gym の実施記録を、Obsidianの実施ログへ追記します。'
+  h += '<p class="sub">routine と gym の実施記録を、Obsidianへ追記します。'
      + '<b>記録そのものは各アプリの中に残ります。</b>ここが消えても記録は消えません。</p>';
 
   h += '<div class="card"><div class="big">'+un.length+'</div>'
-     + '<div class="bigsub">未送信（全'+all.length+'件のうち）</div></div>';
+     + '<div class="bigsub">未送信（'+H.since+' 以降の全'+all.length+'件のうち）</div></div>';
 
   if(justSent){
-    h += '<div class="card"><p class="note">前回 '+justSent+'件を送りました。'
-       + '<b>Obsidianの実施ログに入っているか、いちど確かめてください。</b>'
-       + '入っていなければ、下の「未送信に戻す」で送り直せます。</p></div>';
+    h += '<div class="card"><p class="note">前回 '+justSent+'件'+(justWhat?'（'+esc(justWhat)+'）':'')+'を送りました。'
+       + '<b>Obsidian側に入っているか、いちど確かめてください。</b>'
+       + '入っていなければ、設定の「未送信に戻す」で送り直せます。</p></div>';
   }
 
+  h += '<div class="sec">① 実施ログ（いつ何をやったか）</div>';
   if(!un.length){
     h += '<div class="card"><p class="note">送るものはありません。</p></div>';
   }else{
-    h += '<div class="sec">今回送る分（'+b.rows.length+'件）</div>';
-    h += '<div class="card">';
-    h += '<a class="send" href="'+esc(uriOf(b.text))+'" onclick="return markSent('
-       + JSON.stringify(b.rows.map(function(x){return x.id;})).replace(/"/g,"&quot;") + ')">'
-       + 'Obsidianへ送る（'+b.rows.length+'件）</a>';
-    h += '<p class="note">送り先： <b>'+esc(fileName())+'</b> の末尾'
-       + (H.mode==="prepend" ? '（いまは先頭に入る設定）' : '')
-       + '<br>残り '+(un.length-b.rows.length)+'件は、送ったあとにもう一度押してください。'
-       + '<b>1回に入れる件数を増やすと届かないことがあるため、分けています。</b></p>';
-    h += '<textarea id="out" class="ta" readonly onclick="this.select()">'+esc(b.text)+'</textarea>';
-    h += '<button class="btn ghost" onclick="copyOut()">コピーする（Obsidianが開かないとき）</button>';
-    h += '</div>';
+    h += sendBlock(un, fileName(), "Obsidianへ送る", "", "out", "実施ログ");
+  }
 
-    if(un.length > 40){
-      h += '<div class="warnbox">未送信が'+un.length+'件あります。'
-         + 'アプリを使い始めてからの記録がまとめて残っているためで、こわれてはいません。'
-         + '<b>全部を残す必要がなければ、下の「過去の分は送らずに送信済みにする」で今日から始められます。</b></div>';
-    }
+  h += '<div class="sec">② 設計（セットの中身・有酸素のブロック構成）</div>';
+  if(!ud.length){
+    h += '<div class="card"><p class="note">前回送ったときから変わっていません。'
+       + '<b>セットの中身か、有酸素のプログラムを編集すると、ここに出ます。</b></p></div>';
+  }else{
+    h += '<div class="card"><p class="note">中身が変わった（または、まだ一度も送っていない）セットが '
+       + ud.length + '行ぶんあります。<b>実施ログとは別のファイルに入ります。</b><br>'
+       + '飛ばした項目はアプリに記録が残らないので、この設計と突き合わせて'
+       + '「記録に無い項目＝やらなかった」と読みます。有酸素は「設計の速度」と'
+       + '「その日に実際に走った速度」の差が読めるようになります。</p></div>';
+    h += sendBlock(ud, H.defFile, "設計を送る", "alt", "outd", "設計");
   }
 
   h += '<div class="sec">たまっているもの（新しい順に20件）</div>';
@@ -352,14 +549,22 @@ function render(){
     });
   }
   h += '</div>';
+  if(sk){
+    h += '<p class="note">このほかに <b>'+sk+'件</b> が開始日（'+H.since+'）より前にあります。'
+       + '数えていないだけで、消えてはいません。<b>設定で開始日を戻せば出てきます。</b></p>';
+  }
 
   h += '<button class="btn ghost" onclick="cfgGo()">'+(cfg?'設定を閉じる':'⚙ 設定・送り直し')+'</button>';
   if(cfg){
     h += '<div class="card">';
     h += '<label class="lb">Vault名（この綴りのまま。空にすると届きません）</label>'
        + '<input class="inp" id="c_vault" type="text" value="'+esc(H.vault)+'">';
-    h += '<label class="lb">送り先のファイル（{YYYY-MM} は今月に置き換わります）</label>'
+    h += '<label class="lb">① 実施ログの送り先（{YYYY-MM} は今月に置き換わります）</label>'
        + '<input class="inp" id="c_file" type="text" value="'+esc(H.file)+'">';
+    h += '<label class="lb">② セット定義の送り先</label>'
+       + '<input class="inp" id="c_def" type="text" value="'+esc(H.defFile)+'">';
+    h += '<label class="lb">開始日（この日より前の記録は数えません）</label>'
+       + '<input class="inp" id="c_since" type="text" placeholder="2026-09-07" value="'+esc(H.since)+'">';
     h += '<label class="lb">1回に送る件数の上限</label>'
        + '<input class="inp" id="c_rows" type="number" min="1" max="60" value="'+H.maxRows+'">';
     h += '<button class="btn ghost" onclick="modeGo()">入れる位置： '
@@ -369,7 +574,7 @@ function render(){
     h += '<div class="sec">送り直し</div>';
     h += '<button class="btn ghost" onclick="resend(15)">直近15件を未送信に戻す</button>';
     h += '<button class="btn ghost" onclick="resend(999999)">全部を未送信に戻す</button>';
-    h += '<button class="btn ghost warn" onclick="markAllSent()">過去の分は送らずに送信済みにする</button>';
+    h += '<button class="btn ghost warn" onclick="markAllSent()">いまの未送信を、送らずに送信済みにする</button>';
     h += '<p class="note">送信済みの印は<b>このページだけ</b>が持っています。'
        + 'アプリ本体の記録には何も書き込んでいないので、ここを戻しても記録は壊れません。<br>'
        + '同じ記録を二重に送っても、行の末尾の <b>#ID</b> が同じなので後から片方を消せます。</p>';
