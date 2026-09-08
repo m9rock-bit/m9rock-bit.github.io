@@ -69,6 +69,16 @@ h2{font-size:15px;margin:0 0 3px}
 .ctimer{font-size:clamp(24px,6vh,40px);font-weight:200;text-align:center;
   font-variant-numeric:tabular-nums;letter-spacing:-.02em;margin:9px 0 0;line-height:1.1}
 /* 区間が切り替わったときの合図。急かす色は使わない（休憩終わりの合図と同じ考え方）。 */
+/* v14: 走行中に数字を直接入れる小窓。body直下・position:fixed なので、
+   1秒ごとの描き直しで消えず、走行画面（.crun）の高さも増やさない。 */
+.cpad{position:fixed;top:0;left:0;right:0;bottom:0;z-index:40;background:rgba(8,11,16,.82);
+  display:flex;align-items:center;justify-content:center;padding:18px}
+.cpadbox{width:100%;max-width:340px;max-height:86vh;overflow:auto;background:#171d27;
+  border:1px solid #3a4152;border-radius:16px;padding:16px 16px 14px}
+.cpadttl{font-size:15px;font-weight:700;margin:0 0 8px}
+.cpadbox input{font-size:22px;text-align:center;font-variant-numeric:tabular-nums}
+.cval.tap{cursor:pointer}
+.cval.tap:active{opacity:.6}
 .cflash{position:fixed;top:0;left:0;right:0;bottom:0;z-index:30;pointer-events:none;
   background:#e0a86a;opacity:0;animation:cfl 1.5s ease-out}
 @keyframes cfl{0%{opacity:0}6%{opacity:.75}22%{opacity:.07}40%{opacity:.7}60%{opacity:.05}80%{opacity:.45}100%{opacity:0}}
@@ -344,7 +354,7 @@ const CARDIO_DEF={
 const RATES=["かるすぎる","ちょうどよい","きつすぎる"];
 /* v9（2026-09-05）: 版の表示（ホーム最下部）。開いて1秒で新旧を見分けるため。
    中身を変えたら、ここも必ず上げる。 */
-const APPVER="B.M.C. ジム v13 ・ 2026-09-07";
+const APPVER="B.M.C. ジム v14 ・ 2026-09-09";
 const NORM=30;                    /* グラフの換算基準（30分あたり） */
 const HARDS=["余裕","ちょうどよい","きつい"];
 
@@ -839,6 +849,12 @@ function pace(sp){
   return mm+":"+String(ss).padStart(2,"0")+"/km";
 }
 function per30(v,min){ return (min>0? v*NORM/min : 0); }
+/* v14（2026-09-08 ご記入）: 所要時間を分だけでなく秒まで持つ。
+   過去の記録には sec が無いので、無いときは 0 として扱う（読めなくならない）。
+   recMin() は「分の小数」を返す。30分あたりの換算はこちらを使う。 */
+function recSec(r){ var s=+((r||{}).sec)||0; return (s<0?0:(s>59?59:Math.round(s))); }
+function recMin(r){ return (+((r||{}).min)||0) + recSec(r)/60; }
+function minSecTxt(r){ var s=recSec(r); return (+((r||{}).min)||0)+"分"+(s?s+"秒":""); }
 function segLine(s){ return (s.lb?esc(s.lb)+" ":"")+s.min+"分 ／ "+n1(s.sp)+"km/h ／ 傾斜"+n1(s.inc)+"%"; }
 function blockLine(b,i){
   if(!b) return "";
@@ -948,7 +964,7 @@ function cardioCard(hideSec){
       <button class="btn ghost" onclick="cInOpen(null)">あとから記録する</button>
     </div>
     <button class="btn ghost" onclick="go('cgraph')">推移と記録（${n}回）</button>
-    ${last?`<p class="note">前回 ${mdw(last.date)} ／ ${last.min}分 ${n1(last.dist)}km ${last.kcal}kcal</p>`:
+    ${last?`<p class="note">前回 ${mdw(last.date)} ／ ${minSecTxt(last)} ${n1(last.dist)}km ${last.kcal}kcal</p>`:
            `<p class="note">走り終わるとブロックごとに「かるすぎる／ちょうどよい／きつすぎる」を聞きます。<strong>「かるすぎる」を選んだブロックは、次回ここで1段上げる提案が出ます。</strong></p>`}
   </div>`;
 }
@@ -1097,16 +1113,106 @@ function cAdj(field, dir){
   s[field]=Math.round(v*10)/10;
   cSaveRun(); render();
 }
+/* ===== v14（2026-09-08 ご記入・2026-09-09 実装）======================
+   ②「実施中に新しい区間を足したい」③「速度・傾斜を直接入れたい」の2つ。
+
+   ★どちらも #app の外（body直下）に position:fixed の小窓として出す。
+     理由が2つある。
+     (a) 走行画面は1秒ごとに描き直している。#app の中に入力欄を置くと、
+         打ちかけの数字が毎秒消える。body直下なら描き直しの対象外。
+     (b) v12 で「走りながら要るものは画面の上2/3（.crun）に収める」と決めた。
+         小窓は position:fixed なので、.crun の高さを1pxも増やさない。
+         大きくした＋−ボタンもそのまま残る（潰していない）。 */
+var cPad=null;
+function cPadClose(){ try{ if(cPad&&cPad.parentNode) cPad.parentNode.removeChild(cPad); }catch(e){} cPad=null; }
+function cPadOpen(kind){
+  if(!cRun) return;
+  var q=cPos(); if(q.done) return;
+  var s=cRun.plan[q.i]; if(!s) return;
+  cPadClose();
+  var rows;
+  if(kind==="sp"){
+    rows=[{k:"sp", lb:"速度（km/h）", v:n1(s.sp), st:"0.1"}];
+  }else if(kind==="inc"){
+    rows=[{k:"inc", lb:"傾斜（%）", v:n1(s.inc), st:"0.1"}];
+  }else{
+    rows=[{k:"min", lb:"長さ（分）", v:"1", st:"0.5"},
+          {k:"sp",  lb:"速度（km/h）", v:n1(s.sp), st:"0.1"},
+          {k:"inc", lb:"傾斜（%）", v:n1(s.inc), st:"0.1"}];
+  }
+  var d=document.createElement("div");
+  d.className="cpad";
+  d.innerHTML='<div class="cpadbox">'
+    + '<div class="cpadttl">'+(kind==="seg"?"この区間のあとに1つ足す":(kind==="sp"?"速度を直接入れる":"傾斜を直接入れる"))+'</div>'
+    + rows.map(function(r){
+        return '<label>'+r.lb+'</label><input id="cpad_'+r.k+'" type="number" inputmode="decimal" step="'+r.st+'" value="'+r.v+'">';
+      }).join("")
+    + '<p class="note" style="margin:8px 0 0">'
+    + (kind==="seg"
+        ? 'いま走っている区間の<strong>すぐ次</strong>に入ります。今日この回だけで、プログラムの中身は変わりません。'
+        : '今日この回だけの変更です。<strong>プログラムの既定は書き換えません。</strong>')
+    + '</p>'
+    + '<div class="row" style="margin-top:10px">'
+    + '<button class="btn ghost" style="margin-top:0" onclick="cPadClose()">やめる</button>'
+    + '<button class="btn" style="margin-top:0" onclick="cPadSave(\''+kind+'\')">決定</button>'
+    + '</div></div>';
+  document.body.appendChild(d);
+  cPad=d;
+  var f=d.querySelector("input"); if(f){ try{ f.focus(); f.select(); }catch(e){} }
+}
+function cPadSave(kind){
+  if(!cRun){ cPadClose(); return; }
+  var g=function(k){ var e=document.getElementById("cpad_"+k); return e?parseFloat(e.value):NaN; };
+  var q=cPos(); if(q.done){ cPadClose(); return; }
+  var s=cRun.plan[q.i];
+  if(kind==="sp" || kind==="inc"){
+    var v=g(kind);
+    if(isNaN(v)){ alert("数字を入れてください。"); return; }
+    if(kind==="sp") v=Math.max(0.5, Math.min(25, v)); else v=Math.max(0, Math.min(15, v));
+    s[kind]=Math.round(v*10)/10;
+    cSaveRun(); cPadClose(); render(); return;
+  }
+  var mn=g("min"), sp=g("sp"), ic=g("inc");
+  if(isNaN(mn)||mn<=0){ alert("長さ（分）を0より大きい数で入れてください。"); return; }
+  if(isNaN(sp)||sp<=0) sp=+s.sp||5;
+  if(isNaN(ic)||ic<0)  ic=+s.inc||0;
+  cSegInsert(Math.round(mn*10)/10, Math.max(0.5,Math.min(25,Math.round(sp*10)/10)),
+             Math.max(0,Math.min(15,Math.round(ic*10)/10)));
+  cPadClose();
+}
+/* いま走っている区間のすぐ次に、1区間を差し込む。
+   ・cRun.plan だけを触る（プログラム＝DB側の既定は書き換えない）
+   ・すでに過ぎた区間の長さは変えないので、経過秒の計算はずれない
+   ・区間の切り替え音は「s+番号」で覚えているため、差し込みで番号が
+     1つずつ後ろへずれる。ずれた先の分だけ覚えを消して、鳴り損ねを防ぐ。 */
+function cSegInsert(min, sp, inc){
+  if(!cRun) return false;
+  var q=cPos(); if(q.done) return false;
+  var cur=cRun.plan[q.i]; if(!cur) return false;
+  cRun.plan.splice(q.i+1, 0, {lb:"追加", min:min, sp:sp, inc:inc, b:cur.b, bt:cur.bt});
+  var ch=cRun.chimed||{};
+  Object.keys(ch).forEach(function(k){
+    var m=/^s(\d+)$/.exec(k);
+    if(m && (+m[1])>q.i) delete ch[k];
+  });
+  cRun.chimed=ch;
+  cSaveRun(); render();
+  return true;
+}
 function cStopRun(){
+  cPadClose();   /* v14: 走行画面を離れるときは小窓も片づける */
   if(cTimer){ clearInterval(cTimer); cTimer=null; }
   DB.crun=null; save();
   try{ if(cWake){ cWake.release(); cWake=null; } }catch(e){}
 }
 function cFinish(){
-  var min=Math.max(1, Math.round(cElapsed()/60));
-  var seed=cRun?{min:min, plan:cClone(cRun.plan), blocks:cClone(cRun.blocks),
+  /* v14: 分に丸めず、秒まで渡す（33分15秒の日と33分50秒の日を同じにしない）。 */
+  var tot=Math.max(0, cElapsed());
+  var min=Math.floor(tot/60), sec=tot%60;
+  if(min===0 && sec===0){ min=1; }
+  var seed=cRun?{min:min, sec:sec, plan:cClone(cRun.plan), blocks:cClone(cRun.blocks),
                  progId:cRun.progId, progName:cRun.progName, rates:cClone(cRun.rates||{})}
-               :{min:min, plan:cClone(cPlan()), blocks:cClone(cBlocks()),
+               :{min:min, sec:sec, plan:cClone(cPlan()), blocks:cClone(cBlocks()),
                  progId:(curProg()||{}).id, progName:(curProg()||{}).name||"", rates:{}};
   cStopRun(); cRun=null;
   cInOpen(seed);
@@ -1151,15 +1257,15 @@ function viewCRun(){
   <div class="card">
     <div class="ctwo">
       <div>
-        <div class="cval">${n1(s.inc)}<span>%</span></div>
-        <div class="clab">傾斜</div>
+        <div class="cval${q.done?"":" tap"}" ${q.done?"":`onclick="cPadOpen('inc')"`}>${n1(s.inc)}<span>%</span></div>
+        <div class="clab">傾斜${q.done?"":"（数字をタップ）"}</div>
         ${q.done?"":`<div class="cadj">
           <button onclick="cAdj('inc',1)">＋</button>
           <button onclick="cAdj('inc',-1)">−</button>
         </div>`}
       </div>
       <div>
-        <div class="cval">${n1(s.sp)}<span>km/h</span></div>
+        <div class="cval${q.done?"":" tap"}" ${q.done?"":`onclick="cPadOpen('sp')"`}>${n1(s.sp)}<span>km/h</span></div>
         <div class="clab">速度 ・ ${pace(s.sp)}</div>
         ${q.done?"":`<div class="cadj">
           <button onclick="cAdj('sp',1)">＋</button>
@@ -1189,10 +1295,14 @@ function viewCRun(){
     }).join("")}
     <p class="note" style="margin:8px 0 0">あとで記録の画面でも入れられます。<strong>空のままでも構いません。</strong></p>
   </div>`:``}
+  ${q.done?"":`<div class="card" style="padding:12px 14px">
+    <button class="btn ghost" style="margin-top:0" onclick="cPadOpen('seg')">＋ この区間のあとに1つ足す</button>
+    <p class="note" style="margin:7px 0 0">今日この回だけです。<strong>プログラムの中身は変わりません。</strong>差し込んだぶん、全体の時間も伸びます。</p>
+  </div>`}
   <div class="card">
     <p class="note" style="margin:0">${nx?`次は <strong>${segLine(nx)}</strong>`:`これが最後の区間です`}
     <br>トレッドミルの操作はご自分で。ここは<strong>いま何に設定するかを出すだけ</strong>です。${q.done?"":`
-    <br>実際に速度や傾斜を変えたら、上の＋−も合わせて動かしてください。<strong>この回の記録にそのまま残ります</strong>（あとで直さなくて大丈夫です）。いまの区間だけに効きます。`}</p>
+    <br>実際に速度や傾斜を変えたら、上の＋−も合わせて動かしてください（<strong>数字そのものをタップすると直接入れられます</strong>）。<strong>この回の記録にそのまま残ります</strong>（あとで直さなくて大丈夫です）。いまの区間だけに効きます。`}</p>
   </div>
   <button class="btn" onclick="cFinish()">終わった（記録する）</button>
   <button class="btn link" onclick="cQuit()">この回を残さずにやめる</button>`;
@@ -1203,7 +1313,9 @@ var cBuf=null;
 function cInOpen(seed){
   var p=(seed&&seed.plan)?seed.plan:cClone(cPlan());
   var bs=(seed&&seed.blocks)?seed.blocks:cClone(cBlocks());
-  cBuf={min:(seed&&seed.min)?seed.min:cTotal(p), plan:p, blocks:bs,
+  cBuf={min:(seed&&seed.min!=null)?seed.min:Math.floor(cTotal(p)),
+        sec:(seed&&seed.sec!=null)?seed.sec:Math.round((cTotal(p)%1)*60),
+        plan:p, blocks:bs,
         progId:(seed&&seed.progId)||(curProg()||{}).id,
         progName:(seed&&seed.progName)||(curProg()||{}).name||"",
         rates:(seed&&seed.rates)?seed.rates:{},
@@ -1219,7 +1331,8 @@ function cinRate(bi,v){
 function cinGrab(){
   if(!cBuf) return;
   var g=function(id){ var e=document.getElementById(id); return e?e.value:""; };
-  var m=parseFloat(g("c_min")); if(!isNaN(m)&&m>0) cBuf.min=m;
+  var m=parseFloat(g("c_min")); if(!isNaN(m)&&m>=0) cBuf.min=Math.max(0,Math.round(m));
+  var sc=parseFloat(g("c_sec")); if(!isNaN(sc)&&sc>=0) cBuf.sec=Math.max(0,Math.min(59,Math.round(sc)));
   cBuf.dist=g("c_dist"); cBuf.kcal=g("c_kcal"); cBuf.memo=g("c_memo");
 }
 function cinSave(){
@@ -1230,7 +1343,8 @@ function cinSave(){
      過去の記録・グラフが hard を見ているため、無くさない。 */
   var vals=Object.keys(cBuf.rates||{}).map(function(kk){return cBuf.rates[kk];}).sort(function(a,b){return a-b;});
   var mid = vals.length ? vals[Math.floor(vals.length/2)] : 2;
-  DB.cardio.push({date:Date.now(), min:Math.round(cBuf.min), plan:cClone(cBuf.plan),
+  if((+cBuf.min||0)<=0 && (+cBuf.sec||0)<=0){ alert("時間を入れてください（分か秒のどちらかは0より大きい必要があります）"); return; }
+  DB.cardio.push({date:Date.now(), min:Math.max(0,Math.round(cBuf.min||0)), sec:Math.max(0,Math.min(59,Math.round(cBuf.sec||0))), plan:cClone(cBuf.plan),
                   blocks:cClone(cBuf.blocks||[]), progId:cBuf.progId, progName:cBuf.progName,
                   rates:cClone(cBuf.rates||{}),
                   dist:Math.round(d*100)/100, kcal:(isNaN(k)?0:Math.round(k)),
@@ -1244,8 +1358,11 @@ function viewCIn(){
   <h1>今日の有酸素を記録</h1>
   <p class="sub">トレッドミルの表示をそのまま写してください。<strong>Garminの数字と合っていなくて構いません。</strong>毎回同じ物差しで並べば、伸びは見えます。</p>
   <div class="card">
-    <label>時間（分）</label>
-    <input id="c_min" type="number" inputmode="decimal" step="1" value="${cBuf.min}">
+    <label>時間<small>区間タイマーで走った日は、走った実時間が秒まで入っています</small></label>
+    <div class="row">
+      <div style="flex:1;min-width:0"><input id="c_min" type="number" inputmode="numeric" step="1" min="0" value="${+cBuf.min||0}" placeholder="分"><div class="bigsub" style="margin:2px 0 0;text-align:center">分</div></div>
+      <div style="flex:1;min-width:0"><input id="c_sec" type="number" inputmode="numeric" step="1" min="0" max="59" value="${+cBuf.sec||0}" placeholder="秒"><div class="bigsub" style="margin:2px 0 0;text-align:center">秒</div></div>
+    </div>
     <label>距離（km）</label>
     <input id="c_dist" type="number" inputmode="decimal" step="0.01" value="${esc(cBuf.dist)}" placeholder="例 3.72">
     <label>消費カロリー（kcal）<small>機種と体重設定で変わるので、機械が変わった日は比べられません</small></label>
@@ -1688,8 +1805,8 @@ function viewCGraph(){
   var A2=DB.cardio;
   if(!A2.length) return `<h1>有酸素の記録</h1><p class="sub">まだ記録がありません。</p>
     <button class="btn ghost" onclick="go('cardio')">戻る</button>`;
-  var dist=A2.map(function(r){ return Math.round(per30(r.dist,r.min)*100)/100; });
-  var kcal=A2.map(function(r){ return Math.round(per30(r.kcal,r.min)); });
+  var dist=A2.map(function(r){ return Math.round(per30(r.dist,recMin(r))*100)/100; });
+  var kcal=A2.map(function(r){ return Math.round(per30(r.kcal,recMin(r))); });
   var ds=A2.map(function(r){ return mdw(r.date); });
   var sel = (cSel>=0 && cSel<A2.length) ? A2[cSel] : null;
   return `
@@ -1705,14 +1822,14 @@ function viewCGraph(){
   ${sel?`<div class="card">
     <div class="bigsub">${mdw(sel.date)} の中身</div>
     ${(sel.plan||[]).map(function(s){return `<div class="prev">${segLine(s)}</div>`}).join("")}
-    <p class="note">${sel.min}分 ／ ${n1(sel.dist)}km ／ ${sel.kcal}kcal ／ ${HARDS[(sel.hard||2)-1]}${sel.memo?"<br>"+esc(sel.memo):""}</p>
+    <p class="note">${minSecTxt(sel)} ／ ${n1(sel.dist)}km ／ ${sel.kcal}kcal ／ ${HARDS[(sel.hard||2)-1]}${sel.memo?"<br>"+esc(sel.memo):""}</p>
   </div>`:""}
   <div class="sec">一覧（新しい順）</div>
   <div class="card">
     ${A2.slice().reverse().map(function(r){
       var i=A2.indexOf(r), m=mainOf(r.plan||[]);
-      return `<div class="log"><b>${mdw(r.date)}</b> ${r.min}分 ／ ${n1(r.dist)}km ／ ${r.kcal}kcal ／ ${HARDS[(r.hard||2)-1]}
-        <small>メイン ${n1(m.sp)}km/h ・ 傾斜${n1(m.inc)}% ／ 30分あたり ${n1(per30(r.dist,r.min))}km・${Math.round(per30(r.kcal,r.min))}kcal${r.memo?"<br>"+esc(r.memo):""}
+      return `<div class="log"><b>${mdw(r.date)}</b> ${minSecTxt(r)} ／ ${n1(r.dist)}km ／ ${r.kcal}kcal ／ ${HARDS[(r.hard||2)-1]}
+        <small>メイン ${n1(m.sp)}km/h ・ 傾斜${n1(m.inc)}% ／ 30分あたり ${n1(per30(r.dist,recMin(r)))}km・${Math.round(per30(r.kcal,recMin(r)))}kcal${r.memo?"<br>"+esc(r.memo):""}
         <br><span class="link" style="cursor:pointer;color:#6f7a8c;text-decoration:underline" onclick="cDel(${i})">この回を削除</span></small></div>`;
     }).join("")}
   </div>
@@ -1730,10 +1847,10 @@ function viewCardio(){
 
 /* ===================== 画面 ===================== */
 let view="home", curId=null, tmpW=null, tmpR=null, tmpB=null;
-function go(v){ view=v; render(); }
+function go(v){ if(typeof cPadClose==="function") cPadClose(); view=v; render(); }
 /* v5: 文字を打ち込む画面では、1秒ごとの自動再描画を止める（打っている途中で消えないように）。
    経過時間そのものは Date.now() から計算しているので、戻れば正しい値に追いつく。 */
-function isTyping(){ return view==="backup" || view==="edlist" || view==="edex" || view==="bands"
+function isTyping(){ return !!cPad || view==="backup" || view==="edlist" || view==="edex" || view==="bands"
     || view==="cin" || view==="cplan" || view==="cimp" || view==="ctext" || view==="cspec"; }
 
 /* ===== バックアップ（書き出し・読み込み）　2026-08-15追加 =====================
