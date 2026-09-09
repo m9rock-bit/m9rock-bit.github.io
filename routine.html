@@ -661,7 +661,15 @@ var DB = { v:19, sets:null, chime:true, voice:true, third:true, spotifyUrl:"", s
   run:null,
   /* v34 (2026-09-08): 🔋 今日は畳む — 畳んだあとに選ぶ「積極的な休養」の候補。
      null のあいだは REST_DEF を使う。編集画面はまだ無い（第2回で足す）。 */
-  rest:null };
+  rest:null,
+  /* ===== v35 (2026-09-10): 画面を離れているあいだに気づく（R4）=====
+     awaySound … 離席中に鳴る音を、このアプリ自身が鳴らす（仕組みは awayWav の上）
+     awayTimer … 項目を進めるたび／延長のたびに、その項目の残り時間を
+                 iPhone標準タイマーへ自動で渡す。awaySound が仕掛かった回は渡さない
+     awayMin  … これより短い項目には標準タイマーを渡さない。渡す瞬間に
+                ショートカットAppへ画面が飛ぶため、30秒の項目で毎回飛ばされると
+                かえって手が止まる。0 にすればすべての項目で渡す。 */
+  awaySound:true, awayTimer:true, awayMin:60 };
 try{
   var raw = localStorage.getItem(KEY);
   if(raw){
@@ -706,6 +714,10 @@ try{
     if(typeof p.sceneCur==="string") DB.sceneCur = p.sceneCur;
     if(Array.isArray(p.sxProgs)) DB.sxProgs = p.sxProgs;
     if(typeof p.third==="boolean") DB.third = p.third;
+    /* v35: 離席まわり（★入れ物を足したら、この読み戻しにも足すこと） */
+    if(typeof p.awaySound==="boolean") DB.awaySound = p.awaySound;
+    if(typeof p.awayTimer==="boolean") DB.awayTimer = p.awayTimer;
+    if(typeof p.awayMin==="number" && p.awayMin>=0) DB.awayMin = p.awayMin;
     if(DB.count < DB.log.length) DB.count = DB.log.length;
     if(Array.isArray(p.sets)) DB.sets = p.sets;
     else if(p.sets && typeof p.sets==="object"){
@@ -889,6 +901,7 @@ function resumeRun(){
   if(tick) clearInterval(tick);
   tick = setInterval(tickRender, 250);
   view = "run"; saveRun(); render();
+  awayArm();   /* v35: 続きに戻った回にも仕掛ける（押した操作の中なので音を出せる） */
 }
 /* 続きには戻らず、そこまでを記録として残して閉じる。
    「途中まで完了したセットの実施時間が残るようにしたい」（2026-09-04 ご記入）。 */
@@ -904,7 +917,7 @@ function finishPending(){
 
 /* --- 状態 --- */
 /* v27: 版の表示（ホーム最下部）。中身を変えたら、ここも必ず上げる。 */
-var APPVER = "切り替えルーティン v34 ・ 2026-09-08";
+var APPVER = "切り替えルーティン v35 ・ 2026-09-10";
 var view = "home";
 var curId = null;
 var startAt = 0;
@@ -1301,6 +1314,228 @@ function thirdTimer(){
   var t3 = thirdLeft();
   if(t3 < 1) return;
   nativeTimer(t3);
+}
+
+/* ============================================================================
+   v35（2026-09-10 チャットでのご依頼 ＝ 指示_2026-09-10 R4）
+   「項目ごとに進む」で画面を離れると、目安を過ぎたことに気づけない
+   ----------------------------------------------------------------------------
+   【何が起きているか】iOSは、Safariを裏に回した瞬間にこのページを止める。
+   JSのタイマーも、Web Audioに予約した音も、まとめて止まる。だから
+   ・thirdCheck の読み上げ（1/3の知らせ）
+   ・chimeStep の切り替え音
+   はどちらも、**前面にいるときにしか鳴らない**。8/19にお答えした
+   「Webページから振動は出せない」も同じ壁で、実装では回避できない。
+
+   【止まらないもの】2つだけある。
+   ① iPhone標準のタイマー（ショートカット経由で予約する。v32で1/3用に実装済み）
+   ② **すでに再生が始まっている音声の再生そのもの**（音楽アプリと同じ扱いで、
+      裏に回っても鳴り続ける）
+   ②を使うと「◯分の無音 → チャイム」という1本の音声を先に流しておくだけで、
+   ◯分後にチャイムだけが鳴る。ショートカットAppへ飛ばずに済む。
+
+   【この版で入れたもの】
+   1. 標準タイマーへ渡す対象を **1/3 → その項目の残り全部** に広げ、
+      **5分より長い項目だけ → すべての項目** にした（R4のご依頼そのもの）。
+   2. 「✓ できた — 次へ」「↷ スキップ」「延長」「開始」のたびに**自動で仕掛ける**
+      （2026-09-10 ご指示「常に自動でいい」「延長したら渡し直す」）。
+   3. ②の背景音を実装し、**仕掛かったときは①へ飛ばさない**。画面を奪われる
+      回数を0にするため。背景音が鳴らない端末・設定なら、設定で「離席中の音」を
+      切れば①（標準タイマー）に自動で戻る。＝どちらかが効かなくても全滅しない。
+   4. 戻ってきたときの受け止め（awayBackBox）。
+
+   【正直に書いた制約】
+   ・②が iPhone で確実に鳴るかは**こちらでは確かめていない**（実機がない）。
+     鳴らなければ設定で切ってください。①に戻ります。
+   ・②が鳴っているあいだ、Spotify・YouTubeの音は止まる。そのため
+     **「開始時にプレイリストを開く」がオンのセットでは②を使わない**
+     （awaySoundOK）。そこは①（標準タイマー）が受け持つ。
+   ・自動で進むセット（呼吸法など）は対象外。自分で次へ進むため。
+   ・**行をタップして項目を移るときは仕掛け直さない。**標準タイマー側のときに
+     毎回ショートカットAppへ飛ばされると、並べ替えすらできなくなるため。
+   ============================================================================ */
+var AWAY_RATE   = 4000;      /* 背景音の標本化周波数。1秒あたり4KB（8bit・モノラル） */
+var AWAY_MAXSEC = 40*60;     /* これより長い残りには背景音を仕掛けない（約9.6MBが上限） */
+var AWAY_RING   = 9;         /* チャイムを鳴らす秒数 */
+var awayAudio = null;        /* いま流している背景音 */
+var awayUrl   = "";          /* その Blob の URL（片づけるために持つ） */
+var awayKind  = "";          /* いま仕掛かっているもの: "sound" / "timer" / "both" / "" */
+var awaySec   = 0;           /* 何秒後に鳴る予定か */
+var awayAt    = 0;           /* 仕掛けた時刻 */
+var awayStep  = -1;          /* どの項目に対して仕掛けたか */
+var awayFail  = "";          /* 背景音を始められなかったときの理由（画面に出す） */
+/* 片づけた古い <audio> の error / play() の失敗が、いま仕掛けたものの
+   失敗として画面に出ないようにするための世代番号（awayHush で必ず進める）。 */
+var awayGen   = 0;
+
+/* 「◯秒の無音 → チャイム」の WAV を、その場で組み立てて Blob で返す。
+   ★8bit・4000Hz なのは大きさのため（1秒=4KB）。この標本化周波数でも
+     1000Hz と約667Hz の矩形波はちょうど4標本・6標本で表せるので濁らない。
+   ★完全な無音（全部128）にすると、端末によっては「何も鳴っていない」と
+     判断されて再生を止められることがあるため、ごく薄い揺らぎを入れてある
+     （4000標本に1つだけ1目盛りずらす＝聞こえない大きさ）。 */
+function awayWav(sec){
+  var R = AWAY_RATE;
+  var q = Math.max(0, Math.round(sec * R));
+  var r = Math.round(AWAY_RING * R);
+  var n = q + r;
+  var b = new Uint8Array(44 + n);
+  function s4(o, t){ for(var i=0;i<4;i++) b[o+i] = t.charCodeAt(i); }
+  function u32(o, v){ b[o]=v&255; b[o+1]=(v>>8)&255; b[o+2]=(v>>16)&255; b[o+3]=(v>>24)&255; }
+  function u16(o, v){ b[o]=v&255; b[o+1]=(v>>8)&255; }
+  s4(0,"RIFF"); u32(4, 36+n); s4(8,"WAVE");
+  s4(12,"fmt "); u32(16,16); u16(20,1); u16(22,1);
+  u32(24,R); u32(28,R); u16(32,1); u16(34,8);
+  s4(36,"data"); u32(40,n);
+  b.fill(128, 44, 44+n);
+  for(var i=0;i<q;i+=4000) b[44+i] = 129;      /* 聞こえない揺らぎ */
+  /* チャイム: 高い音と低い音を交互に、短く区切って繰り返す。
+     人は鳴りっぱなしの音より断続音に気づくので、連続では鳴らさない。 */
+  var pat = Math.round(1.5*R);                 /* 1.5秒で1かたまり */
+  var aOn = Math.round(.22*R), bOn0 = Math.round(.30*R), bOn1 = Math.round(.52*R);
+  for(var k=0;k<r;k++){
+    var pp = k % pat, half = 0;
+    if(pp < aOn) half = 2;                     /* 1000Hz（4標本で1周期） */
+    else if(pp >= bOn0 && pp < bOn1) half = 3; /* 約667Hz（6標本で1周期） */
+    if(half) b[44+q+k] = ((Math.floor(pp/half) % 2) ? 46 : 210);
+  }
+  try{ return new Blob([b], {type:"audio/wav"}); }catch(e){ return null; }
+}
+/* 背景音を使ってよいセットか。プレイリストを流すセットでは使わない
+   （鳴らしているあいだ Spotify の音が止まってしまうため）。 */
+function awaySoundOK(s){
+  if(!DB.awaySound) return false;
+  if(!s || s.auto) return false;
+  if(s.spotify) return false;
+  return true;
+}
+/* 背景音を仕掛ける。**押した操作の中から呼ぶこと**
+   （iOSは、指で押した操作の外からは音を出せない。v11と同じ理由）。 */
+function awayPlay(sec, label){
+  awayFail = "";
+  try{
+    var bl = awayWav(sec);
+    if(!bl){ awayFail = "音声を作れませんでした"; return false; }
+    awayHush();
+    var gen = awayGen;
+    awayUrl = URL.createObjectURL(bl);
+    awayAudio = new Audio();
+    awayAudio.src = awayUrl;
+    awayAudio.preload = "auto";
+    awayAudio.onerror = function(){ if(gen===awayGen) awayFail = "音声を再生できませんでした"; };
+    var pr = awayAudio.play();
+    if(pr && pr["catch"]) pr["catch"](function(){ if(gen===awayGen) awayFail = "この端末では自動で鳴らせませんでした"; });
+    /* ロック画面・コントロールセンターに、いま何の項目かを出す。
+       残り時間は裏に回ると更新できないので、名前と「◯分後に鳴ります」だけ。 */
+    try{
+      if(navigator.mediaSession && window.MediaMetadata){
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: String(label||"ルーティン"),
+          artist: "B.M.C. 切り替えルーティン",
+          album: durLabel(sec)+"後に鳴ります"
+        });
+      }
+    }catch(e){}
+    return true;
+  }catch(e){ awayFail = "音声を再生できませんでした"; return false; }
+}
+function awayHush(){
+  awayGen++;
+  try{ if(awayAudio){ awayAudio.onerror = null; awayAudio.pause(); awayAudio.removeAttribute("src"); awayAudio.load(); } }catch(e){}
+  awayAudio = null;
+  try{ if(awayUrl) URL.revokeObjectURL(awayUrl); }catch(e){}
+  awayUrl = "";
+}
+function awayClear(){ awayHush(); awayKind = ""; awaySec = 0; awayAt = 0; awayStep = -1; }
+/* いまの項目に対して「離席中に鳴るもの」を仕掛け直す。 */
+function awayArm(){
+  var s = setOf(curId);
+  awayClear();
+  if(!s || s.auto) return;
+  if(curStep==null || curStep<0) return;
+  var st = stepsOf(s); if(!st[curStep]) return;
+  var l = stepLeft();
+  if(l < 1) return;
+  awayStep = curStep; awaySec = l; awayAt = Date.now();
+  if(awaySoundOK(s) && l <= AWAY_MAXSEC && awayPlay(l, st[curStep].text)){ awayKind = "sound"; return; }
+  if(DB.awayTimer && l >= (DB.awayMin||0)){ awayKind = "timer"; nativeTimer(l); return; }
+  awayKind = ""; awaySec = 0; awayStep = -1;
+}
+/* 手で押したとき用。背景音が仕掛かっていても、標準タイマーにも渡せる。 */
+function awayTimerNow(){
+  var l = stepLeft();
+  if(l < 1) return;
+  awayKind = (awayKind==="sound" || awayKind==="both") ? "both" : "timer";
+  awaySec = l; awayAt = Date.now(); awayStep = curStep;
+  nativeTimer(l);
+}
+function awaySoundOff(){ DB.awaySound = false; save(); awayClear(); render(); }
+/* 仕掛けたものが鳴るまでの残り（秒）。過ぎていればマイナス。 */
+function awayRest(){ return awaySec - Math.floor((Date.now()-awayAt)/1000); }
+/* 実行画面の「離席」ブロック。**いま何が仕掛かっているかを必ず出す。**
+   仕掛かっていないのに仕掛かっていると思い込むのが、いちばん困るため。 */
+function awayBlock(s){
+  if(!s || s.auto) return "";
+  var l = stepLeft(), rest = awayRest();
+  var armed = (awayStep===curStep && !!awayKind && rest > -60);
+  var h = "";
+  if(armed && (awayKind==="sound" || awayKind==="both")){
+    h += '<div class="hint" style="border-color:#7a9ec4;color:#bcd6ee">'
+       + '<b>🔔 離席中に鳴る音を仕掛けました。</b>'
+       + (rest>0 ? 'あと <b>'+mmss(rest)+'</b> で鳴ります。' : 'もう鳴ったはずの時刻です。')
+       + '他のアプリを開いていても鳴ります（この画面を閉じない限り）。'
+       + (awayKind==="both" ? '<br>iPhone標準のタイマーにも渡してあります。' : '')
+       + '<br><b>鳴らしているあいだ、Spotify・YouTubeの音は止まります。</b></div>';
+  }else if(armed && awayKind==="timer"){
+    h += '<div class="hint" style="border-color:#7a9ec4;color:#bcd6ee">'
+       + '<b>⏰ iPhoneの標準タイマーに '+durLabel(awaySec)+' を渡しました。</b>'
+       + 'ロック画面に残り時間が出て、他のアプリを使っていても鳴ります。</div>';
+  }else if(l > 0){
+    h += '<div class="hint">この項目には、離席中に鳴るものが<b>仕掛かっていません</b>。'
+       + '下のボタンで、いつでも渡せます。</div>';
+  }
+  if(awayFail){
+    h += '<div class="warn">離席中の音を鳴らせませんでした（'+esc(awayFail)+'）。'
+       + '下の「⏰ …タイマーへ渡す」を使ってください。設定で「離席中の音」を切ると、'
+       + '<b>項目を進めるたび自動で標準タイマーへ渡す</b>形に戻ります。</div>';
+  }
+  if(l > 0){
+    h += '<button class="btn ghost" onclick="awayTimerNow()">⏰ この項目の残り '+durLabel(l)+' を iPhoneのタイマーへ渡す</button>';
+  }
+  if(awayKind==="sound" || awayKind==="both"){
+    h += '<button class="btn link" onclick="awaySoundOff()">🔕 離席中の音をやめる（以後オフ・設定で戻せます）</button>';
+  }
+  /* v32の「1/3で鳴るタイマー」は、何も仕掛かっていない長い項目のときだけ残す。
+     残り全部のタイマーと同時に押すと標準タイマーが2つ動いて分かりにくいため。
+     1/3の**読み上げ**（thirdCheck）はこの版でも一切変えていない。 */
+  if(!armed && DB.third!==false && stepSec(curStep) > THIRD_LONG){
+    var t3 = thirdLeft();
+    if(t3 > 5) h += '<button class="btn link" onclick="thirdTimer()">⏰ かわりに 1/3（あと'+durLabel(t3)+'）で鳴らす</button>';
+  }
+  return h;
+}
+/* v35: 戻ってきたときの受け止め。1分以上離れていたときだけ出す。
+   ここで押せるのは「次へ」「＋5分」「閉じる」の3つだけにしてある。
+   戻った直後に判断ごとを増やすと、そのまま画面を閉じてしまうため。 */
+var awayHidAt = 0, awayBack = 0;
+function awayBackClose(){ awayBack = 0; render(); }
+function awayBackNext(){ awayBack = 0; toggleStep(curStep); }
+function awayBackMore(){ awayBack = 0; extendStep(300); }
+function awayBackBox(s, st){
+  if(!awayBack || !s || s.auto) return "";
+  if(curStep==null || curStep<0 || curStep>=st.length) return "";
+  var l = stepLeft();
+  return '<div class="iobox" style="border-color:#c4a06a">'
+    + '<label style="margin-top:0">おかえりなさい</label>'
+    + '<p class="note" style="margin-top:5px"><b>'+durLabel(awayBack)+' 離れていました。</b>'
+    + 'いまは <b>'+(curStep+1)+' / '+st.length+'「'+esc(st[curStep].text)+'」</b>。'
+    + (l<0 ? '目安を <b>'+durLabel(-l)+' 過ぎています</b>。' : 'この項目はあと <b>'+durLabel(l)+'</b> です。')
+    + '<br>離れていた分も、この項目に使った時間として数えています。</p>'
+    + '<div class="row" style="margin-top:8px">'
+    + '<button class="btn ghost" style="margin-top:0;font-size:14px" onclick="awayBackMore()">＋5分 続ける</button>'
+    + '<button class="btn save" style="margin-top:0;font-size:14px" onclick="awayBackNext()">✓ できた — 次へ</button>'
+    + '</div>'
+    + '<button class="btn link" onclick="awayBackClose()">閉じる（何もしない）</button></div>';
 }
 
 /* --- v5: Spotifyのプレイリストを開く ----------------------------
@@ -1776,10 +2011,13 @@ function start(id, fromIndex){
      どちらも前面のアプリを切り替えるので、同時に両方はできない。
      タイマーを優先し、プレイリストは実行中の画面のボタンから開く形にした
      （どちらを優先するかは編集画面にも書いてある）。 */
-  if(s && s.timer && limitOf(s)>0) nativeTimer(limitOf(s));
-  else openSpotify(s);   /* set.spotify が入っているセットだけ開く（中で判定） */
+  if(s && s.timer && limitOf(s)>0){ nativeTimer(limitOf(s)); }
+  else if(s && s.spotify){ openSpotify(s); }
+  /* v35: プレイリストもセット全体のタイマーも無いセットでは、最初の項目にも
+     離席中に鳴るものを仕掛ける（外向きの動作は1つだけ、という v8 の線は維持）。 */
+  else { awayArm(); }
 }
-function stop(){ clearRun(); if(tick) clearInterval(tick); tick=null; startAt=0; curId=null; doneSet={}; curStep=0; runIdx=null; autoPaused=false; pauseAt=0; autoFinished=false; stepAt=0; stepExtra={}; runTimes={}; stepAcc={}; inputOpen=null; autoShift=0; foldOn=false; foldAsking=false; foldRest=""; }
+function stop(){ awayClear();   /* v35 */ clearRun(); if(tick) clearInterval(tick); tick=null; startAt=0; curId=null; doneSet={}; curStep=0; runIdx=null; autoPaused=false; pauseAt=0; autoFinished=false; stepAt=0; stepExtra={}; runTimes={}; stepAcc={}; inputOpen=null; autoShift=0; foldOn=false; foldAsking=false; foldRest=""; }
 
 /* ============================================================
    v16: 🛌就寝＋🌃中途覚醒対応
@@ -1969,6 +2207,9 @@ function extendStep(sec){
   if(thirdSaid[curStep] && stepUsed() < stepSec(curStep)/3) delete thirdSaid[curStep];
   saveRun();   /* v22 */
   render();
+  /* v35（2026-09-10 ご指示「延長したら渡し直す」）: 延長後の残りで仕掛け直す。
+     これが無いと、鳴って戻って延長したあと、また同じことが起きる。 */
+  awayArm();
 }
 /* v20 (2026-09-03 ご依頼): 行のタップは「そのステップへ移る」だけにした。
    完了は「✓ できた — 次へ」の1本に絞る。従来はタップ＝即完了で、
@@ -2085,6 +2326,8 @@ function toggleStep(i){
     /* v5: タップ式のセットでも、音声がオンなら次のステップを読み上げる */
     if(s.voice){ var nx = stepsOf(s)[curStep]; if(nx) speak(sayOf(nx)); }
     render();
+    awayArm();   /* v35: 次の項目の分を仕掛け直す。render() のあとに置くこと
+                    （標準タイマー側のときは、ここでショートカットAppへ飛ぶため） */
   }
 }
 /* v19: タップ式のセットで、いまの項目を飛ばして次へ進む（2026-09-02追加）。
@@ -2112,10 +2355,12 @@ function skipStep(){
     chimeStep();
     if(s.voice){ var nx = stepsOf(s)[curStep]; if(nx) speak(sayOf(nx)); }
     render();
+    awayArm();   /* v35: スキップでも仕掛け直す（理由は toggleStep 側のコメント） */
   }
 }
 function enterDone(){
   if(tick) clearInterval(tick); tick=null;
+  awayClear();   /* v35: 離席中に鳴るものを片づける（終わったあとに鳴らさない） */
   /* v21: 「ここまでで終える」で切り上げた項目の時間も、そこまでを残す */
   commitSeg();
   logRun();          /* 終わりまで来た回は、0ステップでも「押した」事実として残す */
@@ -2443,10 +2688,31 @@ function viewHome(){
      + '<p class="note">タップで進めるセットだけ、いまの項目の設定時間の1/3を過ぎたときに、'
      + '<b>チャイム2音 → 画面が光る → 「のこり◯分です」を間をあけて2回</b>の順で知らせます（チャイムは「終了音を鳴らす」に従います）。'
      + '<b>延長を押したら、1/3の位置も計算し直します。</b>1分より短い項目と、自動で進むセットでは鳴りません。'
-     + '<br><b>5分より長い項目</b>では、実行中の画面に「⏰ 1/3で鳴るタイマーを仕掛ける」が出ます。'
-     + '他のアプリを使っているあいだ、このアプリは止まっていて自分では鳴らせないため、iPhone標準のタイマーに肩代わりさせるものです（押したときだけ飛びます）。</p>'
+     + '<br>v35から、<b>離席中に鳴らす仕組みは下の「📱 画面を離れているあいだに気づく」にまとめました。</b>'
+     + '「⏰ 1/3で鳴るタイマー」は、何も仕掛かっていない5分より長い項目のときだけ、実行中の画面に出ます（読み上げ自体はここのスイッチのままです）。</p>'
      + '<p class="note">ここは<b>全体のスイッチ</b>です。これを切ると、どのセットでも読み上げません。'
      + '<br>セットごとのオンオフと読み上げる文言は「セットを編集」の中にあります。対応していない端末では何も起きません。</p></div>';
+  /* v35（2026-09-10 ご依頼 ＝ R4）: 画面を離れているあいだに気づくための設定。
+     ★2つは「どちらかが効かなくても全滅しない」ように組んである。
+       上（離席中の音）が仕掛かった回は、下（標準タイマー）へは飛ばない。
+       上を切れば、下が自動で受け持つ。 */
+  h += '<div class="card"><label>📱 画面を離れているあいだに気づく</label>'
+     + '<div class="toggle" style="margin-top:8px"><b>離席中の音を、このアプリが鳴らす</b>'
+     + '<button class="sw'+(DB.awaySound?' on':'')+'" onclick="DB.awaySound=!DB.awaySound;save();render()"><i></i></button></div>'
+     + '<p class="note">「◯分の無音 → チャイム」という音声を、項目に入った時点で流し始めます。'
+     + '<b>再生そのものは裏に回っても止まらない</b>ので、他のアプリを使っていてもチャイムだけが鳴ります。ショートカットAppへは飛びません。'
+     + '<br><b>鳴らしているあいだ、Spotify・YouTubeの音は止まります。</b>そのため「開始時にプレイリストを開く」がオンのセットでは使いません（そちらは下の標準タイマーが受け持ちます）。'
+     + '<br><b>iPhoneの実機では確かめていません。</b>鳴らなければここを切ってください。下の標準タイマーに自動で切り替わります。'
+     + '<br>40分より長い残りには仕掛けません（音声が大きくなりすぎるため）。</p>'
+     + '<div class="toggle" style="margin-top:12px"><b>項目を進めるたび、iPhone標準タイマーへ渡す</b>'
+     + '<button class="sw'+(DB.awayTimer?' on':'')+'" onclick="DB.awayTimer=!DB.awayTimer;save();render()"><i></i></button></div>'
+     + '<p class="note">「✓ できた — 次へ」「↷ スキップ」「＋延長」を押すたびに、<b>その項目の残り時間</b>を'
+     + 'ショートカット「'+esc(DB.scName)+'」経由で標準タイマーへ渡します。ロック画面に残り時間が出ます。'
+     + '<br><b>渡す瞬間、毎回ショートカットAppへ画面が飛びます。</b>上の「離席中の音」が仕掛かった回は飛びません。</p>'
+     + '<label style="margin-top:12px">短い項目には渡さない（秒）</label>'
+     + '<input class="inp" type="number" min="0" step="10" value="'+(DB.awayMin||0)+'" onchange="DB.awayMin=Math.max(0,parseInt(this.value,10)||0);save();render()">'
+     + '<p class="note">この秒数より短い項目では、標準タイマーへ渡しません（30秒の項目のたびに画面が飛ぶほうが手が止まるため）。'
+     + '<b>0にすると、すべての項目で渡します。</b>上の「離席中の音」にはこの秒数は効きません（短い項目でも仕掛けます）。</p></div>';
   h += '<div class="card"><label>Spotifyプレイリストの既定URL</label>'
      + '<input class="inp" type="text" id="spurl" placeholder="https://open.spotify.com/playlist/..." value="'+esc(DB.spotifyUrl)+'" onchange="DB.spotifyUrl=this.value.trim();save()">'
      + '<p class="note"><b>セットごとにURLを入れていないとき</b>に、ここのURLを使います。'
@@ -2724,6 +2990,7 @@ function viewRun(){
        + '<b>🔋 今日は畳んでいます。</b>項目は減らしていません。<b>手をつけたら済み</b>でかまいません。'
        + '目安の時間は<b>いまの半分</b>にしてあります。</div>';
   }
+  h += awayBackBox(s, st);   /* v35: 1分以上離れて戻ってきたときだけ出る */
   h += '<div class="card">';
   h += '<div class="bigsub" style="margin-bottom:2px">'+(curStep<st.length ? (curStep+1)+' / '+st.length+'　'+esc(cur?cur.text:"") : 'ぜんぶ終わりました')+'</div>';
   h += '<div class="big'+(sl<0?' over':'')+'">'+mmss(sl)+'</div>';
@@ -2749,16 +3016,9 @@ function viewRun(){
        + '<button class="btn ghost" style="margin-top:0" onclick="extendStep(60)">＋1分 延長</button>'
        + '<button class="btn ghost" style="margin-top:0" onclick="extendStep(300)">＋5分 延長</button>'
        + '</div>';
-    /* v32（2026-09-07 ご指示）: 5分より長い項目のときだけ、1/3で鳴る
-       iPhone標準タイマーを仕掛けられるようにする。押したときだけ飛ぶ。 */
-    if(!s.auto && DB.third!==false && stepSec(curStep) > THIRD_LONG){
-      var t3 = thirdLeft();
-      if(t3 > 5){
-        h += '<button class="btn ghost" onclick="thirdTimer()">⏰ 1/3で鳴るタイマーを仕掛ける（あと'+durLabel(t3)+'）</button>';
-        h += '<p class="note" style="margin-top:4px">押すと<b>iPhoneの標準タイマー</b>を'+durLabel(t3)+'で仕掛けます（ショートカットAppへ一度飛びます）。'
-           + '<b>他のアプリを使っていても鳴り、ロック画面にも出ます。</b>この画面の時計は止まりません（離れていた分もそのまま数えます）。</p>';
-      }
-    }
+    /* v35（2026-09-10 ご依頼 ＝ 指示_2026-09-10 R4）: 離席中に鳴るものを
+       ここに1か所へまとめた。v32の「1/3で鳴るタイマー」もこの中に畳んである。 */
+    h += awayBlock(s);
     h += '<button class="btn ghost" onclick="skipStep()">↷ この項目をスキップ</button>';
     /* v26（2026-09-05 ご指摘）: 🧸 と 🛟 は画面のいちばん下にあり、
        **いちばん急いで押したいときに、いちばん遠かった。**スキップの直下へ移した。
@@ -2882,8 +3142,12 @@ function viewRun(){
      + '<b>移ると、それまでの項目は「中断中」になり、そこまでに使った時間はその項目に残ります。</b>戻ってくれば、その続きから数え直します。順番が前後しても、かかった時間は項目ごとに合計で記録されます。<br>'
      + '下の行から始めても構いません（上は「–」になるだけで、失敗にはなりません）。<br>'
      + '<b>足したもの・入れ替えた順番は、このセットにそのまま残ります。</b>やりながら形を作っていって構いません。</p>';
-  h += '<button class="btn ghost" onclick="nativeTimer()">⏱ iPhoneのタイマーにも残り'+Math.max(1,Math.round(left()/60))+'分を渡す</button>';
-  h += '<p class="note">この画面は他のアプリを開くと止まります（戻れば時刻から計算し直すのでズレません）。<br><b>画面の上に残り時間を出したいときは、上のボタンでiPhone標準のタイマーへ渡してください。</b></p>';
+  /* v35: こちらは**セット全体**の残り。項目ごとのタイマーは上の awayBlock にある。
+     どちらも同じ標準タイマーを使うので、押すと上の項目ごとの分は上書きされる。 */
+  h += '<button class="btn ghost" onclick="nativeTimer()">⏱ かわりに<b>セット全体</b>の残り'+Math.max(1,Math.round(left()/60))+'分をタイマーへ渡す</button>';
+  h += '<p class="note">この画面は他のアプリを開くと止まります（戻れば時刻から計算し直すのでズレません）。'
+     + '<br><b>ふだんは上の「この項目の残り」で足ります。</b>こちらは「終わりの時刻だけ知りたい」ときに使ってください。'
+     + '<b>標準タイマーは1つしか動かないので、押すと項目ごとの分は上書きされます。</b></p>';
   if(s.spotify){
     h += '<button class="btn ghost" onclick="openSpotify()">🎵 プレイリストを開く'+(spUrl(s)?'':'（未設定）')+'</button>';
   }
@@ -4784,7 +5048,15 @@ try{
   document.addEventListener("visibilitychange", function(){
     /* v22 (2026-09-05): 裏に回る瞬間に必ず控える。iOSがこのタブを捨てるのは
        この後なので、ここで書いておけば、開き直したときに続きから戻れる。 */
-    if(document.hidden){ if(curId) saveRun(); return; }
+    if(document.hidden){ awayHidAt = Date.now(); if(curId) saveRun(); return; }
+    /* v35: 1分以上離れていたら、戻った実行画面に「おかえり」を出す。
+       離れていた分は、これまでどおりこの項目の時間として数えている
+       （数え方は変えていない。過ぎていることを見えるようにしただけ）。 */
+    if(awayHidAt && curId && view==="run"){
+      var gap = Math.floor((Date.now()-awayHidAt)/1000);
+      if(gap >= 60) awayBack = gap;
+    }
+    awayHidAt = 0;
     render();
   });
 }catch(e){}

@@ -91,7 +91,7 @@ h1{font-size:21px;margin:2px 0 4px}
 var HKEY = "bmc_log_hub_v1";
 var RKEY = "bmc_routine_v1";
 var GKEY = "bmc_gym_v1";
-var APPVER = "B.M.C. 記録ハブ v4 ・ 2026-09-08";
+var APPVER = "B.M.C. 記録ハブ v5 ・ 2026-09-09";
 
 var H = {
   vault: "My Valut",
@@ -313,7 +313,10 @@ function collect(){
       if(num(c.hard)) res.push("きつさ"+num(c.hard));
       if(num(c.kcal)) res.push(num(c.kcal)+"kcal");
       add("c"+c.date, c.date, line(c.date, "gym", "有酸素",
-        c.progName||"有酸素", res.join("・"), (num(c.min)?num(c.min)+"分":""),
+        /* v5: gym v14 から所要時間に秒（c.sec）が入るようになった。
+           古い記録には無いので、無ければ従来どおり分だけを出す。 */
+        c.progName||"有酸素", res.join("・"),
+        (num(c.min)||num(c.sec) ? num(c.min)+"分"+(num(c.sec)?num(c.sec)+"秒":"") : ""),
         c.memo||"", "c"+c.date));
       /* v3: その回に実際に走った速度・傾斜。記録の plan は**その回のコピー**なので、
          あとで既定を変えても過去は動かない（gym側の原則）。 */
