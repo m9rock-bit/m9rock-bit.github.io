@@ -354,7 +354,7 @@ const CARDIO_DEF={
 const RATES=["かるすぎる","ちょうどよい","きつすぎる"];
 /* v9（2026-09-05）: 版の表示（ホーム最下部）。開いて1秒で新旧を見分けるため。
    中身を変えたら、ここも必ず上げる。 */
-const APPVER="B.M.C. ジム v14 ・ 2026-09-09";
+const APPVER="B.M.C. ジム v15 ・ 2026-09-12";
 const NORM=30;                    /* グラフの換算基準（30分あたり） */
 const HARDS=["余裕","ちょうどよい","きつい"];
 
@@ -1045,7 +1045,12 @@ function cStart(){
   unlockAudio();
   cRun={start:Date.now(), plan:cClone(cPlan()), blocks:cClone(cBlocks()),
         progId:(curProg()||{}).id, progName:(curProg()||{}).name||"",
-        lost:0, paused:false, pauseAt:0, chimed:{}, rates:{}};
+        lost:0, paused:false, pauseAt:0, chimed:{}, rates:{},
+        /* v15（2026-09-12 ご記入）: 途中で変えた事実と、区間ごとの実際の時間。
+           plan0 = 走り出したときの設定の控え。cRun.plan は変更のたびに上書き
+           されるため、比較の相手がいなくなる（blocks は残るが、インターバルを
+           展開した形ではないので区間どうしで並べられない）。 */
+        plan0:cClone(cPlan()), edits:[], segW:{"s0":0}, pAcc:0};
   cSaveRun();
   if(navigator.wakeLock&&navigator.wakeLock.request){
     navigator.wakeLock.request("screen").then(function(w){cWake=w}).catch(function(){});
@@ -1057,6 +1062,35 @@ function cElapsed(){
   if(!cRun) return 0;
   var now = cRun.paused ? cRun.pauseAt : Date.now();
   return Math.max(0, Math.floor((now-cRun.start-cRun.lost)/1000));
+}
+/* ===== v15（2026-09-12 ご記入）: 実績の記録 ===============================
+   ご要望は「途中で傾斜や速度を変更したら、経過時間からいつ変えたのかを記録し、
+   その回の区間ごとの実際の時間と傾斜を残す。設定と実績を比べて調整したい」。
+
+   ★現物を読んで分かったこと（新規開発をしないための確認）
+     (1) 速度・傾斜の途中変更は v9 から cRun.plan を直接書き換えており、
+         **変更後の値はすでに記録に残っていた。**残っていないのは「いつ変えたか」
+         と「変える前の値」。だから足すのは控え（plan0）と変更ログだけでよい。
+     (2) 区間の切り替え時刻は**持っていなかった。**cElapsed() は設定の分数から
+         計算した見かけの経過で、区間を飛ばす（cSkip）と時計が進むため、
+         記録に残る min は常に「予定の長さ」で、実際の長さではない。
+         そこで、止めていた時間を除いた実時間（cWall）を区間の頭で控える。
+   ★cElapsed / cPos / cSkip の意味は1つも変えていない（鳴り方・進み方は同じ）。 */
+function cWall(){
+  /* 走り出しからの実時間。止めていたあいだは数えない。
+     lost は一時停止と区間飛ばしの両方に使われていて実時間には使えないため、
+     一時停止だけを pAcc に別で貯める。 */
+  if(!cRun) return 0;
+  var now=Date.now(), p=(+cRun.pAcc||0) + (cRun.paused? (now-cRun.pauseAt) : 0);
+  return Math.max(0, Math.floor((now-cRun.start-p)/1000));
+}
+function cLog(o){
+  if(!cRun) return;
+  if(!Array.isArray(cRun.edits)) cRun.edits=[];
+  o.at=cElapsed();   /* プログラム上の経過（何分めの出来事か） */
+  o.w =cWall();      /* 実時間の経過 */
+  cRun.edits.push(o);
+  if(cRun.edits.length>200) cRun.edits.shift();
 }
 function cPos(){
   /* いま何区間目か・その区間の残り秒 */
@@ -1070,7 +1104,14 @@ function cPos(){
 }
 function cTick(){
   var q=cPos();
-  if(q.done){ if(!cRun.chimed.end){ cRun.chimed.end=true; chimeDone(); cFlash(); } return; }
+  /* v15: 区間の頭に立った実時間を1度だけ控える。1秒ごとに通るので、
+     すでに入っているときは何もしない（飛ばした区間にも印が付く）。 */
+  if(!cRun.segW) cRun.segW={"s0":0};
+  if(!q.done && cRun.segW["s"+q.i]==null) cRun.segW["s"+q.i]=cWall();
+  if(q.done){
+    if(cRun.segW.end==null) cRun.segW.end=cWall();
+    if(!cRun.chimed.end){ cRun.chimed.end=true; chimeDone(); cFlash(); } return;
+  }
   if(!cRun.chimed["s"+q.i] && q.i>0){ cRun.chimed["s"+q.i]=true; chimeMark(); cFlash(); }
 }
 /* v12（2026-09-06 ご依頼）: 区間が切り替わったら画面全体を光らせる。
@@ -1088,13 +1129,19 @@ function cFlash(){
 }
 function cPause(){
   if(!cRun) return;
-  if(cRun.paused){ cRun.lost += Date.now()-cRun.pauseAt; cRun.paused=false; }
+  if(cRun.paused){
+    var d=Date.now()-cRun.pauseAt;
+    cRun.lost += d;
+    cRun.pAcc = (+cRun.pAcc||0) + d;   /* v15: 実時間から抜くぶん */
+    cRun.paused=false;
+  }
   else { cRun.pauseAt=Date.now(); cRun.paused=true; }
   cSaveRun(); render();
 }
 function cSkip(){
   if(!cRun) return;
   var q=cPos(); if(q.done) return;
+  cLog({i:q.i, lb:(cRun.plan[q.i]||{}).lb||"", f:"skip", left:q.left});  /* v15 */
   cRun.lost -= q.left*1000;      /* 区間の終わりまで時計を進める */
   cRun.chimed["s"+(q.i+1)]=true; /* 手で進めたときは合図を鳴らさない */
   cSaveRun(); render();
@@ -1110,7 +1157,9 @@ function cAdj(field, dir){
   var v=(+s[field]||0)+step*dir;
   if(field==="sp") v=Math.max(0.5, Math.min(25, v));
   else             v=Math.max(0, Math.min(15, v));
+  var was=+s[field]||0;                      /* v15: 変える前の値 */
   s[field]=Math.round(v*10)/10;
+  if(s[field]!==was) cLog({i:q.i, lb:s.lb||"", f:field, from:was, to:s[field]});
   cSaveRun(); render();
 }
 /* ===== v14（2026-09-08 ご記入・2026-09-09 実装）======================
@@ -1169,7 +1218,9 @@ function cPadSave(kind){
     var v=g(kind);
     if(isNaN(v)){ alert("数字を入れてください。"); return; }
     if(kind==="sp") v=Math.max(0.5, Math.min(25, v)); else v=Math.max(0, Math.min(15, v));
+    var was=+s[kind]||0;                      /* v15: 変える前の値 */
     s[kind]=Math.round(v*10)/10;
+    if(s[kind]!==was) cLog({i:q.i, lb:s.lb||"", f:kind, from:was, to:s[kind]});
     cSaveRun(); cPadClose(); render(); return;
   }
   var mn=g("min"), sp=g("sp"), ic=g("inc");
@@ -1190,6 +1241,15 @@ function cSegInsert(min, sp, inc){
   var q=cPos(); if(q.done) return false;
   var cur=cRun.plan[q.i]; if(!cur) return false;
   cRun.plan.splice(q.i+1, 0, {lb:"追加", min:min, sp:sp, inc:inc, b:cur.b, bt:cur.bt});
+  cLog({i:q.i+1, lb:"追加", f:"add", min:min, sp:sp, inc:inc});   /* v15 */
+  /* v15: 番号が1つずつ後ろへずれるので、区間の頭の控えも同じだけずらす
+     （ずらさないと、差し込みより後ろの区間の実時間が別の区間の値になる）。 */
+  var sw=cRun.segW||{}, sw2={};
+  Object.keys(sw).forEach(function(k){
+    var mm=/^s(\d+)$/.exec(k);
+    if(mm && (+mm[1])>q.i) sw2["s"+((+mm[1])+1)]=sw[k]; else sw2[k]=sw[k];
+  });
+  cRun.segW=sw2;
   var ch=cRun.chimed||{};
   Object.keys(ch).forEach(function(k){
     var m=/^s(\d+)$/.exec(k);
@@ -1210,10 +1270,16 @@ function cFinish(){
   var tot=Math.max(0, cElapsed());
   var min=Math.floor(tot/60), sec=tot%60;
   if(min===0 && sec===0){ min=1; }
+  /* v15: 最後の区間の終わりにも印を付けてから畳む（終了ボタンで抜けた回も
+     いちばん後ろの区間の長さが出るようにするため）。 */
+  if(cRun){ if(!cRun.segW) cRun.segW={"s0":0}; if(cRun.segW.end==null) cRun.segW.end=cWall(); }
   var seed=cRun?{min:min, sec:sec, plan:cClone(cRun.plan), blocks:cClone(cRun.blocks),
-                 progId:cRun.progId, progName:cRun.progName, rates:cClone(cRun.rates||{})}
+                 progId:cRun.progId, progName:cRun.progName, rates:cClone(cRun.rates||{}),
+                 plan0:cClone(cRun.plan0||cRun.plan), edits:cClone(cRun.edits||[]),
+                 segW:cClone(cRun.segW||{})}
                :{min:min, sec:sec, plan:cClone(cPlan()), blocks:cClone(cBlocks()),
-                 progId:(curProg()||{}).id, progName:(curProg()||{}).name||"", rates:{}};
+                 progId:(curProg()||{}).id, progName:(curProg()||{}).name||"", rates:{},
+                 plan0:null, edits:[], segW:null};
   cStopRun(); cRun=null;
   cInOpen(seed);
 }
@@ -1319,6 +1385,10 @@ function cInOpen(seed){
         progId:(seed&&seed.progId)||(curProg()||{}).id,
         progName:(seed&&seed.progName)||(curProg()||{}).name||"",
         rates:(seed&&seed.rates)?seed.rates:{},
+        /* v15: 実績。走らずに手で記録した回は控えが無いので null のまま。 */
+        plan0:(seed&&seed.plan0)?seed.plan0:null,
+        edits:(seed&&seed.edits)?seed.edits:[],
+        segW:(seed&&seed.segW)?seed.segW:null,
         dist:"", kcal:"", memo:""};
   go("cin");
 }
@@ -1347,6 +1417,11 @@ function cinSave(){
   DB.cardio.push({date:Date.now(), min:Math.max(0,Math.round(cBuf.min||0)), sec:Math.max(0,Math.min(59,Math.round(cBuf.sec||0))), plan:cClone(cBuf.plan),
                   blocks:cClone(cBuf.blocks||[]), progId:cBuf.progId, progName:cBuf.progName,
                   rates:cClone(cBuf.rates||{}),
+                  /* v15: 走り出しの設定の控え・変更ログ・区間の頭の実時間。
+                     過去の記録にはこの3つが無いので、読む側は必ず既定値で包む。 */
+                  plan0:(cBuf.plan0?cClone(cBuf.plan0):null),
+                  edits:cClone(cBuf.edits||[]),
+                  segW:(cBuf.segW?cClone(cBuf.segW):null),
                   dist:Math.round(d*100)/100, kcal:(isNaN(k)?0:Math.round(k)),
                   hard:mid, memo:String(cBuf.memo||"").slice(0,120)});
   save(); cBuf=null; cHold={}; go("cardio");
@@ -1389,8 +1464,11 @@ function viewCIn(){
   <div class="card">
     ${p.map(function(s){return `<div class="prev">${segLine(s)}</div>`}).join("")}
     <button class="btn ghost" onclick="cPlanOpen('cin')">設定を直す</button>
-    <p class="note">途中で速度や傾斜を変えた日は、ここを実際の値に直してから保存してください。<strong>次回の提案はこの値を見ます。</strong></p>
+    <p class="note">${cHasActual(cBuf)
+      ? `上の数字は<strong>実際に走った値です</strong>——アプリの＋−や数字入力で変えたぶんは、すでにここに入っています（下の「設定と実績」に、いつ変えたかが出ています）。入っていないのは<strong>トレッドミル側だけで変えた</strong>ぶんだけです。`
+      : `途中で速度や傾斜を変えた日は、実際の値に直してから保存してください。`}<strong>次回の提案はこの値を見ます。</strong><br>（「設定を直す」は<strong>プログラムそのもの</strong>を直すボタンです。今日の回だけを直すものではありません。）</p>
   </div>
+  ${cActualCard(cBuf)}
   <button class="btn" onclick="cinSave()">保存する</button>
   <button class="btn link" onclick="cBuf=null;go('cardio')">やめる</button>`;
 }
@@ -1795,6 +1873,66 @@ function cChart(vals, dates, title, unit, dec){
   </svg>
   <p class="note" style="margin-top:2px;text-align:center">最初 ${r(vals[0])}${unit} ・ 最新 ${r(vals[n-1])}${unit}（${n}回）</p>`;
 }
+/* ===== v15（2026-09-12 ご記入）: 設定と実績の並べ方 ======================
+   ・**走っている最中には出しません。**終わったあとの画面だけ（v12で決めた
+     「走行中に要るものは画面の上2/3に収める」を1pxも崩さないため）。
+   ・**速い／遅いの判定は書きません。**事実を2列で並べるところまでです
+     （9/5に上げ方の条件を入れたばかりで、判定の出口を2つにしないため）。
+   ・実績が無い回（v14までの記録・手で入れた回）では**何も出しません。**
+     「記録がありません」と毎回言われても、できることが無いためです。 */
+function cSegSec(r, i){
+  var w=(r||{}).segW; if(!w) return null;
+  var a=w["s"+i]; if(a==null) return null;
+  var b=w["s"+(i+1)]; if(b==null) b=w.end;
+  if(b==null) return null;
+  var d=Math.round(b-a);
+  return d>=0? d : null;
+}
+function cHasActual(r){
+  r=r||{};
+  return !!((r.segW && Object.keys(r.segW).length>1) || (r.edits && r.edits.length));
+}
+function cActualCard(r){
+  if(!cHasActual(r)) return "";
+  var p=(r.plan||[]), p0=(r.plan0||null), ed=(r.edits||[]);
+  /* 途中で区間を足した回は、番号が1つずつずれて**別の区間と比べてしまう**。
+     そのときは矢印（前→後）を出さず、いまの値だけを並べる。
+     ずれたまま並べるより、出さないほうが正しい。 */
+  var align = !!(p0 && p0.length===p.length);
+  var rows=p.map(function(s,i){
+    var act=cSegSec(r,i), o=align?p0[i]:null;
+    var planSec=Math.round((+s.min||0)*60);
+    var dif=(act!=null)? (act-planSec) : null;
+    var difTxt=(dif==null)?"" : (dif===0?"±0" : (dif>0?"＋":"−")+mmss(Math.abs(dif)));
+    var chg=function(f,unit){
+      var now=n1(+s[f]||0);
+      if(o && (+o[f]||0)!==(+s[f]||0)) return n1(+o[f]||0)+unit+" → <strong>"+now+unit+"</strong>";
+      return now+unit;
+    };
+    return '<div class="prev">'+esc(s.lb||("区間"+(i+1)))
+      + '<br><span style="opacity:.75">予定 '+mmss(planSec)+' ／ 実際 '
+      + (act!=null? mmss(act)+(difTxt?'（'+difTxt+'）':'') : '—')
+      + '<br>傾斜 '+chg("inc","%")+' ／ 速度 '+chg("sp","km/h")+'</span></div>';
+  }).join("");
+  var fname={sp:"速度", inc:"傾斜", skip:"この区間を飛ばした", add:"区間を1つ足した"};
+  var log=ed.map(function(e){
+    var head=mmss(+e.w||0)+'　'+esc(e.lb||("区間"+((+e.i||0)+1)))+'　';
+    if(e.f==="sp"||e.f==="inc")
+      return '<div class="prev">'+head+fname[e.f]+' '+n1(+e.from||0)+' → <strong>'+n1(+e.to||0)+'</strong>'
+           + (e.f==="sp"?"km/h":"%")+'</div>';
+    if(e.f==="add")
+      return '<div class="prev">'+head+fname.add+'（'+n1(+e.min||0)+'分 '+n1(+e.sp||0)+'km/h 傾斜'+n1(+e.inc||0)+'%）</div>';
+    return '<div class="prev">'+head+fname.skip+'（残り'+mmss(Math.round(+e.left||0))+'）</div>';
+  }).join("");
+  return '<div class="sec">設定と実績</div><div class="card">'
+    + '<p class="note" style="margin:0 0 8px">左が<strong>走り出したときの設定</strong>、右が<strong>実際に走った値</strong>です。時刻は<strong>止めていた時間を除いた経過</strong>です。'
+    + '<br>速い・遅いの判定はしません。次回の提案は、いままでどおり<strong>手ごたえの評価だけ</strong>で決めています。</p>'
+    + (align? "" : '<p class="note" style="margin:0 0 8px">この回は途中で区間を足したため、<strong>区間ごとの「前→後」は出していません</strong>（番号がずれて別の区間と比べてしまうため）。変えた中身は下の一覧にあります。</p>')
+    + rows
+    + (log? '<div class="bigsub" style="margin:12px 0 4px">途中で変えたこと（'+ed.length+'件）</div>'+log
+          : '<p class="note" style="margin:10px 0 0">途中で変えたところはありませんでした。</p>')
+    + '</div>';
+}
 function cPick(i){ cSel=(cSel===i?-1:i); render(); }
 function cDel(i){
   var r=DB.cardio[i]; if(!r) return;
@@ -1823,7 +1961,7 @@ function viewCGraph(){
     <div class="bigsub">${mdw(sel.date)} の中身</div>
     ${(sel.plan||[]).map(function(s){return `<div class="prev">${segLine(s)}</div>`}).join("")}
     <p class="note">${minSecTxt(sel)} ／ ${n1(sel.dist)}km ／ ${sel.kcal}kcal ／ ${HARDS[(sel.hard||2)-1]}${sel.memo?"<br>"+esc(sel.memo):""}</p>
-  </div>`:""}
+  </div>${cActualCard(sel)}`:""}
   <div class="sec">一覧（新しい順）</div>
   <div class="card">
     ${A2.slice().reverse().map(function(r){
