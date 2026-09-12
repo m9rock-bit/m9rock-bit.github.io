@@ -91,7 +91,7 @@ h1{font-size:21px;margin:2px 0 4px}
 var HKEY = "bmc_log_hub_v1";
 var RKEY = "bmc_routine_v1";
 var GKEY = "bmc_gym_v1";
-var APPVER = "B.M.C. 記録ハブ v5 ・ 2026-09-09";
+var APPVER = "B.M.C. 記録ハブ v6 ・ 2026-09-12";
 
 var H = {
   vault: "My Valut",
@@ -261,9 +261,19 @@ function collect(){
       /* v4 (2026-09-08): 🔋 今日は畳んだ回は、名前の後ろに 🔋 を付ける。
          **付けないと「28/29できた日」と読み違える。**畳んだ回の「済み」は
          「手をつけた」であって、やり切ったではない（routine.html v34）。
-         列は8列のまま増やしていない。 */
+         列は8列のまま増やしていない。
+         v6 (2026-09-12): 🌗 今日の自分に の分岐に合わせ、休息は 🔋・楽しむは 🎉 を付ける。
+         mode が無い古い記録（routine v37以前）は、これまでどおり 🔋。 */
+      var mk = x.fold ? (x.mode==="joy" ? " 🎉" : " 🔋") : "";
       add("r"+x.t, x.t, line(x.t, "routine", "セット",
-        (x.icon?x.icon+" ":"")+(x.name||"")+(x.fold?" 🔋":""), num(x.d)+"/"+num(x.n), mins(x.sec), "", "r"+x.t));
+        (x.icon?x.icon+" ":"")+(x.name||"")+mk, num(x.d)+"/"+num(x.n), mins(x.sec), "", "r"+x.t));
+      /* v6: 🎉 の回は、選んだ楽しみと感想を**そのセット行に続く1行**として送る。
+         8列＋#ID の形は崩さない（列は増やさない）。#ID は "j"+t で重複しない。 */
+      if(x.fold && x.mode==="joy" && x.joy){
+        var FEEL = { again:"またやりたい", ok:"ふつう", no:"そうでもない" };
+        add("j"+x.t, x.t, line(x.t, "routine", "楽しみ",
+          x.joy, (FEEL[x.jfeel] || "未記入"), (x.jmin ? x.jmin+"分" : ""), (x.jnote||""), "j"+x.t));
+      }
     });
     /* v2: 項目ごとの実測。ここが「何をやったか」の本体。
        アプリは**触った項目だけ**を DB.times に入れる（飛ばした項目は入らない）。
