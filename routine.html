@@ -109,6 +109,23 @@ label{display:block;font-size:12.5px;color:#8a94a6;margin:12px 0 5px}
 .dnrow{background:#1a1f29;border:1px solid #262d3a;border-radius:11px;padding:11px 12px;margin-bottom:9px}
 .dnrow .h{font-size:14.5px;line-height:1.5;margin-bottom:7px}
 .dnrow .h s{color:#6f7a8c}
+/* v40（2026-09-12 ご指示「全体的に文字が多い」）: 説明文（.note）は
+   既定でたたむ。**消してはいない**——どの一文も理由があって書かれていて、
+   消すと同じ質問がもう一度出る。開けば全部読める形にしてある。
+   ホーム設定の「説明文をいつも開いておく」で、たたむのをやめられる。 */
+details.nt{margin:-2px 0 9px}
+details.nt>summary{list-style:none;cursor:pointer;font-size:11.5px;color:#7b879a;padding:4px 0;user-select:none}
+details.nt>summary::-webkit-details-marker{display:none}
+details.nt>summary::before{content:"▸ "}
+details.nt[open]>summary::before{content:"▾ "}
+details.nt>.note:first-of-type{margin-top:3px}
+/* v40: 完了画面の「今日はこれを楽しむ」。帯の中の本文サイズでは小さすぎた
+   （2026-09-12 ご指摘）。画面の主役として大きく出す。 */
+.joycard{background:#221d16;border:1px solid #c4a06a;border-radius:14px;padding:16px 15px;margin-bottom:10px;text-align:center}
+.joycard .lab{font-size:11.5px;color:#c9a97b;letter-spacing:.08em;margin-bottom:7px}
+.joycard .nm{font-size:23px;font-weight:700;line-height:1.35;color:#f0d9ae}
+.joyrow{display:flex;gap:8px;align-items:center;margin-bottom:9px}
+.joyrow .g{flex:1;min-width:0}
 .nlist{margin:6px 0 0}
 .nline{display:flex;gap:8px;align-items:flex-start;font-size:12.5px;color:#cbd5e3;line-height:1.6;padding:4px 0}
 .nline .d{flex:none;color:#6f7a8c;font-size:11.5px;padding-top:1px}
@@ -654,13 +671,14 @@ function defaults(){ return [
 var FOCUS_DEF = { len:{am:120,pm:90,ev:50,kids:15}, from:{pm:12,ev:16}, seg:[15,25,40], segKids:[5,5,5], sound:false, native:true, notify:true, lastBreak:"",
   /* v20 (2026-09-03): 集中ブロックのプレイリスト。spMode は "default"（既定URL）か "own"（専用URL）。 */
   spotify:false, spMode:"default", spotifyUrl:"" };
-var DB = { v:19, sets:null, chime:true, voice:true, third:true, spotifyUrl:"", scName:"ルーティンタイマー", log:[], count:0, focus:null, notes:[], times:[], sleepActive:false, sleepStartAt:0,
+var DB = { v:19, sets:null, chime:true, voice:true, third:true, noteOpen:false, spotifyUrl:"", scName:"ルーティンタイマー", log:[], count:0, focus:null, notes:[], times:[], sleepActive:false, sleepStartAt:0,
   /* v20 (2026-09-03): 就寝のプレイリスト。spMode は "default"（既定URL）か "own"（専用URL）。 */
   sleepSpotify:false, sleepSpMode:"default", sleepSpotifyUrl:"",
   /* v22 (2026-09-05): 実行中の途中経過の控え（詳細は save() の下のコメント） */
   run:null,
-  /* v34 (2026-09-08): 🔋 今日は畳む — 畳んだあとに選ぶ「積極的な休養」の候補。
-     null のあいだは REST_DEF を使う。編集画面はまだ無い（第2回で足す）。 */
+  /* v34 (2026-09-08): 🔋 休息／🎉 楽しむ で選ぶ候補。null のあいだは REST_DEF を使う。
+     v40 で編集画面（viewJoyLib）を追加し、形が {n:名前, m:分} になった。
+     古い形（文字列の配列）も joyItems() が読める。 */
   rest:null,
   /* ===== v35 (2026-09-10): 画面を離れているあいだに気づく（R4）=====
      awaySound … 離席中に鳴る音を、このアプリ自身が鳴らす（仕組みは awayWav の上）
@@ -714,6 +732,8 @@ try{
     if(typeof p.sceneCur==="string") DB.sceneCur = p.sceneCur;
     if(Array.isArray(p.sxProgs)) DB.sxProgs = p.sxProgs;
     if(typeof p.third==="boolean") DB.third = p.third;
+    /* v40: 説明文をたたまない設定（★入れ物を足したら、この読み戻しにも足すこと） */
+    if(typeof p.noteOpen==="boolean") DB.noteOpen = p.noteOpen;
     /* v35: 離席まわり（★入れ物を足したら、この読み戻しにも足すこと） */
     if(typeof p.awaySound==="boolean") DB.awaySound = p.awaySound;
     if(typeof p.awayTimer==="boolean") DB.awayTimer = p.awayTimer;
@@ -895,7 +915,7 @@ function loadRun(r){
   /* v38: モード。v37以前の控え（mode が無い）は、畳んでいれば休息として読む。 */
   foldMode = (r.mode==="rest"||r.mode==="joy") ? r.mode : (foldOn ? "rest" : "");
   joyName = r.joy || "";
-  joyMin = (typeof r.jmin==="number") ? r.jmin : 15;
+  joyMin = (typeof r.jmin==="number") ? r.jmin : JOY_MIN_DEF;
   joyFeel = ""; joyNote = "";
   /* v37: 後回し。無い控え（v36以前）は snStep=-1 のまま＝後回しなし。
      ★開き直した回は、すでに時間を過ぎていても**その場で鳴らさない**
@@ -932,7 +952,7 @@ function finishPending(){
 
 /* --- 状態 --- */
 /* v27: 版の表示（ホーム最下部）。中身を変えたら、ここも必ず上げる。 */
-var APPVER = "切り替えルーティン v39 ・ 2026-09-12";
+var APPVER = "切り替えルーティン v40 ・ 2026-09-12";
 var view = "home";
 var curId = null;
 var startAt = 0;
@@ -2060,12 +2080,12 @@ function start(id, fromIndex, mode){   /* v38: mode = "rest" | "joy"（省略時
   fromBreak = false;   /* v12: 休憩から始めた場合は breakStart() が押し直す */
   curId = id; doneSet = {}; curStep = fromIndex||0;
   foldOn = false; foldAsking = false; foldRest = "";   /* v34: 畳みは回ごと。始めたら必ず素の状態から */
-  foldMode = ""; joyName = ""; joyMin = 15; joyFeel = ""; joyNote = "";   /* v38: モードも回ごと */
+  foldMode = ""; joyName = ""; joyMin = JOY_MIN_DEF; joyFeel = ""; joyNote = "";   /* v38: モードも回ごと */
   if(mode==="rest" || mode==="joy"){
     foldOn = true; foldMode = mode;
-    if(mode==="joy"){ joyName = joyPend || ""; }
+    if(mode==="joy"){ joyName = joyPend || ""; joyMin = joyPendMin || JOY_MIN_DEF; }   /* v40 */
   }
-  joyPend = "";
+  joyPend = ""; joyPendMin = JOY_MIN_DEF;
   snClear(); snAsk = false;   /* v37: 後回しも回ごと */
   for(var i=0;i<curStep;i++) doneSet[i] = "skip";
   startAt = Date.now();
@@ -2089,7 +2109,7 @@ function start(id, fromIndex, mode){   /* v38: mode = "rest" | "joy"（省略時
   else { awayArm(); }
 }
 function stop(){ awayClear();   /* v35 */ snClear(); snAsk=false;   /* v37 */ clearRun(); if(tick) clearInterval(tick); tick=null; startAt=0; curId=null; doneSet={}; curStep=0; runIdx=null; autoPaused=false; pauseAt=0; autoFinished=false; stepAt=0; stepExtra={}; runTimes={}; stepAcc={}; inputOpen=null; autoShift=0; foldOn=false; foldAsking=false; foldRest="";
-  foldMode=""; joyName=""; joyMin=15; joyFeel=""; joyNote=""; joyPend=""; modePick=""; }   /* v38 */
+  foldMode=""; joyName=""; joyMin=JOY_MIN_DEF; joyFeel=""; joyNote=""; joyPend=""; joyPendMin=JOY_MIN_DEF; modePick=""; }   /* v38 */
 
 /* ============================================================
    v16: 🛌就寝＋🌃中途覚醒対応
@@ -2200,7 +2220,39 @@ var foldRest = "";       /* 完了画面で選んだ休養（この回かぎり�
 var FOLD_SCALE = 0.5, FOLD_MIN = 30;
 var REST_DEF = ["決めた動画・ドラマを1本","音楽を1曲、最後まで","温かい飲み物を1杯、座って",
                 "子どもと一緒にごろごろ","何もしないで5分横になる","ゲーム"];
-function restList(){ return (DB.rest && DB.rest.length) ? DB.rest : REST_DEF; }
+/* ===== v40（2026-09-12 ご依頼）: 楽しみリストの追加・編集 ==========================
+   v38 までは文字列6つの固定だった。ここで「名前＋分」の入れ物にする。
+   ★古い形（文字列の配列）もそのまま読める。触った瞬間に新しい形へ移る。
+     既存の控え・バックアップを壊さないため、変換は読むときにだけ行う。
+   ★空にしたら既定（REST_DEF）に戻る。これは v34 からの挙動を変えていない。
+   ★restList() は今までどおり**名前の配列**を返す。🔋 休息の選び方は変えない。 */
+var JOY_MIN_DEF = 15;
+/* joyItems() は**保存されている行をそのまま**返す（名前が空の行も含む）。
+   足したばかりの行に名前を打ち込めるようにするため、編集画面と jl* はこちらを使う。
+   選ぶ側（🌗 の候補・🔋 の候補）は joyPick() を使う。**両方を同じ関数にすると、
+   空行を挟んだ瞬間に編集画面と選ぶ画面で番号がずれる。** */
+function joyItems(){
+  var src = (DB.rest && DB.rest.length) ? DB.rest : REST_DEF;
+  return src.map(function(x){
+    if(x && typeof x==="object") return { n:String(x.n||""), m:Math.max(1, parseInt(x.m,10)||JOY_MIN_DEF) };
+    return { n:String(x||""), m:JOY_MIN_DEF };
+  });
+}
+function joyPick(){ return joyItems().filter(function(x){ return x.n!==""; }); }
+function restList(){ return joyPick().map(function(x){ return x.n; }); }
+function joyMinOf(name){
+  var a = joyPick(), i;
+  for(i=0;i<a.length;i++){ if(a[i].n===name) return a[i].m; }
+  return JOY_MIN_DEF;
+}
+/* 編集画面はここから DB.rest を書く。書くときは必ず新しい形にそろえる。 */
+function joySave(a){ DB.rest = a.map(function(x){ return { n:x.n, m:x.m }; }); save(); }
+function jlAdd(){ var a=joyItems(); a.push({ n:"", m:JOY_MIN_DEF }); joySave(a); render(); }
+function jlName(i, v){ var a=joyItems(); if(!a[i]) return; a[i].n = String(v||"").trim(); joySave(a); render(); }
+function jlMin(i, v){ var a=joyItems(); if(!a[i]) return; var m=parseInt(v,10); if(isNaN(m)) m=JOY_MIN_DEF; a[i].m = Math.max(1, Math.min(180, m)); joySave(a); render(); }
+function jlMove(i, d){ var a=joyItems(), j=i+d; if(!a[i]||!a[j]) return; var t=a[i]; a[i]=a[j]; a[j]=t; joySave(a); render(); }
+function jlDel(i){ var a=joyItems(); if(!a[i]) return; a.splice(i,1); joySave(a); render(); }
+function jlReset(){ DB.rest = null; save(); render(); }
 /* 畳んだときの目安秒。半分にして、下限30秒。ただし**元より長くはしない**
    （20秒の項目が30秒に伸びると、畳んだのに増える、という妙なことになる）。 */
 function foldSecOf(sec){
@@ -2243,10 +2295,10 @@ function foldRestTimer(){ nativeTimer(900); }
      休息として読み戻す（loadRun）。 */
 var foldMode = "";     /* "" | "rest" | "joy" */
 var joyName  = "";     /* 🎉 で選んだ楽しみ（この回かぎり・控えにも入れる） */
-var joyMin   = 15;     /* 完了画面のタイマー（分）。楽しみごとの目安の置き場 */
+var joyMin   = 15;     /* 完了画面のタイマー（分）。v40 から楽しみごとの分が入る */
 var joyFeel  = "";     /* "again" | "ok" | "no" */
 var joyNote  = "";
-var modeSetId = "", modeFrom = "", modePick = "", joyPend = "";
+var modeSetId = "", modeFrom = "", modePick = "", joyPend = "", joyPendMin = JOY_MIN_DEF;
 /* 画面の見出しに付ける印。記録の印（logRun）と必ず同じ考え方にする。 */
 function modeMark(){ return foldMode==="joy" ? " 🎉" : (foldOn ? " 🔋" : ""); }
 function modeAsk(id, from){
@@ -2255,7 +2307,13 @@ function modeAsk(id, from){
   view = "mode"; render();
 }
 function modePickMode(m){ modePick = m; if(m!=="joy") joyPend = ""; render(); }
-function modePickJoy(i){ joyPend = (i<0) ? "" : (restList()[i] || ""); render(); }
+function modePickJoy(i){
+  if(i<0){ joyPend = ""; joyPendMin = JOY_MIN_DEF; render(); return; }
+  var it = joyPick()[i];
+  joyPend = it ? it.n : "";
+  joyPendMin = it ? it.m : JOY_MIN_DEF;   /* v40: 分は楽しみごとに持つ */
+  render();
+}
 function modeCancel(){ modePick=""; joyPend=""; view = (modeFrom==="run") ? "run" : "home"; render(); }
 function modeGo(){
   var m = modePick;
@@ -2265,7 +2323,8 @@ function modeGo(){
   if(modeFrom==="run" && curId){
     foldOn = true; foldMode = m;
     joyName = (m==="joy") ? joyPend : "";
-    joyMin = 15; joyFeel = ""; joyNote = "";
+    joyMin = (m==="joy") ? joyPendMin : JOY_MIN_DEF;   /* v40 */
+    joyFeel = ""; joyNote = "";
     modePick=""; joyPend=""; view="run"; saveRun(); render(); return;
   }
   var id = modeSetId; modePick = "";
@@ -2741,6 +2800,7 @@ function render(){
     else h = viewDone();
   }
   else if(view==="mode") h = viewMode();   /* v38 */
+  else if(view==="joylib") h = viewJoyLib();   /* v40 */
   else if(view==="done") h = viewDone();
   else if(view==="sleepWatch") h = viewSleepWatch();
   else if(view==="wakeChoice") h = viewWakeChoice();
@@ -2760,6 +2820,46 @@ function render(){
   else if(view==="scale") h = viewScale();
   else if(view==="backup") h = viewBackup();
   document.getElementById("app").innerHTML = h;
+  foldNotes();   /* v40 */
+}
+
+/* ===== v40（2026-09-12 ご指示「全体的に文字が多い」）: 説明文をたたむ ==============
+   説明文（.note）は129か所ある。**1つずつ書き直して消す形は採らなかった。**
+   どの一文も、そのとき起きたことへの答えとして書かれていて（同じ質問がもう一度
+   出る／記録を読み違える、の防止）、消すと理由ごと失われるため。
+   ★連続する .note をまとめて <details>（既定は閉じる）に入れる。開けば全部読める。
+   ★確認パネル（.iobox）の中の説明は畳まない。押す前に読む必要があるものだから。
+   ★帯（.hint）も畳まない。あれは説明ではなく「いまどうなっているか」の表示。
+   ★開いた状態は noteOpenSet に覚える。実行中は tickRender が0.25秒ごとに
+     描き直すので、覚えておかないと開いた瞬間に閉じる。
+   ★ホーム設定の「説明文をいつも開いておく」で、この機能ごと止められる。 */
+var noteOpenSet = {};
+function foldNotes(){
+  if(DB.noteOpen) return;
+  var root = document.getElementById("app");
+  if(!root || !root.querySelectorAll) return;
+  var all;
+  try{ all = root.querySelectorAll(".note"); }catch(e){ return; }
+  if(!all || !all.length) return;
+  var groups = [], cur = null, i, el;
+  for(i=0;i<all.length;i++){
+    el = all[i];
+    if(el.closest && el.closest(".iobox")) continue;
+    if(cur && cur[cur.length-1].nextElementSibling === el) cur.push(el);
+    else { cur = [el]; groups.push(cur); }
+  }
+  groups.forEach(function(g, gi){
+    var key = view + ":" + gi;
+    var d = document.createElement("details");
+    d.className = "nt";
+    if(noteOpenSet[key]) d.open = true;
+    var sm = document.createElement("summary");
+    sm.textContent = "くわしく";
+    d.appendChild(sm);
+    g[0].parentNode.insertBefore(d, g[0]);
+    g.forEach(function(x){ d.appendChild(x); });
+    d.addEventListener("toggle", function(){ noteOpenSet[key] = d.open; });
+  });
 }
 
 /* v16: 🛌就寝の見守り画面。経過時間は DB.sleepStartAt からの時刻計算
@@ -2937,6 +3037,11 @@ function viewHome(){
        + (s.note ? '<small>'+esc(s.note)+'</small>' : '')+'</button>';
   });
   h += '<div class="sec">設定</div>';
+  /* v40: 説明文をたたむのをやめる口。いちばん上に置く（探させないため）。 */
+  h += '<div class="card"><div class="toggle"><b>説明文をいつも開いておく</b>'
+     + '<button class="sw'+(DB.noteOpen?' on':'')+'" onclick="DB.noteOpen=!DB.noteOpen;save();render()"><i></i></button></div>'
+     + '<p class="note">オフのあいだ、各画面の説明は「▸ くわしく」にたたまれます。<b>消してはいません。</b>押せば全部出ます。'
+     + '<br>帯（いまどうなっているかの表示）と、押す前に読む確認パネルは、たたみません。</p></div>';
   h += '<div class="card"><div class="toggle"><b>終了音を鳴らす</b>'
      + '<button class="sw'+(DB.chime?' on':'')+'" onclick="DB.chime=!DB.chime;save();render()"><i></i></button></div>'
      + '<div class="toggle" style="margin-top:8px"><b>音声で切り替えを案内する</b>'
@@ -2986,6 +3091,7 @@ function viewHome(){
   h += '<div class="card"><label>ショートカットの名前（iPhone標準タイマーを起動するもの）</label>'
      + '<input class="inp" type="text" id="scn" value="'+esc(DB.scName)+'" onchange="DB.scName=this.value;save()">'
      + '<p class="note">作り方は <b>行動計画_2026-08-14 §10</b> にあります。未作成でも、このアプリ自体は使えます。</p></div>';
+  h += '<button class="btn ghost" onclick="go(\'joylib\')">🎉 楽しみリスト（🌗 で選ぶ候補）</button>';   /* v40 */
   h += '<button class="btn ghost" onclick="go(\'scale\')">📏 満腹度のものさし（食後に見る）</button>';
   h += '<button class="btn ghost" onclick="go(\'log\')">📖 これまでの記録</button>';
   /* v33（2026-09-07）: 実施記録をObsidianへ送る「記録ハブ」への導線。
@@ -3556,6 +3662,37 @@ function viewRunAuto(s){
   return h;
 }
 
+/* ===== v40（2026-09-12 ご依頼）: 🎉 楽しみリストの編集 =========================
+   追加・名前の変更・分の変更・並べ替え・削除。**タイプ分けと履歴の一覧は入れていない**
+   （そこまで一度に作ると戻せなくなるため、次の段階に回す）。
+   ★空にすると既定の6つに戻る（v34からの挙動を変えていない）。 */
+function viewJoyLib(){
+  var a = joyItems(), using = !!(DB.rest && DB.rest.length);
+  var h = '<h1>🎉 楽しみリスト</h1>';
+  h += '<p class="sub">🌗 → 🎉 楽しむ で選ぶ候補です</p>';
+  a.forEach(function(it,i){
+    h += '<div class="dnrow"><div class="joyrow">'
+       + '<div class="g"><input class="inp" type="text" value="'+esc(it.n)+'" placeholder="楽しみの名前" onchange="jlName('+i+',this.value)"></div>'
+       + '</div><div class="joyrow" style="margin-bottom:0">'
+       + '<input class="inp" type="number" min="1" max="180" step="5" style="flex:none;width:82px" value="'+it.m+'" onchange="jlMin('+i+',this.value)">'
+       + '<span style="flex:none;color:#7b879a;font-size:12.5px">分</span>'
+       + '<span class="g"></span>'
+       + '<button class="btn ghost" style="flex:none;width:auto;margin-top:0;padding:0 11px" onclick="jlMove('+i+',-1)">↑</button>'
+       + '<button class="btn ghost" style="flex:none;width:auto;margin-top:0;padding:0 11px" onclick="jlMove('+i+',1)">↓</button>'
+       + '<button class="btn ghost" style="flex:none;width:auto;margin-top:0;padding:0 11px;border-color:#5c4a4a;color:#c98b8b" onclick="jlDel('+i+')">🗑</button>'
+       + '</div></div>';
+  });
+  h += '<button class="btn save" onclick="jlAdd()">＋ 楽しみを足す</button>';
+  h += '<p class="note">名前と分は、その場で保存されます。分は完了画面のタイマーの既定値で、そのときに増減もできます。'
+     + '<br>並べ替えは選ぶ画面の並びに、そのまま出ます。<b>上に置いたものが選ばれやすくなります。</b>'
+     + '<br>全部消すと、既定の6つに戻ります。</p>';
+  if(using) h += '<button class="btn ghost" onclick="jlReset()">既定の6つに戻す</button>';
+  h += '<p class="note">この6つは 🔋 休息 の「今日はこれをやって休む」でも同じものが出ます。'
+     + '<b>2つのリストには分けていません。</b>休みたい日と楽しみたい日で、同じものを選ぶことがあるためです。</p>';
+  h += '<button class="btn link" onclick="go(\'home\')">← 戻る</button>';
+  return h;
+}
+
 /* ===== v38: 🌗 今日の自分に の画面 ==================================
    ホームからも実行中からも、ここ1か所に来る。確認の文言を2か所に持たない。
    3段：①休息/楽しむ ②（楽しむのとき）楽しみを1つ ③確認して始める。 */
@@ -3577,10 +3714,12 @@ function viewMode(){
     h += '<div class="sec">🎉 今夜の楽しみを1つ</div>';
     h += '<p class="note" style="margin-top:0"><b>残った時間でやることではありません。</b>先に決めて、そのために手前を短くします。</p>';
     h += '<div class="dnrow">';
-    restList().forEach(function(r,i){
-      h += '<button class="btn ghost" style="margin-top:6px" onclick="modePickJoy('+i+')">'+esc(r)+'</button>';
+    joyPick().forEach(function(it,i){
+      h += '<button class="btn ghost" style="margin-top:6px" onclick="modePickJoy('+i+')">'+esc(it.n)
+         + '<span style="opacity:.55;font-size:12px"> ・ '+it.m+'分</span></button>';
     });
     h += '</div>';
+    h += '<button class="btn ghost" onclick="go(\'joylib\')">✏️ リストを編集する</button>';
     h += '<button class="btn link" onclick="modePickMode(\'\')">戻る</button>';
     return h;
   }
@@ -3596,7 +3735,7 @@ function viewMode(){
      + '・目安の時間が<b>いまの半分</b>になります（下限30秒）<br>'
      + (modePick==="joy"
         ? '・実行中は、いちばん上に<b>「今夜の楽しみ」</b>が出続けます<br>'
-          + '・終わったあとに<b>「'+esc(joyPend)+'」</b>とタイマー、そのあと<b>どう感じたか</b>を残せます'
+          + '・終わったあとに<b>「'+esc(joyPend)+'」</b>と'+joyPendMin+'分のタイマー、そのあと<b>どう感じたか</b>を残せます'
         : '・終わったあとに<b>「今日はこれをやって休む」</b>を選びます')
      + '</p>';
   h += '<div class="row" style="margin-top:8px">'
@@ -3650,12 +3789,14 @@ function viewDone(){
      ★感想は3択だけで終われる形にする。一言は任意。書けない日に手を増やさない。
      ★回数・達成率は出さない（v20・v31 と同じ方針）。 */
   if(foldMode==="joy"){
-    h += '<div class="sec">🎉 今日はこれを楽しむと決めました</div>';
-    h += '<div class="hint" style="border-color:#c4a06a;color:#e8c99a"><b>'+esc(joyName || "（選んでいません）")+'</b><br>'
-       + '決めたのは<b>始める前</b>です。ここまでを短くしたのは、これをやるためです。</div>';
-    h += '<div class="row" style="margin-top:0">'
+    /* v40（2026-09-12 ご指摘「文字が小さくて見づらい」）: 帯の中の本文サイズを
+       やめ、完了画面の主役として大きく出す。ここが押し出されないと、
+       完了画面の下のほうにある注記に負けて読み飛ばされる。 */
+    h += '<div class="joycard"><div class="lab">今日はこれを楽しむ</div>'
+       + '<div class="nm">'+esc(joyName || "（選んでいません）")+'</div></div>';
+    h += '<button class="btn save big" onclick="joyTimer()">⏰ '+joyMin+'分のタイマー</button>';
+    h += '<div class="row" style="margin-top:7px">'
        + '<button class="btn ghost" style="margin-top:0" onclick="joyMinAdd(-5)">− 5分</button>'
-       + '<button class="btn save" style="margin-top:0" onclick="joyTimer()">⏰ '+joyMin+'分のタイマー</button>'
        + '<button class="btn ghost" style="margin-top:0" onclick="joyMinAdd(5)">＋ 5分</button>'
        + '</div>';
     h += '<p class="note" style="margin-top:4px">押すと<b>iPhoneの標準タイマー</b>を仕掛けます（ショートカットAppへ一度飛びます）。'
