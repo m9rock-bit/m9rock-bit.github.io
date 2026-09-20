@@ -354,7 +354,7 @@ const CARDIO_DEF={
 const RATES=["かるすぎる","ちょうどよい","きつすぎる"];
 /* v9（2026-09-05）: 版の表示（ホーム最下部）。開いて1秒で新旧を見分けるため。
    中身を変えたら、ここも必ず上げる。 */
-const APPVER="B.M.C. ジム v15 ・ 2026-09-12";
+const APPVER="B.M.C. ジム v17 ・ 2026-09-19";
 const NORM=30;                    /* グラフの換算基準（30分あたり） */
 const HARDS=["余裕","ちょうどよい","きつい"];
 
@@ -386,6 +386,25 @@ function def(id, env){
 function isEditableEnv(env){ return env==="home_db" || env==="home_none"; }
 function curEnv(){ return DB.settings.env || "gym"; }
 function envLabel(env){ const e=ENVS.filter(function(x){return x.id===env})[0]; return e?e.label:env; }
+
+/* v17（2026-09-19 ご依頼 G-b）: 場所の貼り替え。
+   **セットの中身は1つも書き換えない。**env の札だけを付け替える。
+   前回値・ダブルプログレッションは v4 から env で絞っているので、
+   ここを直せば、比較の相手が正しい場所のものに入れ替わる。 */
+function envFixActive(env){
+  if(!DB.active) return;
+  if(!ENVS.some(function(x){return x.id===env})) return;
+  DB.active.env=env;
+  DB.settings.env=env;   /* 次に始めるときの既定も、直した場所に合わせる */
+  save(); render();
+}
+function envFixSession(stamp, env){
+  if(!ENVS.some(function(x){return x.id===env})) return;
+  const s=DB.sessions.filter(function(x){return x.date===stamp;})[0];
+  if(!s || (s.env||"gym")===env) return;
+  s.env=env;
+  save(); render();
+}
 
 /* ---------- v3（2026-08-16）: セット数を種目ごとに可変にする ----------
    【なぜ】3固定だったため、4セット目をやった日に、その事実を入れる場所が無かった。
@@ -537,10 +556,25 @@ function lastOf(id, env){
       const last=hit[hit.length-1];
       return {w:last.w, bd:last.bd, ld:last.ld,
               reps:Math.min.apply(null,hit.map(function(s){return s.reps})),
-              date:d[i].date, n:hit.length};
+              date:d[i].date, n:hit.length,
+              /* v17（2026-09-19 ご依頼 G-c）: セットごとの中身をそのまま返す。
+                 いままでは reps に「いちばん少ないセット」だけを入れて潰していたので、
+                 12/10/8 のように落ちた日も「×8回」としか出せなかった。
+                 潰す前の並びを sets に持たせる（reps・n は呼び出し側の互換のため残す）。 */
+              sets:hit.slice()};
     }
   }
   return null;
+}
+/* v17（G-c）: 前回のセットごとの中身を「12kg×10 / 12kg×10 / 12kg×8」の形にする。
+   重さが3セットとも同じなら「12kg × 10/10/8回」とまとめる（同じ数字を3回読ませない）。 */
+function prevSetsTxt(e,l){
+  if(!l || !l.sets || !l.sets.length) return "";
+  const w0=fmtSet(e,l.sets[0]);
+  const sameW=l.sets.every(function(x){ return fmtSet(e,x)===w0; });
+  const reps=l.sets.map(function(x){ return x.reps; }).join("/");
+  if(sameW) return w0+" × "+reps+"回";
+  return l.sets.map(function(x){ return fmtSet(e,x)+"×"+x.reps; }).join(" / ");
 }
 
 /* --- ダブル・プログレッション（筋トレプログラム §2 変更①）---
@@ -876,15 +910,39 @@ function blockLine(b,i){
    ★対象はセットとインターバルだけ。ウォームアップ・クールダウンは動かさない。
    ★インターバルは「速い側」（いちばん速い区間）だけを動かす。 */
 function lastRateOf(blockIdx){
+  var h=lastRateRecOf(blockIdx); return h? h.v : null;
+}
+/* v16（2026-09-19 ご依頼 G-a）: 評価だけでなく、**その評価が付いた回そのもの**を返す。
+   次回の提案を「設定値」ではなく「実際に走った値」から出すために要る。 */
+function lastRateRecOf(blockIdx){
   var g=curProg(); if(!g) return null;
   for(var i=DB.cardio.length-1;i>=0;i--){
     var r=DB.cardio[i];
     if(r.progId!==g.id || !r.rates) continue;
     var v=r.rates[blockIdx];
-    if(v===1||v===2||v===3) return v;
+    if(v===1||v===2||v===3) return {v:v, r:r};
     return null;   /* 直近の同じプログラムの回に評価が無ければ、そこで打ち切る */
   }
   return null;
+}
+/* v16（G-a）: ある回 r のブロック bi で、**実際に走った**区間（intervalなら速いほう）を返す。
+   r.plan は ＋− や数字入力でその場で書き換わるので、ここが実績になる。
+   r.blocks は開始時の写しで動かないため、こちらは見ない。
+   区間を足した回は番号がずれて別の区間を指すので、**出さない**（null）。
+   ——cActualCard が「ずれたまま並べるより出さないほうが正しい」としているのと同じ線。 */
+function cActualTargetOf(r, bi){
+  if(!r || !r.plan || !r.plan.length) return null;
+  if(!(r.plan0 && r.plan0.length===r.plan.length)) return null;
+  var mine=[];
+  r.plan.forEach(function(s){ if((+s.b||0)===bi) mine.push(s); });
+  if(!mine.length) return null;
+  var b0=(r.blocks||[])[bi];
+  if(b0 && b0.type==="interval"){
+    var segs=(b0.segs||[]); if(!segs.length) return null;
+    var k=fastSegIdx(b0);
+    return mine[k] || null;          /* 1周目の速い区間。2周目以降も同じ値で動く */
+  }
+  return mine[0];
 }
 function fastSegIdx(b){
   var k=0, sg=b.segs||[];
@@ -900,15 +958,25 @@ function targetOf(b){
 function blockAdvice(bi){
   if(cHold[bi]) return null;
   var b=cBlocks()[bi]; if(!rateable(b)) return null;
-  var v=lastRateOf(bi); if(v!==1 && v!==3) return null;
+  var h=lastRateRecOf(bi); if(!h) return null;
+  var v=h.v; if(v!==1 && v!==3) return null;
   var t=targetOf(b); if(!t) return null;
+  /* v16（2026-09-19 ご依頼 G-a）: 起点を**実際に走った値**にする。
+     従来は t（＝いまのプログラムの設定値）から1段動かしていたので、
+     走りながら傾斜や速度を変えた回では、**評価した相手と提案の相手が別物**
+     になっていた（「きつすぎる」と答えたのは実際に走った値に対してなのに、
+     下げる起点は設定値だった）。実績が取れない回（区間を足した等）だけ、
+     従来どおり設定値を起点にし、画面にもその旨を出す。 */
+  var act=cActualTargetOf(h.r, bi);
+  var base=act||t, fromActual=!!act;
   var cs=cSet(), dir=(v===1?1:-1);
-  var field=(dir>0 ? ((+t.inc||0) < cs.incCap ? "inc":"sp") : ((+t.inc||0) > 0 ? "inc":"sp"));
+  var field=(dir>0 ? ((+base.inc||0) < cs.incCap ? "inc":"sp") : ((+base.inc||0) > 0 ? "inc":"sp"));
   var step=(field==="inc"? cs.incStep : cs.spStep)*dir;
-  var from=+t[field]||0, to=Math.round(Math.max(0, from+step)*100)/100;
+  var from=+base[field]||0, to=Math.round(Math.max(0, from+step)*100)/100;
   if(to===from) return null;
   return {bi:bi, dir:dir, field:field, from:from, to:to,
-          unit:(field==="inc"?"%":"km/h"), name:(field==="inc"?"傾斜":"速度"), rate:v};
+          unit:(field==="inc"?"%":"km/h"), name:(field==="inc"?"傾斜":"速度"), rate:v,
+          fromActual:fromActual, setVal:+t[field]||0};
 }
 function allAdvice(){
   var out=[];
@@ -937,6 +1005,9 @@ function cardioCard(hideSec){
           <b>${esc(blockName(b,a.bi))}</b> — 前回「${RATES[a.rate-1]}」
           <br>${a.name} <strong>${n1(a.from)}${a.unit} → ${n1(a.to)}${a.unit}</strong>
           ${b.type==="interval"?'<br><span style="opacity:.75">（速い側の区間を動かします）</span>':''}
+          ${a.fromActual && a.setVal!==a.from
+            ? `<br><span style="opacity:.75">起点は<strong>実際に走った${n1(a.from)}${a.unit}</strong>です（プログラムの設定は${n1(a.setVal)}${a.unit}）。</span>`
+            : (a.fromActual ? '' : '<br><span style="opacity:.75">この回は区間を足したため、<strong>設定値</strong>を起点にしています。</span>')}
           <div class="row" style="margin-top:6px">
             <button class="btn" style="margin-top:0" onclick="applyAdvice(${a.bi})">${a.dir>0?"上げる":"1段戻す"}</button>
             <button class="btn ghost" style="margin-top:0" onclick="holdAdvice(${a.bi})">今日は据え置き</button>
@@ -1451,8 +1522,17 @@ function viewCIn(){
     ウォームアップとクールダウンは聞きません（上げ下げの対象にしていないため）。<strong>空のままでも保存できます。</strong></p>
     ${rateIdxs(cBuf.blocks).map(function(bi){
       var b=cBuf.blocks[bi], v=(cBuf.rates||{})[bi];
+      /* v16（2026-09-19 ご依頼 G-a）: 手ごたえを聞くときに出す数字を、
+         **実際に走った値**にする。cBuf.blocks は走り出したときの写しで、
+         走りながら変えたぶんが入っていない。cBuf.plan のほうは ＋− や
+         数字入力でその場で書き換わっているので、そちらを見る。 */
+      var ab=cActualTargetOf(cBuf,bi);
+      var shown=(ab && ((+ab.sp||0)!==(+((targetOf(b)||{}).sp)||0) || (+ab.inc||0)!==(+((targetOf(b)||{}).inc)||0)))
+        ? `<span style="color:#e0a86a">実際に走った値：${n1(ab.sp)}km/h ／ 傾斜${n1(ab.inc)}%</span>`
+          + `<br><span style="opacity:.6">（設定は ${blockLine(b,bi)}）</span>`
+        : blockLine(b,bi);
       return `<div style="margin-top:10px"><b style="font-size:14px">${esc(blockName(b,bi))}</b>
-        <div class="bigsub" style="margin:2px 0 5px">${blockLine(b,bi)}</div>
+        <div class="bigsub" style="margin:2px 0 5px">${shown}</div>
         <div class="row">
           ${RATES.map(function(r,k){
             return `<button class="btn ${v===k+1?"":"ghost"}" style="margin-top:0;font-size:13px;padding:8px 4px" onclick="cinRate(${bi},${k+1})">${r}</button>`;
@@ -2351,13 +2431,28 @@ function viewWork(){
     const l=lastOf(e0.id,env);
     return `<div class="ex">
       <div class="t"><h2>${esc(e.name)}</h2><span class="pill">${n}/${setsOf(e0.id)}セット</span></div>
-      <div class="prev">${l ? `前回 <b>${fmtSet(e,l)} × ${l.reps}回</b>` : `目安 <b>${fmtW(e,e.w)} × ${e.reps}回</b>`}</div>
+      <div class="prev">${l ? `前回 <b>${prevSetsTxt(e,l)}</b>` : `目安 <b>${fmtW(e,e.w)} × ${e.reps}回</b>`}</div>
       <button class="btn ghost" onclick="openEx('${e0.id}')">${n>=setsOf(e0.id)?"記録を見直す":"記録する"}</button>
     </div>`;
   }).join("");
   return `
   <h1>${s.routine} を実施中</h1>
-  <p class="sub">${mdw(s.date)} ／ ${envLabel(env)} ／ 記録済み ${s.sets.length} セット</p>
+  <p class="sub">${mdw(s.date)} ／ <b>${envLabel(env)}</b> ／ 記録済み ${s.sets.length} セット</p>
+  ${/* v17（2026-09-19 ご依頼 G-b）: 実施中に場所を直せるようにした。
+       ご記入は「自宅でやった回数がジムに出てしまっている」。現物を読むと、
+       前回値・重さアップの判定は v4 から **同じ環境同士でしか比べていない**。
+       つまり分ける仕組みは既にあり、足りなかったのは
+       **始めるときに選び損ねた場所を、あとから直す道**だった。
+       ここで直すと、この回の記録がその場所のものとして残る。 */''}
+  <div class="card" style="padding:10px 12px">
+    <div class="bigsub" style="margin-bottom:6px">場所（間違っていたらここで直せます）</div>
+    <div class="row">
+      ${ENVS.map(function(x){
+        return `<button class="btn ${env===x.id?"":"ghost"}" style="margin-top:0;font-size:12.5px;padding:8px 4px" onclick="envFixActive('${x.id}')">${esc(x.label)}</button>`;
+      }).join("")}
+    </div>
+    <p class="note" style="margin:7px 0 0">前回の数字と「重さを上げる案内」は、<strong>同じ場所の記録どうしでしか比べていません。</strong>ここを直すと、上の「前回」の表示もその場で入れ替わります。</p>
+  </div>
   ${clockCard()}
   <div class="card">${list}</div>
   <div class="card">${restStepper()}</div>
@@ -2385,7 +2480,7 @@ function viewEx(){
   return `
   <h1>${esc(e.name)}</h1>
   <p class="sub">${envLabel(env)}
-  ${l ? `<br>前回 <strong>${fmtSet(e,l)} × ${l.reps}回 × ${l.n}セット</strong>（${mdw(l.date)}）`
+  ${l ? `<br>前回 <strong>${prevSetsTxt(e,l)}</strong>（${l.n}セット・${mdw(l.date)}）`
       : `<br>はじめての記録です（この環境では）。目安は ${fmtW(e,e.w)} × ${e.reps}回。`}
   ${e.memo?`<br>${esc(e.memo)}`:""}</p>
 
@@ -2515,9 +2610,20 @@ function viewLog(){
         +(senv!=="gym" ? "・"+envLabel(senv) : "")
         +(typeof s.sec==="number" ? " ／ "+mmss(s.sec) : "")
         +(typeof s.rest==="number" ? "（休憩"+s.rest+"秒）" : "");
-      return `<div class="log"><strong>${head}</strong><small>${inner}</small></div>`;
+      /* v17（2026-09-19 ご依頼 G-b）: 過去の回の場所も直せるようにした。
+         「自宅でやった回数がジムに出てしまっている」の実体は、**始めるときに
+         場所を選び損ねた回が gym として残っていること**だった（分ける仕組み自体は
+         v4 から入っている）。直すと、その回はその場所の記録として数え直される。
+         **セットの中身（重さ・回数）には一切触らない。**場所の札を貼り替えるだけ。 */
+      const fix = `<div class="row" style="margin-top:6px">
+        ${ENVS.map(function(x){
+          return `<button class="btn ${senv===x.id?"":"ghost"}" style="margin-top:0;font-size:11.5px;padding:6px 3px" onclick="envFixSession(${s.date},'${x.id}')">${esc(x.label)}</button>`;
+        }).join("")}
+      </div>`;
+      return `<div class="log"><strong>${head}</strong><small>${inner}</small>${fix}</div>`;
     }).join("") : '<p class="note">まだ記録はありません。</p>'}
   </div>
+  <p class="note"><strong>場所を押し間違えた回は、上のボタンで貼り替えられます。</strong>重さ・回数は変わりません。前回値と「重さを上げる案内」は<strong>同じ場所の記録どうしでしか比べていない</strong>ので、貼り替えるとそちらの数字も直ります。</p>
   <p class="note">所要時間は記録として並べているだけです。<strong>速さの順位づけ・最短の表示はしません。</strong>${TARGET_MIN}分を超えた回にも印は付きません。</p>
   <a class="btn" href="log.html" style="display:block;text-decoration:none">📤 記録を送る（記録ハブ）</a>
   <p class="note">今日の分をObsidianの実施ログ（<code>20_Projects/Private/B.M.C/logs/</code>）へ追記します。<strong>送っても記録はこのアプリから消えません。</strong>送信済みの印はハブ側だけが持っています。</p>
