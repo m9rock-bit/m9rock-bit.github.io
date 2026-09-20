@@ -354,7 +354,7 @@ const CARDIO_DEF={
 const RATES=["かるすぎる","ちょうどよい","きつすぎる"];
 /* v9（2026-09-05）: 版の表示（ホーム最下部）。開いて1秒で新旧を見分けるため。
    中身を変えたら、ここも必ず上げる。 */
-const APPVER="B.M.C. ジム v18 ・ 2026-09-21";
+const APPVER="B.M.C. ジム v19 ・ 2026-09-21";
 const NORM=30;                    /* グラフの換算基準（30分あたり） */
 const HARDS=["余裕","ちょうどよい","きつい"];
 
@@ -739,12 +739,15 @@ function awStop(){
   awAudio=null;
   try{ if(awUrl) URL.revokeObjectURL(awUrl); }catch(e){}
   awUrl=""; awOn=false;
+  if(awTick){ clearInterval(awTick); awTick=null; }
 }
 /* ★必ず「指で押した操作」の中から呼ぶこと（v6 の unlockAudio と同じ制約）。 */
 function awPlay(marks, tail, title, album){
   awStop(); awMsg="";
   var o=awBuildWav(marks, tail);
   if(!o||!o.bl){ awMsg="音声を作れませんでした"; return false; }
+  awSetSession();                       /* v19: 裏に回っても続く種類の音として宣言する */
+  awStartAt=Date.now(); awDiag.log=[]; awDiag.hid=0; awDiag.last=null;
   var gen=++awGen;
   try{
     awUrl=URL.createObjectURL(o.bl);
@@ -760,13 +763,95 @@ function awPlay(marks, tail, title, album){
           title:String(title||"B.M.C."), artist:"B.M.C. 有酸素", album:String(album||"")});
       }
     }catch(e){}
-    awOn=true; return true;
+    awOn=true;
+    if(awTick) clearInterval(awTick);
+    awTick=setInterval(function(){
+      if(!awAudio||!awOn){ clearInterval(awTick); awTick=null; return; }
+      if(view==="cardio" && !isTyping()){ try{ render(); }catch(e){} }
+    },1000);
+    return true;
   }catch(e){ awMsg="音声を再生できませんでした"; awOn=false; return false; }
 }
-/* 段階1のテスト: 無音60秒 → 区間の合図（1.5秒） → 無音30秒 → 走り終わりの合図（6秒）。
-   全体で約1分40秒。 */
+/* ===== v19（2026-09-21・1回目の実機テストの結果を受けて） =====================
+   ご報告は「**アプリを開いたままなら鳴った。Kindleの読み上げは止まらなかった。
+   離れているあいだは鳴らなかった。ロック画面に再生中の表示は出ていた。
+   消音スイッチはOFF**」。
+
+   ★ここまでで潰せたこと（推測ではなく、ご報告から確実に言えること）
+     ・WAVの組み立て・再生・音量・消音スイッチは正常（前面で鳴ったため）
+     ・iOSはこれを「メディア再生」として認識している（ロック画面に出たため）
+     ・読み上げと**混ざって**いた（読み上げが止まらなかったため）
+
+   ★残っている可能性は2つ。ここから先は推測なので、**測る道具を入れて分ける**。
+     (1) 裏に回った瞬間にiOSが**再生を止めている**。
+         → ミックス可（ambient）扱いの音は、裏に回ると止められる。読み上げが
+           止まらなかったこと自体が、ミックス可だった証拠になり得る。
+     (2) 再生は続いていたが、読み上げのダッキングで**合図の音量が絞られて**
+         聞こえなかった。
+
+   ★分け方：**離れていた実時間**と、**そのあいだに音声が進んだ秒数**を比べる。
+     止められていたなら、62秒離れても音声は数秒しか進まない。
+     進んでいるのに聞こえなかったなら(2)。どちらかは画面に出る。
+
+   ★同時に打つ手：navigator.audioSession.type を "playback"（裏でも続く、
+     長い音楽と同じ種類）に宣言する。Safari 16.4以降のみ。対応の有無も画面に出す。
+     ※これが効くと、読み上げ側が止まる可能性がある。9/21のご回答で
+       「合図を優先（読み上げが数秒止まってよい）」を選んでいただいている。 */
+var awStartAt=0, awTick=null;
+var awDiag={sup:"未確認", typ:"", hid:0, log:[], last:null};
+function awSetSession(){
+  try{
+    if(navigator.audioSession){
+      awDiag.sup="あり";
+      try{ navigator.audioSession.type="playback"; }catch(e){}
+      awDiag.typ=String(navigator.audioSession.type||"");
+    }else{
+      awDiag.sup="なし"; awDiag.typ="";
+    }
+  }catch(e){ awDiag.sup="確認できませんでした"; awDiag.typ=""; }
+}
+/* 画面を離れた／戻ったときに、実時間と音声の位置を控える。
+   ★この2つの差が、裏で止められたかどうかの答えそのもの。 */
+function awVis(){
+  try{
+    if(!awAudio||!awOn) return;
+    var now=Date.now(), ct=+awAudio.currentTime||0;
+    if(document.hidden){ awDiag.last={t:now, ct:ct}; awDiag.hid++; }
+    else if(awDiag.last){
+      awDiag.log.push({gone:(now-awDiag.last.t)/1000, moved:ct-awDiag.last.ct});
+      if(awDiag.log.length>10) awDiag.log.shift();
+      awDiag.last=null;
+      try{ render(); }catch(e){}
+    }
+  }catch(e){}
+}
+try{ document.addEventListener("visibilitychange", awVis); }catch(e){}
+function n1s(v){ return (Math.round((+v||0)*10)/10).toFixed(1); }
+/* 画面に出す計測結果。専門用語を使わず、何が起きたかを日本語で1行にする。 */
+function awDiagHtml(){
+  var rows=[];
+  rows.push("音の種類の宣言: "+esc(awDiag.sup)+(awDiag.typ?("（"+esc(awDiag.typ)+"）"):"")
+    +(awDiag.sup==="なし"?"　← この端末のSafariは未対応です":""));
+  if(awOn&&awAudio){
+    var el=(Date.now()-awStartAt)/1000, ct=+awAudio.currentTime||0;
+    rows.push("押してからの実時間: "+n1s(el)+"秒　／　音声の位置: "+n1s(ct)+"秒　／　ずれ: "+n1s(el-ct)+"秒");
+  }
+  if(awDiag.log.length){
+    awDiag.log.forEach(function(x,i){
+      var v = (x.moved < x.gone*0.5)
+        ? "→ <strong>裏で止められています</strong>（これが鳴らない原因です）"
+        : "→ <strong>裏でも動いていました</strong>（鳴らないのは音量が絞られたためです）";
+      rows.push("離れた回 "+(i+1)+": 離れていた "+n1s(x.gone)+"秒 のあいだに、音声は "+n1s(x.moved)+"秒 進んだ　"+v);
+    });
+  }else if(awOn){
+    rows.push("まだ画面を離れていません。Kindleへ移ると、ここに結果が出ます。");
+  }
+  return '<p class="note" style="background:#12151c;border:1px solid #262d3a;border-radius:10px;padding:10px 11px">'
+    + rows.join("<br>") + '</p>';
+}
+/* テスト: 無音30秒 → 合図（1.5秒） → 無音28.5秒 → 長めの合図（4.5秒）。全体で約1分6秒。 */
 function awTest(){
-  awPlay([{at:60,cyc:1},{at:91.5,cyc:4}], 1, "離席中の音のテスト", "1分後と1分半後に鳴ります");
+  awPlay([{at:30,cyc:1},{at:60,cyc:3}], 1, "離席中の音のテスト", "30秒後と60秒後に鳴ります");
   try{ render(); }catch(e){}
 }
 
@@ -2164,16 +2249,19 @@ function viewCardio(){
   <p class="sub"><strong>目標は距離ではなく「今日この速度・傾斜で走り切ること」</strong>です（距離は速度×時間で決まるので、直接は動かせないためです）。<br><strong>時間の長さに決まりはありません。</strong>グラフだけは、長さのちがう回を並べるために30分あたりへ換算しています。</p>
   ${cardioCard(true)}
   ${cRun ? `` : `
-  <div class="sec">実機テスト（2026-09-21）</div>
+  <div class="sec">実機テスト（2026-09-21・2回目）</div>
   <div class="card">
     <h2>🔊 離席中の音を試す</h2>
-    <p class="note">アプリを離れていても区間の合図が鳴るか、<strong>確かめるだけ</strong>の機能です。有酸素の動き・記録は何も変えていません。</p>
-    <p class="note">① 下のボタンを押す　② すぐKindleを開いて「画面の読み上げ」を始める　③ <strong>1分後</strong>に区間の合図、<strong>1分半後</strong>に走り終わりの合図が鳴ります</p>
-    <p class="note">見るところは3つです。<strong>(a) 無音のあいだ読み上げが続くか　(b) 合図が聞こえるか　(c) 合図のあと読み上げが戻るか。</strong></p>
+    <p class="note">1回目で<strong>前面では鳴り、離れると鳴らない</strong>ことが分かりました。原因は「裏で止められている」か「音量が絞られている」かの<strong>どちらか</strong>です。<strong>今回は、どちらなのかが画面に出ます。</strong>有酸素の動き・記録は何も変えていません。</p>
+    <p class="note"><strong>2回、やってみてください。</strong><br>
+      <strong>1回目（読み上げなし）</strong>… ボタンを押す → すぐKindleへ移る（読み上げは<strong>始めない</strong>）→ 30秒後と60秒後の合図を聞く → 戻ってくる<br>
+      <strong>2回目（読み上げあり）</strong>… ボタンを押す → すぐKindleへ移って「画面の読み上げ」を始める → 同じように聞く → 戻ってくる</p>
     ${awOn ? `<button class="btn ghost" onclick="awStop();render()">■ 止める</button>`
-           : `<button class="btn" onclick="awTest()">▶ 鳴らしてみる（約1分40秒）</button>`}
+           : `<button class="btn" onclick="awTest()">▶ 鳴らしてみる（約1分6秒）</button>`}
     ${awMsg ? `<p class="note" style="color:#e0a86a">${esc(awMsg)}</p>` : ``}
-    <p class="note">iPhoneの<strong>消音スイッチ</strong>を入れていると鳴りません。Webページの音は消音スイッチと音量に従います（標準のタイマー・アラームとはここが違います）。</p>
+    ${awDiagHtml()}
+    <p class="note">戻ってきたときに出る「離れていた◯秒のあいだに音声は◯秒進んだ」の行が答えです。そのままお知らせください。<br>
+    iPhoneの<strong>消音スイッチ</strong>は切っておいてください（画面の読み上げは消音でも喋るので、読み上げが聞こえても音が出るとは限りません）。</p>
   </div>`}
   <button class="btn ghost" onclick="go('home')">筋トレの画面に戻る</button>`;
 }
