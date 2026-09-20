@@ -354,7 +354,7 @@ const CARDIO_DEF={
 const RATES=["かるすぎる","ちょうどよい","きつすぎる"];
 /* v9（2026-09-05）: 版の表示（ホーム最下部）。開いて1秒で新旧を見分けるため。
    中身を変えたら、ここも必ず上げる。 */
-const APPVER="B.M.C. ジム v17 ・ 2026-09-19";
+const APPVER="B.M.C. ジム v18 ・ 2026-09-21";
 const NORM=30;                    /* グラフの換算基準（30分あたり） */
 const HARDS=["余裕","ちょうどよい","きつい"];
 
@@ -666,6 +666,109 @@ function chimeDone(){
 /* 15分の目安に達したときの合図。休憩終わりの3音とは別物と分かるよう、
    単発のやわらかい1音にする。急かす音にしない（警告音にしない）。 */
 function chimeMark(){ beep(587,.5); }
+
+/* ===== 離席中の音（段階1・2026-09-21 ご依頼） ==========================
+   ご要望「アプリを離れていても、有酸素の区間が過ぎたら音で知らせてほしい。
+   iPhoneでKindleの読み上げを使って、走りながら読書をしている」。
+
+   ★なぜ今までの音では届かないか（推測ではなく、コードの形として確かなもの）
+     区間の合図 chimeMark() と走り終わりの chimeDone() は、どちらも1秒ごとの
+     setInterval（cTick）から呼んでいる。iOSは裏に回った瞬間にページを止める
+     ので、setInterval そのものが動かない。setTimeout・Web Audio の予約・
+     読み上げ・振動も同じで、離席中には一切届かない。書き方では回避できない。
+
+   ★届く道は「すでに再生が始まっている音声」だけ。
+     音楽アプリと同じ扱いで、裏に回っても再生は止まらない。そこで
+     「無音 → 合図 → 無音 → 合図 …」を1本のWAVとしてその場で組み立て、
+     指で押した操作の中から再生を始める（iOSは操作の外からは音を出せない）。
+     routine.html v35 の awayWav と同じ手で、実績がある。
+
+   ★段階1ではテスト用のボタンだけを置く。有酸素の動き（cStart・cTick・
+     cSkip・cSegInsert・cFinish 等）には1行も触っていない。保存する形も変えていない。
+     実機で確かめたいのは次の3つ（こちらでは判定できない）。
+       (a) 無音が流れているあいだ、iPhoneの「画面の読み上げ」を始められるか・続くか
+       (b) 60秒後の合図が、読み上げの声に埋もれずに聞こえるか
+       (c) 合図のあと、読み上げが自分で戻るか・止まったままか
+     (a)が黒なら、この作り方は有酸素には使えない（標準タイマー経由等へ組み替える）。
+
+   ★消音スイッチ（マナーモード）を入れていると、この音は鳴らない。
+     Webページの音は消音スイッチと音量に従う（標準のタイマー・アラームは従わない）。
+     「鳴らない」というご報告が来たら、実装の不具合と決めつけず、まずここを確認する。 */
+var AW_RATE=4000;      /* 1秒=4000標本=4KB。40分で約9.6MB（routine と同じ作り） */
+var AW_MAX=40*60;      /* 組み立てる音声の上限（秒） */
+var AW_CYC=1.5;        /* 合図ひとかたまりの長さ（秒） */
+
+/* 合図を「ひとかたまり×cyc回」ぶん、b の off から書き込む。
+   鳴りっぱなしの音より断続音のほうが人は気づくので、高い音と低い音を交互に区切る。
+   endAt から先へは絶対に書かない（上限で切られた音声でも壊さないため）。 */
+function awChimeInto(b, off, cyc, endAt){
+  var R=AW_RATE, pat=Math.round(AW_CYC*R);
+  var aOn=Math.round(.22*R), b0=Math.round(.30*R), b1=Math.round(.52*R);
+  var n=pat*(cyc||1);
+  for(var k=0;k<n;k++){
+    var at=off+k; if(at<44) continue; if(at>=endAt) return;
+    var pp=k%pat, half=0;
+    if(pp<aOn) half=2;                  /* 1000Hz（4標本で1周期） */
+    else if(pp>=b0 && pp<b1) half=3;    /* 約667Hz（6標本で1周期） */
+    if(half) b[at]=((Math.floor(pp/half)%2)?46:210);
+  }
+}
+/* marks = [{at:何秒後, cyc:かたまりの数}]（昇順）。tail は最後の合図のあとの余白（秒）。
+   8bit・モノラル・4000Hz の WAV を組み立てて {bl:Blob, sec:長さ} で返す。 */
+function awBuildWav(marks, tail){
+  var R=AW_RATE, last=0, ms=marks||[];
+  ms.forEach(function(m){ last=Math.max(last, (+m.at||0)+AW_CYC*(+m.cyc||1)); });
+  var total=Math.min(AW_MAX, Math.max(1, Math.ceil(last+(+tail||0))));
+  var n=Math.round(total*R), b=new Uint8Array(44+n);
+  function s4(o,t){ for(var i=0;i<4;i++) b[o+i]=t.charCodeAt(i); }
+  function u32(o,v){ b[o]=v&255; b[o+1]=(v>>8)&255; b[o+2]=(v>>16)&255; b[o+3]=(v>>24)&255; }
+  function u16(o,v){ b[o]=v&255; b[o+1]=(v>>8)&255; }
+  s4(0,"RIFF"); u32(4,36+n); s4(8,"WAVE");
+  s4(12,"fmt "); u32(16,16); u16(20,1); u16(22,1);
+  u32(24,R); u32(28,R); u16(32,1); u16(34,8);
+  s4(36,"data"); u32(40,n);
+  b.fill(128,44,44+n);
+  for(var i=0;i<n;i+=4000) b[44+i]=129;   /* 聞こえない揺らぎ（完全な無音だと途中で止められることがあるため） */
+  ms.forEach(function(m){ awChimeInto(b, 44+Math.round((+m.at||0)*R), (+m.cyc||1), 44+n); });
+  try{ return {bl:new Blob([b],{type:"audio/wav"}), sec:total}; }catch(e){ return null; }
+}
+var awAudio=null, awUrl="", awGen=0, awMsg="", awOn=false;
+function awStop(){
+  awGen++;
+  try{ if(awAudio){ awAudio.onerror=null; awAudio.onended=null; awAudio.pause(); awAudio.removeAttribute("src"); awAudio.load(); } }catch(e){}
+  awAudio=null;
+  try{ if(awUrl) URL.revokeObjectURL(awUrl); }catch(e){}
+  awUrl=""; awOn=false;
+}
+/* ★必ず「指で押した操作」の中から呼ぶこと（v6 の unlockAudio と同じ制約）。 */
+function awPlay(marks, tail, title, album){
+  awStop(); awMsg="";
+  var o=awBuildWav(marks, tail);
+  if(!o||!o.bl){ awMsg="音声を作れませんでした"; return false; }
+  var gen=++awGen;
+  try{
+    awUrl=URL.createObjectURL(o.bl);
+    awAudio=new Audio(); awAudio.src=awUrl; awAudio.preload="auto";
+    awAudio.onerror=function(){ if(gen===awGen){ awMsg="音声を再生できませんでした"; awOn=false; try{render()}catch(e){} } };
+    awAudio.onended=function(){ if(gen===awGen){ awOn=false; try{render()}catch(e){} } };
+    var pr=awAudio.play();
+    if(pr&&pr["catch"]) pr["catch"](function(){ if(gen===awGen){ awMsg="この端末では自動で鳴らせませんでした"; awOn=false; try{render()}catch(e){} } });
+    /* ロック画面・コントロールセンターに何が鳴る予定かを出す（残り時間は裏では更新できない）。 */
+    try{
+      if(navigator.mediaSession&&window.MediaMetadata){
+        navigator.mediaSession.metadata=new MediaMetadata({
+          title:String(title||"B.M.C."), artist:"B.M.C. 有酸素", album:String(album||"")});
+      }
+    }catch(e){}
+    awOn=true; return true;
+  }catch(e){ awMsg="音声を再生できませんでした"; awOn=false; return false; }
+}
+/* 段階1のテスト: 無音60秒 → 区間の合図（1.5秒） → 無音30秒 → 走り終わりの合図（6秒）。
+   全体で約1分40秒。 */
+function awTest(){
+  awPlay([{at:60,cyc:1},{at:91.5,cyc:4}], 1, "離席中の音のテスト", "1分後と1分半後に鳴ります");
+  try{ render(); }catch(e){}
+}
 
 /* ---------- 休憩タイマー（機能4／v2で既定20秒・その場で変更可） ---------- */
 let restEnd=0, restTimer=null;
@@ -2060,6 +2163,18 @@ function viewCardio(){
   <h1>有酸素（トレッドミル）</h1>
   <p class="sub"><strong>目標は距離ではなく「今日この速度・傾斜で走り切ること」</strong>です（距離は速度×時間で決まるので、直接は動かせないためです）。<br><strong>時間の長さに決まりはありません。</strong>グラフだけは、長さのちがう回を並べるために30分あたりへ換算しています。</p>
   ${cardioCard(true)}
+  ${cRun ? `` : `
+  <div class="sec">実機テスト（2026-09-21）</div>
+  <div class="card">
+    <h2>🔊 離席中の音を試す</h2>
+    <p class="note">アプリを離れていても区間の合図が鳴るか、<strong>確かめるだけ</strong>の機能です。有酸素の動き・記録は何も変えていません。</p>
+    <p class="note">① 下のボタンを押す　② すぐKindleを開いて「画面の読み上げ」を始める　③ <strong>1分後</strong>に区間の合図、<strong>1分半後</strong>に走り終わりの合図が鳴ります</p>
+    <p class="note">見るところは3つです。<strong>(a) 無音のあいだ読み上げが続くか　(b) 合図が聞こえるか　(c) 合図のあと読み上げが戻るか。</strong></p>
+    ${awOn ? `<button class="btn ghost" onclick="awStop();render()">■ 止める</button>`
+           : `<button class="btn" onclick="awTest()">▶ 鳴らしてみる（約1分40秒）</button>`}
+    ${awMsg ? `<p class="note" style="color:#e0a86a">${esc(awMsg)}</p>` : ``}
+    <p class="note">iPhoneの<strong>消音スイッチ</strong>を入れていると鳴りません。Webページの音は消音スイッチと音量に従います（標準のタイマー・アラームとはここが違います）。</p>
+  </div>`}
   <button class="btn ghost" onclick="go('home')">筋トレの画面に戻る</button>`;
 }
 
