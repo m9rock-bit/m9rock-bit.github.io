@@ -687,7 +687,9 @@ var DB = { v:19, sets:null, chime:true, voice:true, third:true, noteOpen:false, 
      awayMin  … これより短い項目には標準タイマーを渡さない。渡す瞬間に
                 ショートカットAppへ画面が飛ぶため、30秒の項目で毎回飛ばされると
                 かえって手が止まる。0 にすればすべての項目で渡す。 */
-  awaySound:true, awayTimer:true, awayMin:60 };
+  awaySound:true, awayTimer:true, awayMin:60,
+  /* v44: 🌾 よはく／やることの差し込みリスト（Obsidianから取り込む） */
+  blist:null, blAt:0, blScName:"よはくリスト" };
 try{
   var raw = localStorage.getItem(KEY);
   if(raw){
@@ -716,6 +718,12 @@ try{
     if(typeof p.sleepSpotifyUrl==="string") DB.sleepSpotifyUrl = p.sleepSpotifyUrl;
     /* v22: 実行中の途中経過の控え。無い保存データ（v21以前）はそのまま null。 */
     if(p.run && typeof p.run==="object") DB.run = p.run;
+    /* v43: 自分で中断してホームへ戻したセット（最大3つ）。無い保存データ（v42以前）は空のまま。 */
+    /* v44: 差し込みリスト。★入れ物を足したら、この読み戻しにも足すこと（v30の教訓） */
+    if(Array.isArray(p.blist)) DB.blist = p.blist;
+    if(typeof p.blAt==="number") DB.blAt = p.blAt;
+    if(typeof p.blScName==="string" && p.blScName) DB.blScName = p.blScName;
+    if(Array.isArray(p.parked)) DB.parked = p.parked.filter(function(x){ return x && typeof x==="object" && x.id; }).slice(-3);   /* PARKMAX=3（この時点ではまだ定義前のため数字で書く） */
     /* v30（2026-09-06 ご報告「ユーザーが変更したタグが、版が変わるたびに初期値に戻る」）
        ------------------------------------------------------------------
        ここは「保存してあるものの中から、名前を挙げたものだけを読み戻す」形。
@@ -875,6 +883,7 @@ function runSnap(){
            fold:foldOn,     /* v34: 畳んだ状態も控える（開き直しても畳んだまま） */
            mode:foldMode, joy:joyName, jmin:joyMin,   /* v38（★入れ物を足したら loadRun にも足すこと） */
            jAt:joyAt, jTk:joyTaken,   /* v41: 差し込み中の楽しみ（★loadRun にも足してある） */
+           bAt:blEndAt, bNm:blName, bTk:blTaken, bDn:blDone,   /* v44（★loadRun にも足してある） */
            snStep:snStep, snAt:snAt };   /* v37: 後回し（★入れ物を足したら loadRun にも足すこと） */
 }
 function saveRun(){ if(!curId) return; DB.run = runSnap(); save(); lastRunSave = Date.now(); }
@@ -922,6 +931,12 @@ function loadRun(r){
      ★開き直した瞬間には鳴らさない（v30 thirdSaid・v37 snSaid と同じ考え方）。
        帯は出るので「戻る」は押せる。 */
   joyAsk = false;
+  /* v44: 差し込み。無い控え（v43以前）は 0 のまま＝寄り道なし。開いた瞬間に鳴らさない。 */
+  blAsk = "";
+  blEndAt = (typeof r.bAt==="number") ? r.bAt : 0;
+  blName  = r.bNm || "";
+  blTaken = (typeof r.bTk==="number") ? r.bTk : 0;
+  blDone  = Array.isArray(r.bDn) ? r.bDn.slice() : [];
   joyAt    = (typeof r.jAt==="number") ? r.jAt : 0;
   joyTaken = (typeof r.jTk==="number") ? r.jTk : 0;
   /* v37: 後回し。無い控え（v36以前）は snStep=-1 のまま＝後回しなし。
@@ -957,9 +972,246 @@ function finishPending(){
   go("home");
 }
 
+/* ============================================================
+   v43（2026-09-20 ご依頼）: 実行中に自分で中断してホームへ戻り、あとで再開する。
+   ------------------------------------------------------------
+   - 途中の状態は v22 の控え（runSnap）と同じ形で DB.parked に積む（最大 PARKMAX=3）。
+     DB.run（アプリが閉じられたときの控え）とは別の置き場。別のセットを始めても消えない。
+   - 再開は resumeRun と同じ手順（loadRun）。**離れていた時間は数えない。**
+   - 16時間（RUNMAXAGE）を過ぎたものは再開できず「記録して閉じる」だけ（ご選択）。
+   - 4つ目を中断したときは、いちばん古いものを「記録して閉じる」扱いにしてから積む。
+   - 🛟/🧸 の寄り道中・🎉 差し込み中・就寝の流れの中では出さない（戻り先が二重になるため）。
+   ★DB.parked は読み戻し（ホワイトリスト）にも足してある。 */
+var PARKMAX = 3;
+function parkList(){ return Array.isArray(DB.parked) ? DB.parked : []; }
+function parkExpired(r){ return Date.now() - (r.at||0) > RUNMAXAGE; }
+function canPark(){
+  if(!curId) return false;
+  if(inDetour() || curId==="anger") return false;
+  if(joyAt > 0) return false;
+  if(blEndAt > 0) return false;   /* v44 */
+  if(fromPreSleep || fromWake) return false;
+  var s0 = setOf(curId); if(s0 && s0.rescue) return false;
+  return true;
+}
+/* 控え1つを、いまの実行に読み込まずに記録だけして閉じる */
+function parkLog(r){
+  loadRun(r);
+  stepAt = 0;
+  if(pendDone(r) > 0 || runIdx !== null) logRun();
+  fromPreSleep = false; fromWake = false;
+  stop();
+}
+function parkRun(){
+  if(!canPark()){ render(); return; }
+  var snap = runSnap(); if(!snap){ render(); return; }
+  snap.at = Date.now();
+  snap.parked = 1;
+  stop();                         /* 音・読み上げ・後回し・離席中の音を止め、DB.run も消す */
+  /* 同じセットの古い中断は、記録して閉じてから新しいほうだけを置く */
+  parkList().filter(function(x){ return x.id === snap.id; }).forEach(function(x){
+    DB.parked = parkList().filter(function(y){ return y !== x; }); parkLog(x);
+  });
+  var list = parkList().slice();
+  while(list.length >= PARKMAX){ var old = list.shift(); DB.parked = list; parkLog(old); list = parkList().slice(); }
+  list.push(snap);
+  DB.parked = list; save();
+  go("home");
+}
+function parkResume(i){
+  if(curId){ render(); return; }
+  var list = parkList().slice(), r = list[i]; if(!r){ render(); return; }
+  if(parkExpired(r) || !setOf(r.id)){ render(); return; }
+  list.splice(i,1); DB.parked = list; save();
+  unlockAudio();
+  loadRun(r);
+  stepAt = Date.now();
+  if(tick) clearInterval(tick);
+  tick = setInterval(tickRender, 250);
+  view = "run"; saveRun(); render();
+  awayArm();
+}
+function parkFinish(i){
+  if(curId){ render(); return; }
+  var list = parkList().slice(), r = list[i]; if(!r){ render(); return; }
+  list.splice(i,1); DB.parked = list; save();
+  if(setOf(r.id)) parkLog(r);
+  go("home");
+}
+/* ============================================================
+   v44（2026-09-21 ご依頼）: 🌾 よはく／✅ やること の差し込み
+   ------------------------------------------------------------
+   9/19・9/20とも、**手が空いた瞬間にYouTubeへ行き、そのまま止まらなくなった。**
+   実行中・1人時間の最中に「食べる・YouTube以外の選択肢」をその場で出すための口。
+   ★**s.steps には触らない。**v41の 🎉 と同じ寄り道の形（時計を止めて、標準タイマーで
+     呼び戻し、戻ったら同じ項目の続きから）。添字で紐づく印をずらさないため。
+   ★リストの入力は Obsidian 側に一本化（アプリ内に編集画面は作らない）。
+     アプリは GitHub Pages で動くので Vault を直接読めない。ショートカットが
+     書き出しファイルを読み、`#list=` 付きでこのページを開き直して渡す。 */
+var BL_DEF_MIN = 15;     /* 目安分が空の候補の既定（仕様書 Q2・ご承認） */
+var BL_OLD_DAY = 3;      /* これより古い取り込みは「古いかも」と1行出す */
+var blMsg = "";
+function blItems(){ return Array.isArray(DB.blist) ? DB.blist : []; }
+function blOf(k){ return blItems().filter(function(x){ return x.k===k; }); }
+function blIdx(it){ return blItems().indexOf(it); }
+function blParse(txt){
+  var out = [];
+  String(txt||"").split(/\r?\n/).forEach(function(line){
+    var t = line.trim();
+    if(!t || t.indexOf("|")<0) return;
+    var c = t.split("|").map(function(x){ return x.trim(); });
+    var k = c[0];
+    if(k!=="task" && k!=="breather") return;   /* 見出し行・囲みの行はここで落ちる */
+    var n = c[2]||""; if(!n) return;
+    var m = parseInt(c[3],10);
+    out.push({ k:k, g:c[1]||"", n:n, m:(isFinite(m)&&m>0?m:0), d:c[4]||"" });
+  });
+  return out;
+}
+function blImport(txt){
+  var it = blParse(txt);
+  if(!it.length) return 0;
+  DB.blist = it; DB.blAt = Date.now(); save();
+  return it.length;
+}
+function blAgeDays(){ return DB.blAt ? Math.floor((Date.now()-DB.blAt)/86400000) : -1; }
+function blOld(){ return DB.blAt>0 && blAgeDays()>=BL_OLD_DAY; }
+/* ショートカットを起動して、最新のリストを持って戻ってきてもらう */
+function blRefresh(){
+  location.href = "shortcuts://run-shortcut?name=" + encodeURIComponent(DB.blScName||"よはくリスト")
+                + "&input=text&text=list";
+}
+/* 貼り付けでの取り込み（ショートカットが使えないときの逃げ道） */
+function blPasteGo(){
+  var el = document.getElementById("blpaste");
+  var n = el ? blImport(el.value) : 0;
+  blMsg = n ? (n+"件を取り込みました") : "1件も読めませんでした（種別が task か breather の行だけを読みます）";
+  render();
+}
+function blGoView(){ blMsg=""; view="bl"; render(); }
+
+/* --- 差し込みの状態（この回かぎり。控えにも入れる） --- */
+var blAsk   = "";   /* "" | "kind" | "task" | "breather" */
+var blEndAt = 0;    /* 差し込みが終わる時刻（0＝いま寄り道していない） */
+var blName  = "";   /* いまやっていること */
+var blTaken = 0;    /* この回に差し込んだ回数（★表示しない。記録にだけ残す） */
+var blDone  = [];   /* この回に差し込んだ中身（記録用） */
+function blOn(){ return blEndAt > 0; }
+function blLeft(){ return Math.max(0, Math.round((blEndAt - Date.now())/1000)); }
+function blCan(){ return !!curId && blItems().length>0 && !blOn() && !(typeof joyOn==="function" && joyOn()); }
+function blOpen(){
+  var hr = new Date().getHours();
+  /* 夜（20時以降・明け方まで）は 🌾 よはく を先に開く（仕様書 Q1・ご承認） */
+  blAsk = (hr>=20 || hr<4) ? "breather" : "kind";
+  render();
+}
+function blKindGo(k){ blAsk = k; render(); }
+function blClose(){ blAsk = ""; render(); }
+function blGo(i, min){
+  var it = blItems()[i]; if(!it || !curId) return;
+  unlockAudio();              /* 押した操作の中で音を開通させる（v11と同じ理由） */
+  blAsk = "";
+  commitSeg();                /* ここまでの分をその項目に残す（戻ったら続きから） */
+  var m = min || it.m || BL_DEF_MIN;
+  blEndAt = Date.now() + m*60000;
+  blName = it.n;
+  blTaken++;
+  blDone.push((it.k==="breather" ? "🌾 " : "✅ ") + it.n + "・" + m + "分");
+  saveRun();
+  render();
+  awayClear();                /* 離席中に鳴らせる本数は1本（v37・v41と同じ） */
+  nativeTimer(m*60);
+}
+function blEnd(){
+  if(!blOn()) return;
+  blEndAt = 0; blName = "";
+  var s0 = setOf(curId);
+  if(!(s0 && s0.auto)) stepAt = Date.now();   /* 自動セットは経過から逆算するので触らない */
+  saveRun();
+  render();
+}
+/* 実行中の画面に出す口（タップ式・自動進行の両方から呼ぶ） */
+function blUI(){
+  var h = "";
+  if(blOn()){
+    h += '<div class="hint" style="border-color:#8fb98a;color:#c9e2c4">'
+       + '<b>📋 '+esc(blName)+' の途中です（あと '+mmss(blLeft())+'）。</b><br>'
+       + 'ルーティンの時計は止めています。'
+       + '<button class="btn ghost" style="margin-top:7px" onclick="blEnd()">▶ ルーティンに戻る</button></div>';
+    return h;
+  }
+  if(!blCan() && !blAsk) return "";
+  if(!blAsk){
+    h += '<button class="btn ghost" style="border-color:#8fb98a;color:#c9e2c4" onclick="blOpen()">📋 いまやることを選ぶ</button>';
+    return h;
+  }
+  if(blAsk==="kind"){
+    h += '<div class="iobox"><label style="margin-top:0">📋 どちらから選びますか</label>'
+       + '<div class="row" style="margin-top:8px">'
+       + '<button class="btn ghost" style="margin-top:0" onclick="blKindGo(\'breather\')">🌾 よはく（'+blOf("breather").length+'）</button>'
+       + '<button class="btn ghost" style="margin-top:0" onclick="blKindGo(\'task\')">✅ やること（'+blOf("task").length+'）</button>'
+       + '</div><button class="btn link" onclick="blClose()">やめる</button></div>';
+    return h;
+  }
+  var list = blOf(blAsk);
+  h += '<div class="iobox"><label style="margin-top:0">'+(blAsk==="breather" ? "🌾 よはく" : "✅ やること")+'</label>'
+     + '<p class="note" style="margin-top:5px">'
+     + '・<b>ルーティンの時計は止まります。</b>戻ったら、いまの項目の<b>続きから</b>数えます<br>'
+     + '・項目は減りません。<b>スキップにもなりません</b><br>'
+     + '・何回でも押せます。<b>回数は数えていません</b></p>';
+  if(!list.length){
+    h += '<p class="note">このリストは空です。Obsidian側で足してから「📋 リストを更新」を押してください。</p>';
+  }else{
+    list.forEach(function(it){
+      var i = blIdx(it), m = it.m || BL_DEF_MIN;
+      h += '<button class="btn ghost" style="text-align:left" onclick="blGo('+i+','+m+')">'
+         + esc(it.n)+'<small style="display:block;color:#8a94a6">'+esc(it.g||"")+(it.g?" ・ ":"")+m+'分</small></button>';
+    });
+  }
+  h += '<button class="btn link" onclick="blKindGo(\'kind\')">ほかの種類を見る</button>'
+     + '<button class="btn link" onclick="blClose()">やめる</button></div>';
+  return h;
+}
+/* 設定から開く画面（状態の確認・更新・貼り付けでの取り込み） */
+function viewBl(){
+  var h = '<h1>🌾 よはく／やることリスト</h1>';
+  h += '<p class="sub">実行中の画面の「📋 いまやることを選ぶ」に出る候補です。'
+     + '<b>中身の入力はObsidian側です。</b>このアプリでは足したり直したりしません。</p>';
+  if(blMsg) h += '<div class="hint">'+esc(blMsg)+'</div>';
+  var n = blItems().length;
+  h += '<div class="card"><label style="margin-top:0">いま持っているもの</label>'
+     + '<p class="note" style="margin-top:5px">🌾 よはく '+blOf("breather").length+'件 ／ ✅ やること '+blOf("task").length+'件'
+     + (DB.blAt ? '<br>取り込み: '+dayLabel(DB.blAt)+' '+hhmm(DB.blAt)+(blOld()?'（'+blAgeDays()+'日前。古いかもしれません）':'') : '<br>まだ1件も取り込んでいません')
+     + '</p></div>';
+  h += '<button class="btn" onclick="blRefresh()">📋 リストを更新（ショートカットを起動）</button>';
+  h += '<div class="card"><label>ショートカットの名前（リストを渡すもの）</label>'
+     + '<input class="inp" type="text" id="blscn" value="'+esc(DB.blScName||"")+'" onchange="DB.blScName=this.value;save()">'
+     + '<p class="note">ショートカットは、Obsidianが書き出したファイルを読んで、このページを <b>#list=…</b> 付きで開き直します。作り方の手順書は別にお渡しします。</p></div>';
+  h += '<div class="card"><label>貼り付けて取り込む（ショートカットが使えないとき）</label>'
+     + '<textarea class="inp" id="blpaste" rows="5" placeholder="breather | やりたいこと | 積んでいる本を1章だけ読む | 20 | night"></textarea>'
+     + '<button class="btn ghost" onclick="blPasteGo()">取り込む</button>'
+     + '<p class="note">1行1件・パイプ区切り。<b>種別（task／breather）・ジャンル・やること・目安分・モード</b>の順です。読めない行は黙って飛ばします。</p></div>';
+  if(n){
+    h += '<div class="sec">中身</div><div class="card" style="padding:6px 14px">';
+    blItems().forEach(function(it){
+      h += '<div class="lrow"><span class="ln">'+(it.k==="breather"?"🌾":"✅")+' '+esc(it.n)
+         + '<em style="display:block;font-style:normal;color:#8a94a6;font-size:12.5px">'+esc(it.g||"")+(it.d?" ・ "+esc(it.d):"")+'</em></span>'
+         + '<span class="ld">'+(it.m||BL_DEF_MIN)+'分</span></div>';
+    });
+    h += '</div>';
+  }
+  h += '<button class="btn ghost" onclick="go(\'home\')">ホームへ</button>';
+  return h;
+}
+
+function parkBtn(){
+  if(!canPark()) return '';
+  return '<button class="btn ghost" onclick="parkRun()">⏸ 中断してホームへ（あとで続きから）</button>';
+}
+
 /* --- 状態 --- */
 /* v27: 版の表示（ホーム最下部）。中身を変えたら、ここも必ず上げる。 */
-var APPVER = "切り替えルーティン v42 ・ 2026-09-19";
+var APPVER = "切り替えルーティン v44 ・ 2026-09-21";
 var view = "home";
 var curId = null;
 var startAt = 0;
@@ -1202,6 +1454,8 @@ function logRun(){
     if(joyFeel) rec.jfeel = joyFeel;
     if(joyNote) rec.jnote = joyNote;
   }
+  /* v44: 差し込んだ中身。点数は付けない（加点ルールに触れない） */
+  if(blTaken){ rec.bnow = blTaken; rec.bit = blDone.slice(); }
   if(runIdx===null){
     DB.log.push(rec);
     DB.count++;
@@ -2119,7 +2373,8 @@ function start(id, fromIndex, mode){   /* v38: mode = "rest" | "joy"（省略時
 }
 function stop(){ awayClear();   /* v35 */ snClear(); snAsk=false;   /* v37 */ clearRun(); if(tick) clearInterval(tick); tick=null; startAt=0; curId=null; doneSet={}; curStep=0; runIdx=null; autoPaused=false; pauseAt=0; autoFinished=false; stepAt=0; stepExtra={}; runTimes={}; stepAcc={}; inputOpen=null; autoShift=0; foldOn=false; foldAsking=false; foldRest="";
   foldMode=""; joyName=""; joyMin=JOY_MIN_DEF; joyFeel=""; joyNote=""; joyPend=""; joyPendMin=JOY_MIN_DEF; modePick="";
-  joyAsk=false; joyAt=0; joyTaken=0; }   /* v38 / v41 */
+  joyAsk=false; joyAt=0; joyTaken=0;
+  blAsk=""; blEndAt=0; blName=""; blTaken=0; blDone=[]; }   /* v38 / v41 / v44 */
 
 /* ============================================================
    v16: 🛌就寝＋🌃中途覚醒対応
@@ -2878,6 +3133,7 @@ function render(){
   else if(view==="log") h = viewLog();
   else if(view==="review") h = viewReview();
   else if(view==="about") h = viewAbout();
+  else if(view==="bl") h = viewBl();   /* v44 */
   else if(view==="scale") h = viewScale();
   else if(view==="backup") h = viewBackup();
   document.getElementById("app").innerHTML = h;
@@ -2987,6 +3243,22 @@ function viewHome(){
        + '<small>'+pd+' / '+pn+' 項目まで済み ・ そこまでの実施 '+durLabel(Math.max(0, pr.elapsed||0))
        + '（'+hhmm(pr.at)+' で中断）<br>タップすると<b>続きから</b>再開します。離れていた時間は数えません。</small></button>';
     h += '<button class="btn ghost" onclick="finishPending()">ここまでを記録して終える</button>';
+  }
+  /* v43: 自分で中断したセット（最大3つ）。押したときだけ続きに戻る。 */
+  if(!curId){
+    parkList().forEach(function(r, i){
+      var ps = setOf(r.id); if(!ps) return;
+      var pd = pendDone(r), pn = ps.steps.length, ex = parkExpired(r);
+      if(ex){
+        h += '<button class="setb" style="border-color:#6a6a6a;background:#1c1c1c" onclick="parkFinish('+i+')">⏸ 中断したままのセット（'+esc(ps.icon+" "+ps.name)+'）'
+           + '<small>'+pd+' / '+pn+' 項目まで済み ・ '+hhmm(r.at)+' に中断<br>時間が経ったので続きには戻れません。タップすると<b>ここまでを記録して閉じます</b>。</small></button>';
+      }else{
+        h += '<button class="setb" style="border-color:#c4a06a;background:#211e18" onclick="parkResume('+i+')">⏸ 中断中：'+esc(ps.icon+" "+ps.name)
+           + '<small>'+pd+' / '+pn+' 項目まで済み ・ そこまでの実施 '+durLabel(Math.max(0, r.elapsed||0))+'（'+hhmm(r.at)+' に中断）'
+           + '<br>タップすると<b>続きから</b>再開します。離れていた時間は数えません。</small></button>';
+        h += '<button class="btn link" style="padding:7px" onclick="parkFinish('+i+')">ここまでを記録して閉じる</button>';
+      }
+    });
   }
   /* v30（2026-09-06）: 🛟 の前にやっていたセットへの戻り口。完了画面で
      「最初に戻る」を押した場合・🛟 を途中でやめた場合の受け皿。
@@ -3153,6 +3425,7 @@ function viewHome(){
      + '<input class="inp" type="text" id="scn" value="'+esc(DB.scName)+'" onchange="DB.scName=this.value;save()">'
      + '<p class="note">作り方は <b>行動計画_2026-08-14 §10</b> にあります。未作成でも、このアプリ自体は使えます。</p></div>';
   h += '<button class="btn ghost" onclick="go(\'joylib\')">🎉 楽しみリスト（🌗 で選ぶ候補）</button>';   /* v40 */
+  h += '<button class="btn ghost" onclick="blGoView()">🌾 よはく／やることリスト（📋 で選ぶ候補）</button>';   /* v44 */
   h += '<button class="btn ghost" onclick="go(\'scale\')">📏 満腹度のものさし（食後に見る）</button>';
   h += '<button class="btn ghost" onclick="go(\'log\')">📖 これまでの記録</button>';
   /* v33（2026-09-07）: 実施記録をObsidianへ送る「記録ハブ」への導線。
@@ -3356,6 +3629,7 @@ function viewLog(){
         s += '<div class="lrow"><span class="lt">'+hhmm(r.t)+'</span>'
            + '<span class="ln">'+esc(r.icon)+' '+esc(r.name)
            + (r.items && r.items.length ? '<em style="display:block;font-style:normal;color:#8a94a6;font-size:12.5px;margin-top:3px">'+esc(r.items.join(' → '))+'</em>' : '')
+           + (r.bit && r.bit.length ? '<em style="display:block;font-style:normal;color:#8fb98a;font-size:12.5px;margin-top:3px">📋 '+esc(r.bit.join(' ／ '))+'</em>' : '')
            + (r.memo ? '<em style="display:block;font-style:normal;color:#8a94a6;font-size:12.5px;margin-top:3px">'+esc(r.memo)+'</em>' : '')
            + '</span>'
            + '<span class="ld">'+what+'</span>'
@@ -3643,6 +3917,8 @@ function viewRun(){
     h += angerBtn();
   }
   h += backToFocus();
+  h += blUI();      /* v44 */
+  h += parkBtn();   /* v43 */
   h += '<button class="btn link" onclick="leaveRun()">'+(inDetour()&&curId==="anger" ? 'やめて、さっきの続きに戻る' : 'やめて最初に戻る')+'</button>';
   return h;
 }
@@ -3752,6 +4028,8 @@ function viewRunAuto(s){
   h += '<button class="btn" onclick="finishNow()">'+(curId==="anger"&&inDetour() ? 'ここまでにして、さっきの続きに戻る' : 'ここまでで終える')+'</button>';
   /* v26: 🧸 は上（「次へ ▶」の下）へ移した。ここには出さない。 */
   h += backToFocus();
+  h += blUI();      /* v44 */
+  h += parkBtn();   /* v43 */
   h += '<button class="btn link" onclick="leaveRun()">'+(inDetour()&&curId==="anger" ? 'やめて、さっきの続きに戻る' : 'やめて最初に戻る')+'</button>';
   return h;
 }
@@ -5984,6 +6262,24 @@ function fbInit(){
   document.body.appendChild(t);
 }
 
+/* v44: ショートカットから #list=… で渡された内容を取り込む。
+   取り込んだらハッシュを消す（再読み込みで二重に取り込まないため）。 */
+/* ★同じURLを開き直すだけ（ハッシュだけの違い）だと、ページは読み込み直されない。
+   その場合は hashchange しか来ないので、両方から同じ処理を呼ぶ。 */
+function blFromHash(){
+  var m = /[#&]list=([\s\S]*)$/.exec(location.hash||"");
+  if(!m) return;
+  var txt = m[1];
+  try{ txt = decodeURIComponent(txt.replace(/\+/g," ")); }catch(e){}
+  var n = blImport(txt);
+  blMsg = n ? (n+"件のリストを取り込みました") : "リストを読めませんでした";
+  try{ history.replaceState(null,"",location.pathname+location.search); }catch(e){ location.hash = ""; }
+  /* ★実行中に届いた場合、画面を奪わない（250msの再描画で実行画面が消えるため）。
+     取り込みだけして、知らせはホームに戻ったときに出す。 */
+  if(!curId){ view = "bl"; render(); }
+}
+window.addEventListener("hashchange", blFromHash);
+blFromHash();
 render();
 fbInit();
 </script>
