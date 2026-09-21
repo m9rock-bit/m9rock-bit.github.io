@@ -1089,6 +1089,30 @@ function blPasteGo(){
   render();
 }
 function blGoView(){ blMsg=""; view="bl"; render(); }
+/* v47（2026-09-21・ご報告）: ハッシュで渡す道は**ホーム画面アプリには届かない**。
+   iOSでは「ホーム画面のアイコンから開いたアプリ」と「Safari」が別の保存場所になり、
+   ショートカットの「URLを開く」は必ずSafari側を開くため、取り込みだけSafariに入っていた。
+   → 端末をまたげる**クリップボード**経由を主の道にする。 */
+function blStandalone(){
+  try{ return !!(window.navigator.standalone || (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches)); }
+  catch(e){ return false; }
+}
+function blWhere(){ return blStandalone() ? "ホーム画面のアプリ" : "Safari（ブラウザ）"; }
+function blFromClip(){
+  blMsg = "";
+  if(!(navigator.clipboard && navigator.clipboard.readText)){
+    blMsg = "このブラウザからは読み取れませんでした。下の欄を長押しして貼り付け、「取り込む」を押してください。";
+    render(); return;
+  }
+  navigator.clipboard.readText().then(function(t){
+    var n = blImport(t);
+    blMsg = n ? (n+"件を取り込みました") : "1件も読めませんでした（種別が task か breather の行だけを読みます）";
+    render();
+  }, function(){
+    blMsg = "貼り付けが許可されませんでした。下の欄を長押しして貼り付け、「取り込む」を押してください。";
+    render();
+  });
+}
 
 /* --- 差し込みの状態（この回かぎり。控えにも入れる） --- */
 var blAsk   = "";   /* "" | "kind" | "task" | "breather" */
@@ -1195,7 +1219,11 @@ function viewBl(){
      + '<p class="note" style="margin-top:5px">🌾 よはく '+blOf("breather").length+'件 ／ ✅ やること '+blOf("task").length+'件'
      + (DB.blAt ? '<br>取り込み: '+dayLabel(DB.blAt)+' '+hhmm(DB.blAt)+(blOld()?'（'+blAgeDays()+'日前。古いかもしれません）':'') : '<br>まだ1件も取り込んでいません')
      + '</p></div>';
-  h += '<button class="btn" onclick="blRefresh()">📋 リストを更新（ショートカットを起動）</button>';
+  h += '<button class="btn" onclick="blFromClip()">📋 クリップボードから取り込む</button>';
+  h += '<p class="note">先にショートカット（よはくリスト）を実行して、リストをコピーしておいてください。'
+     + '<b>この画面は「'+blWhere()+'」で開いています。</b>ホーム画面のアイコンとSafariは、iOSでは別の保存場所です。'
+     + '<b>ふだん使うほう（ホーム画面のアイコン）で取り込んでください。</b></p>';
+  h += '<button class="btn ghost" onclick="blRefresh()">⚙️ ショートカットを起動する（コピーまで）</button>';
   h += '<div class="card"><label>ショートカットの名前（リストを渡すもの）</label>'
      + '<input class="inp" type="text" id="blscn" value="'+esc(DB.blScName||"")+'" onchange="DB.blScName=this.value;save()">'
      + '<p class="note">ショートカットは、Obsidianが書き出したファイルを読んで、このページを <b>#list=…</b> 付きで開き直します。作り方の手順書は別にお渡しします。</p></div>';
@@ -1223,7 +1251,7 @@ function parkBtn(){
 
 /* --- 状態 --- */
 /* v27: 版の表示（ホーム最下部）。中身を変えたら、ここも必ず上げる。 */
-var APPVER = "切り替えルーティン v46 ・ 2026-09-21";
+var APPVER = "切り替えルーティン v47 ・ 2026-09-21";
 var view = "home";
 var curId = null;
 var startAt = 0;
