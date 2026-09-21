@@ -1211,7 +1211,7 @@ function parkBtn(){
 
 /* --- 状態 --- */
 /* v27: 版の表示（ホーム最下部）。中身を変えたら、ここも必ず上げる。 */
-var APPVER = "切り替えルーティン v44 ・ 2026-09-21";
+var APPVER = "切り替えルーティン v45 ・ 2026-09-21";
 var view = "home";
 var curId = null;
 var startAt = 0;
@@ -2519,7 +2519,21 @@ function joyItems(){
     return { n:String(x||""), m:JOY_MIN_DEF };
   });
 }
-function joyPick(){ return joyItems().filter(function(x){ return x.n!==""; }); }
+/* v45（2026-09-21 ご依頼）: 🎉 の候補は **🌾 よはく に置き換えた**。
+   二重管理をやめ、入力はObsidian側の1か所にする。
+   ★旧「楽しみリスト」（DB.rest）は**消していない**。よはくが空のときだけ
+     そちらを使う＝取り込み前でも 🎉 が空にならない（`claude_shared/claude.md §6`
+     ＝削除ではなく無効化）。 */
+function joyFromBl(){
+  var a = (typeof blOf==="function") ? blOf("breather") : [];
+  return a.map(function(x){ return { n:x.n, m:(x.m || JOY_MIN_DEF) }; });
+}
+function joyPick(){
+  var bl = joyFromBl();
+  if(bl.length) return bl;
+  return joyItems().filter(function(x){ return x.n!==""; });
+}
+function joyUsingBl(){ return joyFromBl().length > 0; }
 function restList(){ return joyPick().map(function(x){ return x.n; }); }
 function joyMinOf(name){
   var a = joyPick(), i;
@@ -3424,7 +3438,7 @@ function viewHome(){
   h += '<div class="card"><label>ショートカットの名前（iPhone標準タイマーを起動するもの）</label>'
      + '<input class="inp" type="text" id="scn" value="'+esc(DB.scName)+'" onchange="DB.scName=this.value;save()">'
      + '<p class="note">作り方は <b>行動計画_2026-08-14 §10</b> にあります。未作成でも、このアプリ自体は使えます。</p></div>';
-  h += '<button class="btn ghost" onclick="go(\'joylib\')">🎉 楽しみリスト（🌗 で選ぶ候補）</button>';   /* v40 */
+  h += '<button class="btn ghost" onclick="go(\'joylib\')">🎉 楽しみリスト（'+(joyUsingBl()?'いまは 🌾 よはく を使っています':'🌗 で選ぶ候補')+'）</button>';   /* v40 / v45 */
   h += '<button class="btn ghost" onclick="blGoView()">🌾 よはく／やることリスト（📋 で選ぶ候補）</button>';   /* v44 */
   h += '<button class="btn ghost" onclick="go(\'scale\')">📏 満腹度のものさし（食後に見る）</button>';
   h += '<button class="btn ghost" onclick="go(\'log\')">📖 これまでの記録</button>';
@@ -3812,6 +3826,10 @@ function viewRun(){
          + 'どちらも<b>いまのセットはそのまま残ります</b>。🧸 は終わるとそのまま続きに戻り、'
          + '🛟 は終わったあとに<b>「続きに戻る」</b>が出ます（押さなければ戻りません）。</p>';
     }
+    /* v45（2026-09-21 ご指摘「実行中に📋が見当たらない」）: v44では画面の
+       いちばん下に置いていた。**手が空いた瞬間に押すもの**なので、v26で
+       🛟・🧸 を上へ移したのと同じ理由で、ここ（スキップの直下）へ移した。 */
+    h += blUI();
     /* v34の確認パネルは v38 で view="mode"（viewMode）へ移した。実行中から押しても
        ホームから押しても、確認の文言が1か所になるようにするため。ここには残さない。 */
     var ap = appOf(cur);
@@ -3917,7 +3935,7 @@ function viewRun(){
     h += angerBtn();
   }
   h += backToFocus();
-  h += blUI();      /* v44 */
+  if(curStep >= st.length) h += blUI();   /* v45: 全項目を終えたあとは上のブロックが出ないので、ここに出す */
   h += parkBtn();   /* v43 */
   h += '<button class="btn link" onclick="leaveRun()">'+(inDetour()&&curId==="anger" ? 'やめて、さっきの続きに戻る' : 'やめて最初に戻る')+'</button>';
   return h;
@@ -3997,6 +4015,7 @@ function viewRunAuto(s){
     h += '<button class="btn ghost" style="margin-top:9px;border-color:#c98b8b;color:#e8b4b4" onclick="angerGo()">🧸 イライラした — 1分だけ離れる</button>';
     h += '<p class="note" style="margin-top:4px"><b>いまのセットはそのまま残ります。</b>終わると、この続きに戻ります。</p>';
   }
+  h += blUI();   /* v45: 下から「次へ ▶」の近くへ移した */
   h += '<div class="row" style="margin-top:9px">'
      + '<button class="btn ghost" style="margin-top:0" onclick="autoExtend(60)">＋1分 延長</button>'
      + '<button class="btn ghost" style="margin-top:0" onclick="autoExtend(300)">＋5分 延長</button>'
@@ -4028,7 +4047,6 @@ function viewRunAuto(s){
   h += '<button class="btn" onclick="finishNow()">'+(curId==="anger"&&inDetour() ? 'ここまでにして、さっきの続きに戻る' : 'ここまでで終える')+'</button>';
   /* v26: 🧸 は上（「次へ ▶」の下）へ移した。ここには出さない。 */
   h += backToFocus();
-  h += blUI();      /* v44 */
   h += parkBtn();   /* v43 */
   h += '<button class="btn link" onclick="leaveRun()">'+(inDetour()&&curId==="anger" ? 'やめて、さっきの続きに戻る' : 'やめて最初に戻る')+'</button>';
   return h;
@@ -4041,7 +4059,17 @@ function viewRunAuto(s){
 function viewJoyLib(){
   var a = joyItems(), using = !!(DB.rest && DB.rest.length);
   var h = '<h1>🎉 楽しみリスト</h1>';
-  h += '<p class="sub">🌗 → 🎉 楽しむ で選ぶ候補です</p>';
+  if(joyUsingBl()){
+    /* v45: 候補の出どころを 🌾 よはく に置き換えた。ここは**使われていない**ことを
+       その場で分かるようにする（消していないので、よはくが空になれば戻る）。 */
+    h += '<div class="hint" style="border-color:#8fb98a;color:#c9e2c4">'
+       + '<b>いまの候補は 🌾 よはく から出ています。</b>このリストは使われていません。'
+       + '<br>中身を足す・直すのは Obsidian 側（🌾 よはく）です。'
+       + '<button class="btn ghost" style="margin-top:7px" onclick="blGoView()">🌾 よはく／やることリストを見る</button></div>';
+    h += '<p class="sub">下は、よはくを取り込む前まで使っていた古いリストです。<b>消していません</b>（よはくが空になれば、こちらが使われます）。</p>';
+  }else{
+    h += '<p class="sub">🌗 → 🎉 楽しむ で選ぶ候補です</p>';
+  }
   a.forEach(function(it,i){
     h += '<div class="dnrow"><div class="joyrow">'
        + '<div class="g"><input class="inp" type="text" value="'+esc(it.n)+'" placeholder="楽しみの名前" onchange="jlName('+i+',this.value)"></div>'
