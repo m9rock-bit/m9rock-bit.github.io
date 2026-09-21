@@ -354,7 +354,7 @@ const CARDIO_DEF={
 const RATES=["かるすぎる","ちょうどよい","きつすぎる"];
 /* v9（2026-09-05）: 版の表示（ホーム最下部）。開いて1秒で新旧を見分けるため。
    中身を変えたら、ここも必ず上げる。 */
-const APPVER="B.M.C. ジム v19 ・ 2026-09-21";
+const APPVER="B.M.C. ジム v21 ・ 2026-09-21";
 const NORM=30;                    /* グラフの換算基準（30分あたり） */
 const HARDS=["余裕","ちょうどよい","きつい"];
 
@@ -487,6 +487,11 @@ if(!DB.settings.cardio.progs.some(function(g){return g.id===DB.settings.cardio.c
 if(typeof DB.settings.cardio.spStep!=="number")  DB.settings.cardio.spStep=CARDIO_DEF.spStep;
 if(typeof DB.settings.cardio.incStep!=="number") DB.settings.cardio.incStep=CARDIO_DEF.incStep;
 if(typeof DB.settings.cardio.incCap!=="number")  DB.settings.cardio.incCap=CARDIO_DEF.incCap;
+/* v21（2026-09-21）: 離席中の案内（ショートカット経由）。
+   gym.html の DB は JSON.parse で丸ごと読み戻しているので、routine.html のような
+   読み戻しホワイトリストへの追記は要らない（ここの既定パッチだけで足りる）。 */
+if(typeof DB.settings.cardio.guide!=="boolean")   DB.settings.cardio.guide=true;
+if(typeof DB.settings.cardio.scName!=="string" || !DB.settings.cardio.scName) DB.settings.cardio.scName="有酸素ガイド";
 
 
 function restSec(){ return DB.settings.rest; }
@@ -668,6 +673,25 @@ function chimeDone(){
 function chimeMark(){ beep(587,.5); }
 
 /* ===== 離席中の音（段階1・2026-09-21 ご依頼） ==========================
+   ★★★ 2026-09-21 結論: **この作り方は、この端末では使えない。** ★★★
+   実機テスト2回の測定結果:
+     ・前面では鳴る（音の組み立て・音量・消音スイッチは正常）
+     ・ロック画面に再生中の表示が出る（iOSはメディアとして認識している）
+     ・Kindleの「画面の読み上げ」は止まらない（＝混ざっていた）
+     ・**画面を離れると、iOSが再生を止める**（離れていた時間ぶん、音声の位置が
+       進んでいないことを `visibilitychange` の前後で実測。推測ではない）
+     ・`navigator.audioSession.type="playback"` は**対応していて宣言もできたが、
+       それでも止められた。**＝打てる手はもう無い。
+   したがって v20 で**有酸素ホームのテストのボタンを外した**（死んだボタンを残さない）。
+   下の awBuildWav 等は消していないが、**離席中に鳴らす用途では使えない**。
+   前面にいるあいだの合図として使い回す場合だけ残す価値がある。
+   次の入口は**iPhoneのショートカットに喋らせる**（待機→読み上げのくり返し）。
+   ★重要な波及: routine.html v35 の「離席中の音」(`awayWav`) は**同じ仕組み**なので、
+     同じく鳴っていない可能性が極めて高い（v35以来、実機未検証のまま）。
+     しかも routine は「離席中の音を仕掛けた回は標準タイマーへ渡さない」設計のため、
+     **そのセットは離席中に何も届いていない**。設定で「離席中の音」を切れば
+     標準タイマーが受け持つ。B.M.C. memory.md 2026-09-21 参照。
+   ------------------------------------------------------------------
    ご要望「アプリを離れていても、有酸素の区間が過ぎたら音で知らせてほしい。
    iPhoneでKindleの読み上げを使って、走りながら読書をしている」。
 
@@ -1298,6 +1322,61 @@ function cLoop(){
     if(view==="crun") render();
   },1000);
 }
+/* ===== 離席中の案内（v21・2026-09-21） ==================================
+   実機で3回測って決まった形。経緯は仕様書_2026-09-21 §9〜§12。
+
+   ★なぜアプリから音を鳴らさないのか
+     iOSは裏に回った瞬間にページを止める。**音声を先に流しておく手も試したが、
+     「裏でも続く種類の音」として宣言できていても iOS が再生を止めた**（実測）。
+     Web側から打てる手は無い。だから離席中の合図は**iPhoneのショートカットに任せる。**
+
+   ★渡す形
+     開始のタップの中で1度だけ shortcuts://run-shortcut へ渡す。本文は1行1区間の
+     「秒数|文言」。ショートカット側は 待機 → 通知を表示 → テキストを読み上げる を
+     くり返す。**渡す瞬間、画面が1度だけショートカットAppへ飛ぶ**（有酸素は開始が
+     1回なので、routine のように何度も飛ばされる問題は出ない）。
+
+   ★なぜ「通知を表示」を挟むのか（2026-09-21のご記入）
+     ショートカットの読み上げは、iOSの「画面の読み上げ」を**下げない。**2つの声が
+     同時に流れるため、読み上げだけでは案内だと気づけなかった。通知の音で「来る」と
+     分かってから言葉が来る形にした。**通知のバナーに文言そのものも出る**ので、
+     聞き取れなくても目で確かめられる（iPhoneをトレッドミルの台に置いているため）。
+
+   ★文言を短くしている理由
+     重なって流れるので、短いほうが拾える。区間名は入れない（傾斜と速度だけ）。
+
+   ★既知の限界（作っていないもの）
+     走行中に区間を足す・飛ばす・一時停止すると**案内はずれる。**走り出した
+     ショートカットは Web ページから止められないので、**掛け直すと古い案内も
+     鳴り続けて二重になる。**そのため掛け直すボタンは作っていない。
+     ずれが実際に困るかを1〜2回走って確かめてから決める。
+
+   ★通知の音は消音スイッチに従う（画面の読み上げは従わない）。
+     消音にして走る日は、この合図は鳴らない。 */
+function cGuideText(plan){
+  /* 区間 i の長さぶん待って、区間 i+1 の内容を案内する。最後は走り終わり。
+     いちばん最初の区間は、アプリの画面を見て始めるので案内しない。 */
+  var p=plan||[], out=[];
+  for(var i=0;i<p.length;i++){
+    var sec=Math.max(1, Math.round((+p[i].min||0)*60));
+    var nx=p[i+1];
+    out.push(sec+"|"+(nx ? ("傾斜"+n1(nx.inc)+" 速度"+n1(nx.sp)) : "走り終わりです"));
+  }
+  return out.join("\n");
+}
+/* ★必ず「指で押した操作」の中から呼ぶこと。画面がショートカットAppへ飛ぶ。 */
+function cGuideArm(plan){
+  if(!cSet().guide) return false;
+  var nm=String(cSet().scName||"").trim();
+  if(!nm) return false;
+  var txt=cGuideText(plan);
+  if(!txt) return false;
+  try{
+    location.href="shortcuts://run-shortcut?name="+encodeURIComponent(nm)
+      +"&input=text&text="+encodeURIComponent(txt);
+    return true;
+  }catch(e){ return false; }
+}
 function cStart(){
   /* 区間の切り替え音・終了音は setInterval から鳴らすので、
      iOSでは押した瞬間に音を開通させておかないと無音になる（同日のv6と同じ理由）。 */
@@ -1316,6 +1395,10 @@ function cStart(){
   }
   cLoop();
   go("crun");
+  /* v21: 画面を描いたあとで渡す（渡すと画面がショートカットAppへ飛ぶため、
+     戻ってきたときに走行画面が出ている状態にしておく。cSaveRun も済んでいるので、
+     ページが捨てられても DB.crun から続きに戻る）。 */
+  cGuideArm(cRun.plan);
 }
 function cElapsed(){
   if(!cRun) return 0;
@@ -1890,6 +1973,20 @@ function viewCPlan(){
     <p class="note"><strong>傾斜を先に上げます。</strong>着地の衝撃は速度を上げるほうが大きく、傾斜なら衝撃を増やさずに強度だけ上げられるためです。上限に届いたら速度に切り替わります。
     <br>インターバルは<strong>いちばん速い区間</strong>だけを動かします。</p>
   </div>
+  <div class="sec">離席中の案内</div>
+  <div class="card">
+    <label style="display:flex;align-items:center;gap:10px;font-size:14.5px">
+      <input id="cp_gd" type="checkbox" style="width:22px;height:22px" ${cSet().guide?"checked":""}>
+      区間が切り替わったら、iPhoneに知らせる
+    </label>
+    <p class="note"><strong>開始を押すと、1度だけショートカットAppへ画面が飛びます。</strong>そのあとは、アプリを離れていても区間の切り替わりごとに<strong>通知の音 →「傾斜◯ 速度◯」の読み上げ</strong>が来ます（Kindleを聞きながらでも届きます）。
+    <br><strong>アプリ自身の音では、離席中は鳴らせません。</strong>iOSが裏に回った瞬間に再生を止めるためです（実機で確認済み）。
+    <br>📌 <strong>通知の音は消音スイッチに従います。</strong>消音にして走る日は鳴りません（画面の読み上げは消音でも喋るので、読書が聞こえても合図が鳴るとは限りません）。
+    <br>⚠️ <strong>走行中に区間を足す・飛ばす・止めると、案内はずれます。</strong>走り出した案内はアプリ側から止められないため、掛け直すボタンは作っていません。</p>
+    <label>ショートカットの名前</label>
+    <input id="cp_sc" type="text" value="${esc(cSet().scName||"")}" placeholder="有酸素ガイド">
+    <p class="note">ショートカットApp側の名前と<strong>1字でも違うと動きません。</strong>中身の作り方は「仕様書_2026-09-21」§11にあります。</p>
+  </div>
   <button class="btn" onclick="cpSaveAll()">保存する</button>
   <button class="btn ghost" onclick="cTextOpen(curProg().id)">テキストで見る・コピーする</button>
   <button class="btn link" onclick="cpSave()">やめる</button>`;
@@ -1902,6 +1999,10 @@ function cpSaveAll(){
   if(!isNaN(a)&&a>0) cSet().spStep=a;
   if(!isNaN(b)&&b>0) cSet().incStep=b;
   if(!isNaN(c)&&c>=0) cSet().incCap=c;
+  /* v21: 離席中の案内。チェックは数字ではないので g() を通さない。 */
+  var gd=document.getElementById("cp_gd"); if(gd) cSet().guide=!!gd.checked;
+  var sc=document.getElementById("cp_sc");
+  if(sc){ var v=String(sc.value||"").trim(); if(v) cSet().scName=v.slice(0,40); }
   save(); go(cRet);
 }
 
@@ -2248,21 +2349,6 @@ function viewCardio(){
   <h1>有酸素（トレッドミル）</h1>
   <p class="sub"><strong>目標は距離ではなく「今日この速度・傾斜で走り切ること」</strong>です（距離は速度×時間で決まるので、直接は動かせないためです）。<br><strong>時間の長さに決まりはありません。</strong>グラフだけは、長さのちがう回を並べるために30分あたりへ換算しています。</p>
   ${cardioCard(true)}
-  ${cRun ? `` : `
-  <div class="sec">実機テスト（2026-09-21・2回目）</div>
-  <div class="card">
-    <h2>🔊 離席中の音を試す</h2>
-    <p class="note">1回目で<strong>前面では鳴り、離れると鳴らない</strong>ことが分かりました。原因は「裏で止められている」か「音量が絞られている」かの<strong>どちらか</strong>です。<strong>今回は、どちらなのかが画面に出ます。</strong>有酸素の動き・記録は何も変えていません。</p>
-    <p class="note"><strong>2回、やってみてください。</strong><br>
-      <strong>1回目（読み上げなし）</strong>… ボタンを押す → すぐKindleへ移る（読み上げは<strong>始めない</strong>）→ 30秒後と60秒後の合図を聞く → 戻ってくる<br>
-      <strong>2回目（読み上げあり）</strong>… ボタンを押す → すぐKindleへ移って「画面の読み上げ」を始める → 同じように聞く → 戻ってくる</p>
-    ${awOn ? `<button class="btn ghost" onclick="awStop();render()">■ 止める</button>`
-           : `<button class="btn" onclick="awTest()">▶ 鳴らしてみる（約1分6秒）</button>`}
-    ${awMsg ? `<p class="note" style="color:#e0a86a">${esc(awMsg)}</p>` : ``}
-    ${awDiagHtml()}
-    <p class="note">戻ってきたときに出る「離れていた◯秒のあいだに音声は◯秒進んだ」の行が答えです。そのままお知らせください。<br>
-    iPhoneの<strong>消音スイッチ</strong>は切っておいてください（画面の読み上げは消音でも喋るので、読み上げが聞こえても音が出るとは限りません）。</p>
-  </div>`}
   <button class="btn ghost" onclick="go('home')">筋トレの画面に戻る</button>`;
 }
 
