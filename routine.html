@@ -1089,6 +1089,15 @@ function blPasteGo(){
   render();
 }
 function blGoView(){ blMsg=""; view="bl"; render(); }
+/* v48: ホーム画面に追加したアプリは、古いHTMLを抱えたまま開き直しても新しくならない
+   ことがある。**保存データには触らず**、HTMLだけ取り直して開き直す。 */
+function appUpdate(){
+  var url = location.pathname + "?t=" + Date.now();
+  var done = function(){ try{ location.replace(location.pathname + "?v=" + Date.now()); }catch(e){ location.reload(); } };
+  try{
+    fetch(url, { cache:"reload" }).then(done, done);
+  }catch(e){ done(); }
+}
 /* v47（2026-09-21・ご報告）: ハッシュで渡す道は**ホーム画面アプリには届かない**。
    iOSでは「ホーム画面のアイコンから開いたアプリ」と「Safari」が別の保存場所になり、
    ショートカットの「URLを開く」は必ずSafari側を開くため、取り込みだけSafariに入っていた。
@@ -1251,7 +1260,7 @@ function parkBtn(){
 
 /* --- 状態 --- */
 /* v27: 版の表示（ホーム最下部）。中身を変えたら、ここも必ず上げる。 */
-var APPVER = "切り替えルーティン v47 ・ 2026-09-21";
+var APPVER = "切り替えルーティン v48 ・ 2026-09-21";
 var view = "home";
 var curId = null;
 var startAt = 0;
@@ -1429,6 +1438,11 @@ function tickRender(){
   /* v27: テキストを打ち込む画面では描き直さない（打っている途中で消えないように）。
      セットを走らせたままホーム経由でここへ来ることがあるため、必要な保険。 */
   if(view==="sximp" || view==="sxtext" || view==="sxspec") return;
+  /* v48（2026-09-21 ご報告「貼り付けて取り込むが押せない」）: 🌾 よはくの画面にも
+     貼り付け欄がある。セットを走らせたまま設定から入ると、250msごとの描き直しで
+     **貼り付けた文字が消える**（v13・v15・v27と同じ踏み方。4回目）。
+     ★入力欄を置く画面を足したら、必ずこの一覧にも足すこと。 */
+  if(view==="bl") return;
   /* v15: 「次に何をしますか」の入力待ちも同じ。描き直すと打ち込んだ文字が消える。
      このあいだ時計は止めてあるので、描き直さなくても表示はずれない。 */
   if(fAsking && view==="focus") return;
@@ -3497,6 +3511,8 @@ function viewHome(){
      「直したはずなのに変わって見えない」を、開いて1秒で確かめられるようにする。
      このファイルは自動では更新されないので、**いま開いているのが新しいものかどうか**を
      見分ける手がかりが要る（上げ直し忘れ・キャッシュのどちらでも同じ症状になる）。 */
+  h += '<button class="btn ghost" onclick="appUpdate()">⬇️ 最新版を取りに行く（記録・セットはそのまま）</button>';
+  h += '<p class="note">上げ直したのに新しくならないときに押してください。<b>保存してあるセット・記録・取り込んだリストには触りません。</b></p>';
   h += '<p class="note" style="text-align:center;opacity:.45;margin-top:14px">'+APPVER+'</p>';
   return h;
 }
