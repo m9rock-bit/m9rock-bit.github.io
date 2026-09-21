@@ -1098,11 +1098,15 @@ var blTaken = 0;    /* この回に差し込んだ回数（★表示しない。
 var blDone  = [];   /* この回に差し込んだ中身（記録用） */
 function blOn(){ return blEndAt > 0; }
 function blLeft(){ return Math.max(0, Math.round((blEndAt - Date.now())/1000)); }
-function blCan(){ return !!curId && blItems().length>0 && !blOn() && !(typeof joyOn==="function" && joyOn()); }
+/* v46（2026-09-21 ご指摘「📋が見当たらない」2回目）: v44・v45は**リストが空なら
+   ボタン自体を出していなかった。**そのため「無い」のが「空だから」なのか
+   「版が古いから」なのかを、画面からは区別できなかった。**見えないものは
+   直せない**ので、実行中はつねに出し、空のときは押すと理由が出る形にした。 */
+function blCan(){ return !!curId && !blOn() && !(typeof joyOn==="function" && joyOn()); }
 function blOpen(){
   var hr = new Date().getHours();
   /* 夜（20時以降・明け方まで）は 🌾 よはく を先に開く（仕様書 Q1・ご承認） */
-  blAsk = (hr>=20 || hr<4) ? "breather" : "kind";
+  blAsk = (!blItems().length) ? "kind" : ((hr>=20 || hr<4) ? "breather" : "kind");
   render();
 }
 function blKindGo(k){ blAsk = k; render(); }
@@ -1143,6 +1147,14 @@ function blUI(){
   if(!blCan() && !blAsk) return "";
   if(!blAsk){
     h += '<button class="btn ghost" style="border-color:#8fb98a;color:#c9e2c4" onclick="blOpen()">📋 いまやることを選ぶ</button>';
+    return h;
+  }
+  if(blAsk==="kind" && !blItems().length){
+    h += '<div class="iobox"><label style="margin-top:0">📋 リストがまだ空です</label>'
+       + '<p class="note" style="margin-top:5px">中身はObsidian側（🌾 よはく／Privateタスク）にあります。'
+       + 'ホームの<b>設定 →「🌾 よはく／やることリスト」→「📋 リストを更新」</b>で取り込んでください。</p>'
+       + '<button class="btn ghost" onclick="blGoView()">🌾 よはく／やることリストを開く</button>'
+       + '<button class="btn link" onclick="blClose()">やめる</button></div>';
     return h;
   }
   if(blAsk==="kind"){
@@ -1211,7 +1223,7 @@ function parkBtn(){
 
 /* --- 状態 --- */
 /* v27: 版の表示（ホーム最下部）。中身を変えたら、ここも必ず上げる。 */
-var APPVER = "切り替えルーティン v45 ・ 2026-09-21";
+var APPVER = "切り替えルーティン v46 ・ 2026-09-21";
 var view = "home";
 var curId = null;
 var startAt = 0;
