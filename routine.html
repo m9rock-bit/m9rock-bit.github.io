@@ -654,6 +654,30 @@ function defaults(){ return [
       "60|開脚前屈・開ける角度で開脚し、背すじを伸ばしたまま股関節から前傾|開脚前屈",
       "30|音声プレイリストに切り替えて、目を閉じる"
     ]},
+  /* v50（2026-09-30 ご依頼）: 「いま来た」＝YouTube・スマホのながら見／過食の衝動を受ける90秒。
+     ★中身は**衝動サーフィン**（衝動を消そうとせず、波として眺めて、引くまで待つ）。
+       依存・過食の再発予防でいちばん根拠が厚い手法の1つで、「我慢」ではないため
+       **この90秒に失敗という結果が出ない**（そこが 🛟 との違い。🛟 は崩れた後、こちらは崩れる前）。
+     ★auto:true（タップ不要）・voice:false・quiet:true＝**音を1つも出さない**。
+       ご指定は「声・音を出せない場所（職場・電車・子供が寝ている部屋）」なので、
+       読み上げも進行音も鳴らさず、画面の文字と自動の進行だけで完結させる。
+     ★判断を1つも要求しない。20時以降は「判断が求められることは難しい」（9/18のメモ）ため、
+       選択肢・入力欄・チェック欄を作っていない。読むだけで、勝手に進む。
+     ★強さの数字は「だいたいで1つ」。当てるものではないので、外れるという結果も出ない。
+     ★最後の項目で「このあと見ても食べても、この回は成立している」と明示する。
+       ここを書かないと、90秒のあとに食べた回が「失敗した回」として残り、
+       次に押すこと自体をやめる（`claude.md §9`＝自己批判を助長する表現を置かない）。 */
+  { id:"urge", icon:"🌊", name:"いま来た（見たい・食べたい）", limit:90, urge:true,
+    auto:true, voice:false, quiet:true,
+    note:"90秒、勝手に進みます。タップも、音も、入力もありません。衝動を消すためではなく、通り過ぎるのを眺めるためのものです。このあと見ても食べても構いません。",
+    steps:[
+      "15|いま来ている感じが、体のどこにあるか1か所だけ探す（胸・喉・お腹・手・目のあたり）",
+      "15|その強さを、10段のうちどれくらいか、だいたいで1つ心の中で言う",
+      "20|消そうとしない。「来ているな」と見たまま、鼻から吸って、口から長く吐く",
+      "20|波を見る。上がってきて、いちばん高いところを通って、やがて下がっていく",
+      "10|もう一度、強さをだいたいで1つ言う。下がっていなくても、それで構わない",
+      "10|90秒たちました。このあと見ても食べても、この回はもう成立しています"
+    ]},
   { id:"rescue", icon:"🛟", name:"崩れたあとの復帰（1手だけ）", limit:180, rescue:true,
     note:"やり直しではありません。今日をここで終わらせて、次の合図まで戻るためのものです。",
     steps:[
@@ -689,7 +713,9 @@ var DB = { v:19, sets:null, chime:true, voice:true, third:true, noteOpen:false, 
                 かえって手が止まる。0 にすればすべての項目で渡す。 */
   awaySound:true, awayTimer:true, awayMin:60,
   /* v44: 🌾 よはく／やることの差し込みリスト（Obsidianから取り込む） */
-  blist:null, blAt:0, blScName:"よはくリスト" };
+  blist:null, blAt:0, blScName:"よはくリスト",
+  /* v50: 🌊 で最後に選んだ種別（"watch" | "eat"）。記録の内訳にだけ使う */
+  urgeKind:"" };
 try{
   var raw = localStorage.getItem(KEY);
   if(raw){
@@ -708,6 +734,9 @@ try{
     if(p.mig_anger===true) DB.mig_anger = true;
     if(p.detour && typeof p.detour==="object") DB.detour = p.detour;
     if(p.mig_presleep===true) DB.mig_presleep = true;
+    /* v50: 🌊 を一度だけ差し込んだ印。**この行が無いと、ご本人が 🌊 を削除しても
+       開き直すたびに復活する**（読み戻しは列挙した項目だけを拾う作りのため）。 */
+    if(p.mig_urge===true) DB.mig_urge = true;
     /* v16: 就寝の見守り状態。アプリを閉じても経過時間が消えないよう、
        開始時刻そのものを保存し、毎回いまの時刻から計算し直す。 */
     if(typeof p.sleepActive==="boolean") DB.sleepActive = p.sleepActive;
@@ -740,6 +769,8 @@ try{
     if(typeof p.sceneCur==="string") DB.sceneCur = p.sceneCur;
     if(Array.isArray(p.sxProgs)) DB.sxProgs = p.sxProgs;
     if(typeof p.third==="boolean") DB.third = p.third;
+    /* v50: 🌊 でどちらを選んだか（★入れ物を足したら、この読み戻しにも足すこと） */
+    if(typeof p.urgeKind==="string") DB.urgeKind = p.urgeKind;
     /* v40: 説明文をたたまない設定（★入れ物を足したら、この読み戻しにも足すこと） */
     if(typeof p.noteOpen==="boolean") DB.noteOpen = p.noteOpen;
     /* v35: 離席まわり（★入れ物を足したら、この読み戻しにも足すこと） */
@@ -844,6 +875,19 @@ if(!DB.mig_anger){
     var at4 = DB.sets.length;
     DB.sets.forEach(function(s,i){ if(s.rescue && i<at4) at4 = i; });
     DB.sets.splice(at4, 0, ag);
+  }
+  save();
+}
+
+/* v50（2026-09-30）：🌊 いま来た。anger/breath478/presleep と同じ原則＝
+   一度だけ差し込み、以後は編集済みの内容（削除・書き換え）を正として扱う。 */
+if(!DB.mig_urge){
+  DB.mig_urge = true;
+  if(!DB.sets.some(function(s){return s.id==="urge";})){
+    var ug = defaults().filter(function(s){return s.id==="urge";})[0];
+    var at5 = DB.sets.length;
+    DB.sets.forEach(function(s,i){ if(s.rescue && i<at5) at5 = i; });
+    DB.sets.splice(at5, 0, ug);
   }
   save();
 }
@@ -1171,9 +1215,13 @@ function blEnd(){
 function blUI(){
   var h = "";
   if(blOn()){
+    /* ★v49（2026-09-23 ご記入C「差し込みを選ぶと全体終了時間が分からなくなる」）:
+       時計を止める作りは変えていない（9/19に「半減をやめて止める形」へ直したばかり）。
+       困っていたのは**終了時刻が見えなくなること**だったので、止まっている
+       あいだも、戻ったときの見込みをこの帯に出す。押すものは増やしていない。 */
     h += '<div class="hint" style="border-color:#8fb98a;color:#c9e2c4">'
        + '<b>📋 '+esc(blName)+' の途中です（あと '+mmss(blLeft())+'）。</b><br>'
-       + 'ルーティンの時計は止めています。'
+       + 'ルーティンの時計は止めています。<b>いま戻れば '+etaLabel()+' ごろ終わります</b>（延びるぶんはこの表示に乗ります）。'
        + '<button class="btn ghost" style="margin-top:7px" onclick="blEnd()">▶ ルーティンに戻る</button></div>';
     return h;
   }
@@ -1260,7 +1308,7 @@ function parkBtn(){
 
 /* --- 状態 --- */
 /* v27: 版の表示（ホーム最下部）。中身を変えたら、ここも必ず上げる。 */
-var APPVER = "切り替えルーティン v48 ・ 2026-09-21";
+var APPVER = "切り替えルーティン v52 ・ 2026-10-01";
 var view = "home";
 var curId = null;
 var startAt = 0;
@@ -1510,6 +1558,10 @@ function logRun(){
   }
   /* v44: 差し込んだ中身。点数は付けない（加点ルールに触れない） */
   if(blTaken){ rec.bnow = blTaken; rec.bit = blDone.slice(); }
+  /* v50: 🌊 のときだけ、どちらの衝動だったか（"watch"＝見たい／"eat"＝食べたい）。
+     ★点数は付けない・Points Trackerには渡さない。回数と種別だけを残す。
+     ★「下がったか」は記録しない。成否の欄を作ると、下がらなかった回が失敗として残る。 */
+  if(s.id === "urge"){ rec.uk = urgeKind || DB.urgeKind || "watch"; }
   if(runIdx===null){
     DB.log.push(rec);
     DB.count++;
@@ -2093,7 +2145,10 @@ function idxOf(id){ for(var i=0;i<DB.sets.length;i++){ if(DB.sets[i].id===id) re
 /* v25: 🧸 anger はホームの一覧に出さない。**実行中の画面から押して飛ぶもの**であり、
    ホームに並べると「イライラの予定を立てる」形になるため（Manamiさんのご指摘で作り直した）。
    ホームからも1回だけ試せるよう、専用の小さな入口を別に置いてある。 */
-function normals(){ return DB.sets.filter(function(s){return !s.rescue && !s.hidden && !s.archived && s.id!=="anger";}); }
+/* v50: 🌊（urge）も一覧から外す。🧸 と同じ理由＝**衝動が来た瞬間に、
+   セットの一覧を下まで探させない。**ホーム最上部の専用ボタンから始める。 */
+function normals(){ return DB.sets.filter(function(s){return !s.rescue && !s.hidden && !s.archived && s.id!=="anger" && s.id!=="urge";}); }
+function urgeSet(){ return setOf("urge"); }
 /* v23: タグの読み書き。表記ゆれ（全角カンマ・読点・空白）をここで吸収する。 */
 function tagsOf(s){
   return String(s.tags||"").split(/[,、\s]+/).map(function(x){return x.trim();}).filter(Boolean);
@@ -2774,11 +2829,51 @@ function etaSec(){
   return r;
 }
 function etaLabel(){ return hhmm(Date.now() + etaSec()*1000); }
+/* ===== v52（2026-10-01 ご依頼）: 実行中の一覧に「何時ごろか」を出す ==========
+   ご記入「実行中の項目の並びと目安時間をもとに、どの項目が何時ごろになるのか
+   タイムスケジュールのような表示にして欲しい。**15分単位で良い**」。
+
+   ★**画面に要素を1つも足していない。**すでに出ている項目の一覧（st.forEach）の
+     行末に時刻を1つ添えただけ。ボタンは増えていない（9/6のお約束＝実行中の
+     上のかたまりを390×844で417pxに収める。一覧はその下なので、そこも無傷）。
+   ★**15分に丸める。**ご本人が「15分単位で良い」と書かれているため、分単位の
+     正確さは追わない。**丸めるので、途中の延長・スキップで数分ずれても表示が
+     破綻しない。**新しいタイマーも足していない＝すでに動いている render() の中で
+     計算し直すだけで、丸めた値は15分に1度しか変わらない。
+   ★**時計が止まっている回（🌾 差し込み中・⏸ あとで戻る待ち）は、「いま戻った
+     前提」の時刻を出す。**v49で帯に入れた「いま戻れば◯◯ごろ終わります」と同じ
+     考え方に揃えてある。**時計の仕様そのものは1行も触っていない**（9/19に
+     作り直した、意図した動きのため）。
+   ★数え方は etaSec() と同じにしてある（curStep 以降・済みでないものを順に足す）。
+     ここを別の数え方にすると、帯の「全体は◯◯ごろ終わり」と一覧の時刻が
+     食い違って画面に2つの数字が出る。**揃えること。** */
+function qtrLabel(ms){
+  var q = 15*60*1000;
+  return hhmm(Math.round(ms/q)*q);
+}
+/* i番目の項目が始まる見込み時刻（ミリ秒）。出せないときは null。 */
+function stepEtaAt(i){
+  if(curStep==null || i<curStep) return null;   /* 過ぎた位置・開始前は出さない */
+  if(i===curStep) return Date.now();
+  var add = Math.max(0, stepLeft());
+  for(var k=curStep+1;k<i;k++){ if(!doneSet[k]) add += Math.max(0, stepSec(k) - accOf(k)); }
+  return Date.now() + add*1000;
+}
 /* v14: その場で延長する。**この回だけ**の延長で、セットの秒数は変えない
    （セット側を直すのは編集画面と、振り返りの「平均に合わせる」の役目）。
    実績には延長した分もそのまま入る。 */
 function extendStep(sec){
   if(curStep==null) return;
+  /* v51（2026-10-01）: 短くする方向（sec<0）も通す。9/22・9/30に同じ文面で
+     2度届いた「実行中に目安時間を変更したい」への最小の答え。**ボタンは
+     この行に1つ増えるだけで、行数は増やしていない**（9/6のお約束）。
+     ★下限は60秒。ここを外すと0秒・負の秒数の項目ができて、残り時間・
+       完了予定・残り30秒のタイマーが全部おかしくなる。 */
+  if(sec < 0){
+    var allowed = stepSec(curStep);
+    if(allowed + sec < 60) sec = 60 - allowed;   /* 60秒までに留める */
+    if(sec >= 0) return;                          /* すでに60秒以下なら何もしない */
+  }
   stepExtra[curStep] = (stepExtra[curStep]||0) + sec;
   /* v30（2026-09-06 ご指示）: 延長すると知らせる位置も後ろへ動く。
      新しい位置にまだ届いていなければ、印を外してもう一度知らせる。
@@ -3080,6 +3175,29 @@ function finishNow(){ enterDone(); }
      H.M.C.の条件（記録・点数を作らない）に反する。 */
 var detour = null;
 function angerSet(){ return setOf("anger"); }
+/* ===== v50（2026-09-30 ご依頼）: 🌊 いま来た =====
+   ご指定は「1つの入口にまとめる。押した直後に見たい／食べたいを1タップだけ選ぶ」。
+   ★**別の画面を作っていない。**ホームに 🌊 を2つ並べ、押した時点でその1タップが済む形にした。
+     確認画面を挟むと、衝動が来ている数秒のあいだにタップが2回要る。
+   ★どちらを選んでも中身（90秒）は同じ。**選ぶのは記録のためだけ**で、
+     「ながら見と過食のどちらが多いか」を後から数えられるようにしている。
+   ★実行中のセットがあるときは 🧸 と同じ寄り道の形（元のセットを控えて、終わったら戻る）。 */
+var urgeKind = "";
+function urgeGo(kind){
+  var u = urgeSet(); if(!u) return;
+  if(curId === "urge") return;               /* 二重に飛ばない */
+  urgeKind = (kind === "eat") ? "eat" : "watch";
+  DB.urgeKind = urgeKind;
+  if(curId){
+    commitSeg();
+    detour = runSnap();
+    DB.detour = detour;
+  }
+  save();
+  start("urge");
+}
+function urgeLabel(k){ return (k === "eat") ? "食べたい" : "見たい"; }
+
 function angerGo(){
   var a = angerSet(); if(!a) return;
   if(curId === "anger") return;              /* 二重に飛ばない */
@@ -3347,6 +3465,33 @@ function viewHome(){
   if(DB.sleepActive){
     h += '<button class="setb" style="border-color:#7aa0c4;background:#161c24" onclick="go(\'sleepWatch\')">🛌 就寝を見守り中（経過 '+durLabel(sleepElapsed())+'）'
        + '<small>タップして見守り画面に戻る</small></button>';
+  }
+  /* ===== v50（2026-09-30 ご依頼）: 🌊 いま来た（ホーム最上部の専用入口） =====
+     ★**いちばん上に置いている。**🧸 の件（v26）で分かったとおり、いちばん急いで押したいものが
+       いちばん遠いと押されない。衝動は数秒しか猶予がないので、スクロールを一切挟ませない。
+     ★2つ並んでいるが**中身は同じ90秒**。分けているのは記録の内訳のためだけ。
+     ★ここに回数を出していない。「今週3回も来た」と読める数字を毎日ホームに置くと、
+       衝動が来たこと自体の記録が自己評価の材料になる（`claude.md §9`）。内訳は記録画面で見る。 */
+  if(urgeSet() && curId!=="urge"){
+    h += '<div class="sec">いま来たとき</div>';
+    h += '<div class="row" style="gap:6px;margin-bottom:6px">'
+       + '<button class="setb" style="margin-bottom:0;border-color:#5f93a8;background:#141d21" onclick="urgeGo(\'watch\')">🌊 見たい'
+       + '<small>YouTube・スマホをこのまま見続けたい</small></button>'
+       + '<button class="setb" style="margin-bottom:0;border-color:#5f93a8;background:#141d21" onclick="urgeGo(\'eat\')">🌊 食べたい'
+       + '<small>何か口に入れたい・キッチンへ行きたい</small></button>'
+       + '</div>';
+    /* ★v49 と同じ轍を踏まないための1点：この2行は **class="note" を使っていない**。
+       .note は「説明文をいつも開いておく」がオフのとき foldNotes() が「▸ くわしく」に
+       たたむ対象で、v49では終了時刻の目安がそれに巻き込まれて見えなくなっていた。
+       **「このあと見ても食べても構いません」はこの機能の本体**なので、たたませない。
+       見た目は .note と同じ（色・文字の大きさ・行間を同じ値で当てている）。 */
+    h += '<p style="color:#8ea3b8;font-size:12px;line-height:1.75;margin:0 0 4px">'
+       + '90秒、勝手に進みます。<b>タップも音も入力もありません。</b></p>';
+    h += '<p style="color:#8ea3b8;font-size:12px;line-height:1.75;margin:0 0 12px">'
+       + '<b>このあと見ても食べても構いません。押した時点で、この回はもう成立します。</b></p>';
+    h += '<p class="note" style="margin:0 0 12px">消すためではなく、通り過ぎるのを眺めるためのものです。'
+       + '強さの数字は当てるものではないので、外れることもありません。'
+       + '足りないと感じたら、続けて2回押しても構いません。</p>';
   }
   /* v20 (2026-09-03 ご依頼): 累計回数の表示をやめ、今週（月〜日）の実施状況にした。
      DB.count そのものは消していない（「記録を消す操作以外では減らない」という
@@ -3773,13 +3918,23 @@ function viewRun(){
   h += '<div class="card">';
   h += '<div class="bigsub" style="margin-bottom:2px">'+(curStep<st.length ? (curStep+1)+' / '+st.length+'　'+esc(cur?cur.text:"") : 'ぜんぶ終わりました')+'</div>';
   h += '<div class="big'+(sl<0?' over':'')+'">'+mmss(sl)+'</div>';
-  h += '<div class="bigsub">'+(sl<0 ? 'この項目の予定を過ぎています。続けて大丈夫です' : 'この項目の残り時間')+'</div>';
+  /* ★v49（2026-09-23 ご記入A「終了時刻目安が閉じられている」）: 終了時刻は
+     v19からここに出していたが、**v40の .note たたみ込みに巻き込まれて
+     「くわしく」の中に隠れていた**（.note を連続でまとめて <details> に入れる
+     作りのため）。機能が無かったのではなく、見えなくなっていた。
+     ★**新しい行は足していない。**すぐ上の「この項目の残り時間」の行に併記した
+       （9/6のお約束＝実行中の画面の上のかたまりにボタンも行も増やさない）。
+       諦めたもの: この行から「予定を過ぎています。続けて大丈夫です」の
+       後半の言い回しを短くした（意味は残している）。
+     ★.note の中の同じ一文は消した。2か所に出すと、どちらかが古くなる。 */
+  h += '<div class="bigsub">'+(sl<0 ? 'この項目は予定を過ぎています' : 'この項目の残り時間')
+     + (curStep<st.length ? '　・　全体は <b style="color:#e0a86a">'+etaLabel()+'</b> ごろ終わり' : '')
+     + '</div>';
   h += '<div class="bar"><i style="width:'+spct+'%"></i></div>';
   h += '<p class="note" style="text-align:center;margin-top:9px">この項目に使った時間 <b>'+mmss(stepUsed())+'</b>'
      + (accOf(curStep) ? '（中断前の '+mmss(accOf(curStep))+' を含む）' : '')
      + (stepExtra[curStep] ? '（延長 +'+durLabel(stepExtra[curStep])+'）' : '')
-     + '<br>ルーティン全体： 経過 '+mmss(elapsed())+' ／ 目安 '+durLabel(lim)
-     + '<br>このまま進むと <b>'+etaLabel()+'</b> ごろ終わります</p>';
+     + '<br>ルーティン全体： 経過 '+mmss(elapsed())+' ／ 目安 '+durLabel(lim)+'</p>';
   h += '</div>';
   /* いまの項目を、大きく押せる形で進める */
   if(curStep < st.length){
@@ -3792,6 +3947,8 @@ function viewRun(){
       h += '<button class="btn big" onclick="toggleStep('+curStep+')">✓ '+(foldOn?'手をつけた':'できた')+' — 次へ</button>';
     }
     h += '<div class="row" style="margin-top:9px">'
+       /* v51（2026-10-01）: 短くする側。延長しかなかったので足した。 */
+       + '<button class="btn ghost" style="margin-top:0" onclick="extendStep(-60)">−1分 短く</button>'
        + '<button class="btn ghost" style="margin-top:0" onclick="extendStep(60)">＋1分 延長</button>'
        + '<button class="btn ghost" style="margin-top:0" onclick="extendStep(300)">＋5分 延長</button>'
        + '</div>';
@@ -3802,7 +3959,10 @@ function viewRun(){
        「いまはできない」ときに最初に目に入るのがスキップだと、あとでやる
        つもりのものが「やらなかった項目」として記録に残るため。 */
     if(!snOn()){
-      h += '<button class="btn ghost" onclick="snAskOpen()">⏸ この項目は あとで戻る</button>';
+      /* v51（2026-10-01）: 名前を「⏸ 呼ばれた — あとで戻る」へ。段階台帳
+         「routineアプリ ⏸あとで戻る」の段階1の中身（2026-09-28の③見直すで
+         決定済み）。機能は1行も変えていない＝文字列1つで戻せる。 */
+      h += '<button class="btn ghost" onclick="snAskOpen()">⏸ 呼ばれた — あとで戻る</button>';
     }
     /* ★v41（2026-09-19 ご依頼 R-c）: 🎉 をルーティンの「間」に差し込めるようにした。
        ご記入「楽しみリストは…ルーティンの間に差し込めるようにしたい」。
@@ -3833,7 +3993,7 @@ function viewRun(){
       if(joyOn()){
         h += '<div class="hint" style="border-color:#c4a06a;color:#e8c99a">'
            + '<b>🎉 '+esc(joyName)+' の途中です（あと '+mmss(joyLeft())+'）。</b><br>'
-           + 'ルーティンの時計は止めています。'
+           + 'ルーティンの時計は止めています。<b>いま戻れば '+etaLabel()+' ごろ終わります</b>。'   /* v49（ご記入C・📋と同じ扱い） */
            + '<button class="btn ghost" style="margin-top:7px" onclick="joyNowEnd()">▶ ルーティンに戻る</button></div>';
       }
     }
@@ -3859,7 +4019,11 @@ function viewRun(){
          + '<b>タイマーは1本しか持てない</b>ので、待っているあいだは<b>いまの項目の残り時間は渡しません</b>。</p>'
          + '</div>';
     }
-    h += '<button class="btn ghost" onclick="skipStep()">↷ この項目をスキップ</button>';
+    /* v51（2026-10-01）: 「実行中に項目を削除したい」が2度届いた。消す口が
+       無いのではなく、**その回だけ飛ばす＝この↷が「消したい」気持ちに
+       結びついていなかった**と読んだ。記録に残す値（doneSet="skip"）は
+       1文字も変えていない。変えたのは画面の文字だけ。 */
+    h += '<button class="btn ghost" onclick="skipStep()">↷ この項目は今日やらない（スキップ）</button>';
     /* v26（2026-09-05 ご指摘）: 🧸 と 🛟 は画面のいちばん下にあり、
        **いちばん急いで押したいときに、いちばん遠かった。**スキップの直下へ移した。
        この2つは「いま出た衝動・いま出たイライラ」に対する入口なので、
@@ -3890,7 +4054,11 @@ function viewRun(){
        ホームから押しても、確認の文言が1か所になるようにするため。ここには残さない。 */
     var ap = appOf(cur);
     if(ap) h += '<button class="btn ghost" onclick="openApp(\''+esc(cur.app)+'\')">'+ap.icon+' '+esc(ap.name)+'を開く</button>';
-    h += '<p class="note">延長は<b>この回だけ</b>です。セットの秒数は変わりません（実際にかかった時間は、延長した分もそのまま記録されます）。</p>';
+    h += '<p class="note">延長・短縮は<b>この回だけ</b>です。セットの秒数は変わりません（実際にかかった時間は、延長した分もそのまま記録されます）。<b>短くできるのは1分までです。</b>次回以降も変えたいときは編集画面か、振り返りの「平均に合わせる」で直せます。</p>';
+    /* v52（2026-10-01 ご依頼）: 一覧の 🕐 の読み方。ここに置くと、すぐ上の
+       注記と続きになるので foldNotes() が「くわしく」の中へ畳む。 */
+    h += '<p class="note">下の一覧の <b>🕐</b> は「その項目が何時ごろか」の目安です（<b>15分単位</b>のため、数分のずれは丸めています）。'
+       + '🌾 差し込みや ⏸ あとで戻るで時計が止まっているあいだは、<b>いま戻った前提</b>の時刻が出ます。</p>';
   }
   st.forEach(function(x,i){
     var cls = doneSet[i] ? "step done" : (i===curStep ? "step cur" : "step");
@@ -3902,6 +4070,10 @@ function viewRun(){
        + '<em>目安 '+durLabel(foldOn?foldSecOf(x.sec):x.sec)+(foldOn?'（畳み中）':'')+(stepExtra[i]?'（延長 +'+durLabel(stepExtra[i])+'）':'')
        + (usedOf(i) ? '　／　'+(doneSet[i] ? '実際 ' : (i===curStep ? '使用中 ' : (i===snStep ? '後回し ' : '中断中 ')))+mmss(usedOf(i)) : '')
        + (i===snStep ? '　／　<b>⏸ あと '+mmss(snLeft())+' で戻ります</b>' : '')   /* v37 */
+       /* v52: 何時ごろか（15分単位）。済みの項目と、過ぎた位置には出さない。 */
+       + ((!doneSet[i] && stepEtaAt(i)!==null)
+            ? '　／　🕐 '+(i===curStep ? 'いま' : qtrLabel(stepEtaAt(i)))
+            : '')
        + '</em></div></div>';
     /* v13: いまの項目にだけ、メモと「次に足す」を出す。
        全部の行に出すと、行そのもののタップと取り合いになるため。
@@ -4047,12 +4219,14 @@ function viewRunAuto(s){
   var fs = curText.length>26 ? 20 : (curText.length>13 ? 26 : 34);
   h += '<div class="big" style="font-size:'+fs+'px;line-height:1.4;margin:2px 0 8px">'+esc(curText)+'</div>';
   h += '<div class="big'+(autoPaused?' over':'')+'">'+remainInStep+'</div>';
-  h += '<div class="bigsub">'+(autoPaused ? '一時停止中' : 'このステップの残り秒数')+'</div>';
+  /* ★v49（2026-09-23 ご記入A）: タップ式と同じ理由で、終了時刻を
+     「くわしく」の外へ出した。新しい行は足していない（既存の行に併記）。 */
+  h += '<div class="bigsub">'+(autoPaused ? '一時停止中' : 'このステップの残り秒数')
+     + '　・　全体は <b style="color:#e0a86a">'+etaLabel()+'</b> ごろ終わり</div>';
   h += '<div class="bar"><i style="width:'+Math.max(0,Math.min(100,(e/limitOf(s))*100))+'%"></i></div>';
   h += '<p class="note" style="text-align:center;margin-top:8px">'
      + (nx ? '次： '+esc(nx.text)+'<br>' : '次でおしまいです<br>')
-     + '全体の経過 '+mmss(e)+' ／ 目安 '+durLabel(limitOf(s))
-     + '<br>このまま進むと '+etaLabel()+' ごろ終わります</p>';
+     + '全体の経過 '+mmss(e)+' ／ 目安 '+durLabel(limitOf(s))+'</p>';
   h += '</div>';
   h += '<p class="note">タップして進める必要はありません。'+(s.voice?'合図（音・声）':'合図（音）')+'に合わせて進めてください。<br>合わない長さのときは、下の「次へ」で先に進めます。</p>';
   /* v18: 「次へ▶」を操作しやすくした（2026-09-01ご依頼）。
