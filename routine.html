@@ -1308,7 +1308,7 @@ function parkBtn(){
 
 /* --- 状態 --- */
 /* v27: 版の表示（ホーム最下部）。中身を変えたら、ここも必ず上げる。 */
-var APPVER = "切り替えルーティン v52 ・ 2026-10-01";
+var APPVER = "切り替えルーティン v53 ・ 2026-10-01";
 var view = "home";
 var curId = null;
 var startAt = 0;
@@ -2934,6 +2934,60 @@ function shiftK(o, pos){
   Object.keys(o).forEach(function(k){ var i = parseInt(k,10); n[i<pos ? i : i+1] = o[k]; });
   return n;
 }
+/* ===== v53（2026-10-01 ご依頼）: 実行中に項目を「恒久的に」消す ==============
+   ご指示（チャット）＝「実行中に項目を削除できるようにしてほしい。**その変更は
+   恒久的なものです。スキップではない**」。
+
+   ★**スキップ（↷）とは別物。**↷ はその回だけ飛ばして記録に「スキップ」として
+     残るもの。こちらは**セットの定義（s.steps）から消す**ので、**次回以降その項目は
+     出てこない。**v51 で ↷ の名前を「今日やらない」に変えたのは**その回だけ**の
+     話であり、今回のご指示はその先＝**定義から消す**ほうである。
+   ★取り消しは作っていない。**消す前に必ず確認パネルを出す**（`del:` の iobox）。
+     理由を正直に書くと、消した項目を元に戻す仕組み（履歴）をこの回のために
+     作ると、添字で持っている doneSet / stepAcc / stepExtra / runTimes /
+     thirdSaid / snStep の整合をもう1系統抱えることになる。**まず確認1枚で止める**
+     のが最小の形（`claude_shared/claude.md §5`）。
+   ★**実績（DB.times）は消さない。**消すのは「次回以降の予定」であって、今日
+     実際にやったことは履歴として正しい。ここが undoStep（＝やらなかったことに
+     する）との違いである。添字の紐づけ（runTimes）だけ外す。
+   ★**最後の1つは消させない。**0項目のセットは残り時間・進捗バー・完了判定が
+     すべて壊れる。 */
+function unshiftK(o, pos){
+  var n = {};
+  Object.keys(o).forEach(function(k){
+    var i = parseInt(k,10);
+    if(i===pos) return;              /* 消した位置そのものは捨てる */
+    n[i<pos ? i : i-1] = o[k];
+  });
+  return n;
+}
+function removeStep(i){
+  var s = setOf(curId); if(!s) return;
+  if(i<0 || i>=s.steps.length){ closeInput(); return; }
+  if(s.steps.length<=1){
+    closeInput();
+    alert("この項目しか残っていないので、消せません。\n\nセットそのものをやめるときは「⏸ 中断してホームへ」を押してください。セットの中身をまとめて作り直すときは、編集画面から直せます。");
+    return;
+  }
+  var wasRunning = !!stepAt;
+  commitSeg();
+  delete runTimes[i];               /* 実績そのもの（DB.times）は残す */
+  s.steps.splice(i, 1);             /* ★ここが恒久的な変更 */
+  doneSet   = unshiftK(doneSet, i);
+  stepAcc   = unshiftK(stepAcc, i);
+  stepExtra = unshiftK(stepExtra, i);
+  runTimes  = unshiftK(runTimes, i);
+  thirdSaid = unshiftK(thirdSaid, i);   /* 知らせ済みの印もずらす */
+  if(snStep===i) snClear(); else if(snStep>i) snStep--;   /* v37 の指し先 */
+  if(curStep>i) curStep--;
+  if(curStep>=s.steps.length) curStep = s.steps.length-1;
+  if(wasRunning) stepAt = Date.now();
+  save();        /* ★セットの定義を保存＝次回以降も消えたまま */
+  saveRun();
+  inputOpen = null;
+  awayArm();     /* 残り時間が変わったので、離席中の合図を仕掛け直す */
+  render();
+}
 /* v20: 済みにした項目を元に戻す。中身は従来 toggleStep の中にあった
    取り消しの処理をそのまま出したもの（この回に足した実績も一緒に消す）。 */
 function undoStep(i){
@@ -4091,6 +4145,19 @@ function viewRun(){
            + '<button class="btn ghost" style="margin-top:0" onclick="closeInput()">やめる</button>'
            + '<button class="btn save" style="margin-top:0" onclick="runRename('+i+')">直す</button>'
            + '</div></div>';
+      }else if(inputOpen === "del:"+i){
+        /* v53（2026-10-01）: 恒久的に消す前の確認。**ここで止められる唯一の場所**
+           なので、「次回以降も出てこない」ことを必ず文字で見せる。 */
+        h += '<div class="iobox">'
+           + '<label style="margin-top:0">この項目を消します</label>'
+           + '<p class="note" style="margin-top:5px"><b>'+esc(x.text)+'</b> を<b>このセットから消します。</b>'
+           + '<b>次回以降も出てきません</b>（その回だけ飛ばす「↷ この項目は今日やらない」とは別です）。'
+           + '<br>元に戻す仕組みはありません。必要になったら編集画面から足し直してください。'
+           + '<br>いままでの実績の記録は<b>消えません</b>（今日やったことはそのまま残ります）。</p>'
+           + '<div class="row" style="margin-top:8px">'
+           + '<button class="btn ghost" style="margin-top:0" onclick="closeInput()">やめる</button>'
+           + '<button class="btn danger" style="margin-top:0" onclick="removeStep('+i+')">消す</button>'
+           + '</div></div>';
       }else if(inputOpen === "note:"+i){
         h += '<div class="iobox">'
            + '<label style="margin-top:0">やってみて、どう感じましたか</label>'
@@ -4117,6 +4184,12 @@ function viewRun(){
            + '<button onclick="openInput(\'note:'+i+'\')">💬 メモ</button>'
            + '<button onclick="openInput(\'name:'+i+'\')">✏️ 名前を直す</button>'
            + '<button onclick="openInput(\'add:'+(i+1)+'\')">＋ 次に足す</button>'
+           /* v53（2026-10-01 ご依頼）: 恒久的に消す。**実行中の上のかたまりには
+              ボタンを足していない**——ここは項目の行に付いている既存の帯で、
+              いまの項目にだけ出る（9/6のお約束と、9/23の「長押しやタップで
+              既存の項目行から開く形を先に」というご指示に合わせた）。
+              別の項目を消すときは、その行をタップしてから押す。 */
+           + '<button onclick="openInput(\'del:'+i+'\')">🗑 消す</button>'
            + '</div>';
       }
       if(prev.length){
