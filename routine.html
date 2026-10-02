@@ -712,6 +712,17 @@ var DB = { v:19, sets:null, chime:true, voice:true, third:true, noteOpen:false, 
                 ショートカットAppへ画面が飛ぶため、30秒の項目で毎回飛ばされると
                 かえって手が止まる。0 にすればすべての項目で渡す。 */
   awaySound:true, awayTimer:true, awayMin:60,
+  /* ===== v55 (2026-10-03 ご記入②): 離席中の案内を「開始時に1度だけ」渡す =====
+     guide   … オンにすると、セットを始めた1回だけ、全項目の「秒数|次にやること」を
+               ショートカットへ渡す。以後の切り替わりは iPhone 側の通知が知らせる。
+               ★自動で進むセットだけに効く（タップ式は次に進む時刻が決まらないため、
+                 案内の一覧そのものが作れない）。
+     guideSc … そのショートカットの名前（1字でも違うと動かない）
+     ★既定はオフ。ショートカットを作る前にオンだと、開始のたびに
+       「見つかりません」の画面へ飛ばされるため。
+     ★awayTimer / awayMin は v55 で使わなくなったが、**値は消していない**
+       （設定画面の説明だけ入れ替えた。claude.md §9 の「削除しない」）。 */
+  guide:false, guideSc:"ルーティンガイド",
   /* v44: 🌾 よはく／やることの差し込みリスト（Obsidianから取り込む） */
   blist:null, blAt:0, blScName:"よはくリスト",
   /* v50: 🌊 で最後に選んだ種別（"watch" | "eat"）。記録の内訳にだけ使う */
@@ -777,6 +788,8 @@ try{
     if(typeof p.awaySound==="boolean") DB.awaySound = p.awaySound;
     if(typeof p.awayTimer==="boolean") DB.awayTimer = p.awayTimer;
     if(typeof p.awayMin==="number" && p.awayMin>=0) DB.awayMin = p.awayMin;
+    if(typeof p.guide==="boolean") DB.guide = p.guide;                      /* v55 */
+    if(typeof p.guideSc==="string" && p.guideSc) DB.guideSc = p.guideSc;    /* v55 */
     if(DB.count < DB.log.length) DB.count = DB.log.length;
     if(Array.isArray(p.sets)) DB.sets = p.sets;
     else if(p.sets && typeof p.sets==="object"){
@@ -1203,6 +1216,7 @@ function blGo(i, min){
   blEndAt = Date.now() + m*60000;
   blName = it.n;
   blTaken++;
+  guideDrift();   /* v55: 時計が止まるので、渡した案内はずれる */
   blDone.push((it.k==="breather" ? "🌾 " : "✅ ") + it.n + "・" + m + "分");
   saveRun();
   render();
@@ -1326,7 +1340,7 @@ function parkBtn(){
 
 /* --- 状態 --- */
 /* v27: 版の表示（ホーム最下部）。中身を変えたら、ここも必ず上げる。 */
-var APPVER = "切り替えルーティン v54 ・ 2026-10-02";
+var APPVER = "切り替えルーティン v55 ・ 2026-10-03";
 var view = "home";
 var curId = null;
 var startAt = 0;
@@ -1526,6 +1540,7 @@ function runAdd(pos){
   var line = ioSec() + "|" + txt;
   if(pos==null || pos<0 || pos>s.steps.length) pos = s.steps.length;
   s.steps.splice(pos, 0, line);
+  guideDrift();                     /* v55 */
   /* v21: 済み・未済だけでなく、貯めた時間・延長・この回の実績も一緒にずらす
      （従来は doneSet だけで、途中に差し込むと他がずれていた） */
   doneSet   = shiftK(doneSet, pos);
@@ -1928,7 +1943,15 @@ function awayArm(){
   if(l < 1) return;
   awayStep = curStep; awaySec = l; awayAt = Date.now();
   if(awaySoundOK(s) && l <= AWAY_MAXSEC && awayPlay(l, st[curStep].text)){ awayKind = "sound"; return; }
-  if(DB.awayTimer && l >= (DB.awayMin||0)){ awayKind = "timer"; nativeTimer(l); return; }
+  /* ===== v55（2026-10-03 ご記入②）: 項目を進めるたびの自動の渡しは廃止した =======
+     ここが「セットが次に移動するたびにショートカット画面に切り替わるのがうざい」の
+     本体だった（v35 で入れた DB.awayTimer の自動分）。**自動で画面を奪う経路を消す。**
+     離席中に鳴らすものは、これで3つになる。
+       ① 離席中の音（すぐ上の行・従来どおり自動。画面は飛ばない）
+       ② 開始時に1度だけ渡す案内列（v55・DB.guide。自動セットのみ。gym v21と同じ形）
+       ③ 実行中の画面から手で押す「⏰ この項目の残りを渡す」（awayTimerNow・従来どおり）
+     ★DB.awayTimer / DB.awayMin の値は消していない（claude_shared/claude.md §11(a)
+       の「廃止したもの」は memory.md と設定画面の説明に書いた）。 */
   awayKind = ""; awaySec = 0; awayStep = -1;
 }
 /* 手で押したとき用。背景音が仕掛かっていても、標準タイマーにも渡せる。 */
@@ -1938,6 +1961,58 @@ function awayTimerNow(){
   awayKind = (awayKind==="sound" || awayKind==="both") ? "both" : "timer";
   awaySec = l; awayAt = Date.now(); awayStep = curStep;
   nativeTimer(l);
+}
+/* ===== v55（2026-10-03 ご記入②）: 離席中の案内を、開始時に1度だけ渡す =========
+   出どころ: 指示_2026-10-02_4 §3。「セットが次に移動するたびにショートカット画面に
+   切り替わるのがうざいので、Gymアプリの構造を使って通知式にできないか」。
+   ★形は gym v21 と同じ。本文は1行1区間の「秒数|文言」。ショートカット側は
+     待機 → 通知を表示 → 読み上げ をくり返す。**渡すのは開始の1回だけ。**
+   ★区間 i の長さぶん待って、区間 i+1 の文言を案内する（切り替わった瞬間に鳴る）。
+     最初の項目は案内しない（画面を見て始めるため）。最後は「おしまいです」。
+   ★**自動で進むセットだけ。**タップ式は「✓ できた」を押した時刻で次が決まるので、
+     先に時刻の一覧を作れない。タップ式の離席中は ①背景音 ③手で押す渡し が受け持つ。
+     （個人秘書の指示は「routineでも開始時に1度だけ」と書かれていたが、タップ式に
+     当てると鳴る時刻が最初からずれる。ここは意図どおりに読めないので、
+     時間で進むセットに限った。）
+   ★ずれる回の扱い（§3-2で先に決めた1行）: **時計が止まる操作（⏸ 呼ばれた・
+     🌾 差し込み・⏸ 一時停止）や進み方を変える操作（次へ・延長・項目を消す・
+     並べ替え・足す）をした回は、画面に「ずれています」と出すだけにする。
+     渡し直す口は作らない**（走り出したショートカットをWebページから止められず、
+     渡し直すと古い案内も鳴って二重になる。gym v21 と同じ判断）。 */
+var guideOn  = false;   /* この回、案内を渡したか */
+var guideOff = false;   /* この回、案内がずれたか */
+function guideText(s){
+  var st = stepsOf(s); if(!st.length) return "";
+  var out = [];
+  for(var i=0;i<st.length;i++){
+    var sec = Math.max(1, Math.round(st[i].sec));
+    var nx = st[i+1];
+    out.push(sec + "|" + (nx ? nx.text : "おしまいです"));
+  }
+  return out.join("\n");
+}
+/* ★必ず「指で押した操作」の中から呼ぶこと。画面がショートカットAppへ1度だけ飛ぶ。 */
+function guideArm(s){
+  guideOn = false; guideOff = false;
+  if(!DB.guide) return false;
+  if(!s || !s.auto) return false;
+  if(quietOf(s)) return false;                  /* 音を出さないセットでは渡さない（v36の線） */
+  var nm = String(DB.guideSc||"").trim(); if(!nm) return false;
+  var txt = guideText(s); if(!txt) return false;
+  try{
+    location.href = "shortcuts://run-shortcut?name=" + encodeURIComponent(nm)
+                  + "&input=text&text=" + encodeURIComponent(txt);
+    guideOn = true; return true;
+  }catch(e){ return false; }
+}
+/* 進み方が変わった＝渡した案内はもうあてにならない。 */
+function guideDrift(){ if(guideOn) guideOff = true; }
+/* 実行中の画面に出す1行（ずれたときだけ）。 */
+function guideNote(){
+  if(!guideOn || !guideOff) return "";
+  return '<p class="note" style="color:#c98b8b"><b>iPhoneへ渡した案内の時刻は、いまずれています。</b>'
+       + '走り出した案内はこのページから止められないので、渡し直す口は作っていません'
+       + '（渡し直すと古い案内も鳴って二重になります）。<b>画面の数字が正です。</b></p>';
 }
 function awaySoundOff(){ DB.awaySound = false; save(); awayClear(); render(); }
 /* 仕掛けたものが鳴るまでの残り（秒）。過ぎていればマイナス。 */
@@ -2068,6 +2143,7 @@ function autoTick(s){
 /* v4: 手動で次のステップへ進める（合わないときのための逃げ道） */
 function autoSkip(){
   var s = setOf(curId); if(!s || !s.auto) return;
+  guideDrift();   /* v55: 進み方が変わったので、渡した案内はずれる */
   var st = stepsOf(s), cum = 0;
   for(var i=0;i<=curStep && i<st.length;i++){ cum += st[i].sec; }
   var base = autoPaused ? pauseAt : Date.now();
@@ -2083,12 +2159,14 @@ function autoSkip(){
 var autoShift = 0;
 function autoExtend(sec){
   if(autoFinished) return;
+  guideDrift();   /* v55 */
   startAt += sec*1000;
   autoShift += sec;
   render();
 }
 /* v4: 一時停止・再開 */
 function autoPauseToggle(){
+  guideDrift();   /* v55 */
   if(autoPaused){ startAt += (Date.now()-pauseAt); autoPaused = false; }
   else { pauseAt = Date.now(); autoPaused = true; }
   render();
@@ -2495,7 +2573,11 @@ function start(id, fromIndex, mode){   /* v38: mode = "rest" | "joy"（省略時
      どちらも前面のアプリを切り替えるので、同時に両方はできない。
      タイマーを優先し、プレイリストは実行中の画面のボタンから開く形にした
      （どちらを優先するかは編集画面にも書いてある）。 */
-  if(s && s.timer && limitOf(s)>0){ nativeTimer(limitOf(s)); }
+  /* v55: 外向きの動作は1つだけ（v8の線）。案内列を渡せた回は、それで足りる
+     （最後の行が「おしまいです」なので、セット全体のタイマーは要らない）。 */
+  guideOn = false; guideOff = false;
+  if(s && guideArm(s)){ /* v55: 案内列を1度だけ渡した */ }
+  else if(s && s.timer && limitOf(s)>0){ nativeTimer(limitOf(s)); }
   else if(s && s.spotify){ openSpotify(s); }
   /* v35: プレイリストもセット全体のタイマーも無いセットでは、最初の項目にも
      離席中に鳴るものを仕掛ける（外向きの動作は1つだけ、という v8 の線は維持）。 */
@@ -2505,7 +2587,8 @@ function stop(){ awayClear();   /* v35 */ snClear(); snAsk=false;   /* v37 */ cl
   foldMode=""; joyName=""; joyMin=JOY_MIN_DEF; joyFeel=""; joyNote=""; joyPend=""; joyPendMin=JOY_MIN_DEF; modePick="";
   joyAsk=false; joyAt=0; joyTaken=0;
   blAsk=""; blEndAt=0; blName=""; blTaken=0; blDone=[];
-  foldBrkI=-1; foldBrkM=0; foldBrkUsed=false; brkPendI=-1; brkPendM=0; }   /* v38 / v41 / v44 / v54 */
+  foldBrkI=-1; foldBrkM=0; foldBrkUsed=false; brkPendI=-1; brkPendM=0;
+  guideOn=false; guideOff=false; aEdit=false; aEditI=-1; }   /* v38 / v41 / v44 / v54 / v55 */
 
 /* ============================================================
    v16: 🛌就寝＋🌃中途覚醒対応
@@ -2742,6 +2825,7 @@ function joyNowGo(min){
   commitSeg();                /* ここまでの分をその項目に残す（戻ったら続きから） */
   joyAt = Date.now() + min*60000;
   joyTaken++;
+  guideDrift();   /* v55: 時計が止まるので、渡した案内はずれる */
   saveRun();
   render();
   /* 標準タイマーは **render のあと**（ここで画面がショートカットAppへ飛ぶ）。
@@ -2983,6 +3067,117 @@ function gotoStep(i){
    並べ替えは**セットにそのまま残る**（次回も この順番で始まる）。既存の
    「＋ 次に足す」がセットに残るのと同じ扱い。済み・未済の印、貯めた時間、
    この回の延長・実績も一緒に動かす（添字で持っているため）。 */
+/* ===== v55（2026-10-03 ご記入①）: 自動で進むセットの項目を編集する ===========
+   出どころ: 指示_2026-10-02_4 §2。「自動で進む機能もセットの各項目が編集できる
+   ようにして欲しい」。**仮説どおりで、原因は機能の不足ではなかった。**
+   v51（−1分 短く・⏸ 呼ばれた・↷ 今日やらない）と v53（🗑 消す）は、どれも
+   **タップ式の実行画面の「項目の行に付いている帯」**に入れたもので、
+   viewRunAuto（自動で進むセットの実行画面）には**項目の一覧そのものが無い。**
+   だから自動セットからは、v51・v53 の口に到達できなかった（v54 で直した秒表示の
+   件とまったく同じ場所・同じ原因）。足すのは「新しい編集機能」ではなく、
+   **自動セットの画面にも同じ口を出すこと。**
+   ★タップを求めない設計（623行目付近）は崩さない。**一覧は既定では出さない。**
+     いちばん下の「✏️ 項目を直す」を押したときだけ開く。実行中画面の上のかたまり
+     （417px）にはボタンを1つも足していない（9/6のお約束）。
+   ★**いまより先の項目だけ**動かせる。自動セットは経過した秒数から位置を逆算して
+     いるので（autoTick）、済んだ側・いまの項目の長さや並びを変えると位置が
+     巻き戻る。先の項目なら「いまの項目までの秒数の合計」が変わらないので安全。
+     いまの項目と済んだ項目は、**名前を直す・メモを残すだけ**できる。 */
+var aEdit = false, aEditI = -1;
+function aEditOpen(v){ aEdit = !!v; if(!aEdit){ aEditI = -1; } inputOpen = null; render(); }
+function aEditPick(i){ aEditI = (aEditI===i) ? -1 : i; inputOpen = null; render(); }
+function aStepMove(i, d){
+  var s = setOf(curId); if(!s || !s.auto) return;
+  var j = i + d;
+  if(j<0 || j>=s.steps.length) return;
+  if(i<=curStep || j<=curStep) return;          /* 先の項目どうしだけ */
+  var t = s.steps[i]; s.steps[i] = s.steps[j]; s.steps[j] = t;
+  aEditI = j; guideDrift();
+  save(); saveRun(); render();
+}
+function aStepDel(i){
+  var s = setOf(curId); if(!s || !s.auto){ closeInput(); return; }
+  if(i<=curStep || i>=s.steps.length){ closeInput(); return; }
+  if(s.steps.length<=1){ closeInput(); return; }
+  s.steps.splice(i, 1);                         /* ★恒久的な変更。実績（DB.times）は消さない */
+  aEditI = -1; inputOpen = null; guideDrift();
+  save(); saveRun(); render();
+}
+/* 自動セットの編集一覧（既定では出さない）。 */
+function aEditUI(s){
+  if(!s || !s.auto) return "";
+  if(!aEdit){
+    return '<button class="btn ghost" onclick="aEditOpen(1)">✏️ 項目を直す（名前・順番・消す）</button>';
+  }
+  var st = stepsOf(s);
+  var h = '<div class="card"><label>✏️ 項目を直す</label>'
+        + '<p class="note"><b>タップして進める必要がある作りには変わりません。</b>この一覧は、開いたときだけ出ます。'
+        + '<br><b>いまより先の項目</b>は、並べ替え・消す・次に足す ができます。'
+        + '<b>いまの項目と済んだ項目は、名前を直す・メモを残す だけ</b>です'
+        + '（自動で進むセットは経過した秒数から位置を逆算しているので、済んだ側の長さや並びを変えると位置が巻き戻ります）。</p>';
+  st.forEach(function(x, i){
+    var fut = (i > curStep);
+    var tag = (i===curStep) ? '　／　いま' : (i<curStep ? '　／　済み' : '');
+    h += '<div class="dnrow">'
+       + '<div onclick="aEditPick('+i+')" style="cursor:pointer">'
+       + '<b>'+esc(x.text)+'</b>'
+       + '<em style="color:#7b879a">　'+(x.sec>=60 ? mmss(x.sec) : x.sec+'秒')+tag+'</em></div>';
+    if(aEditI===i){
+      if(inputOpen === "name:"+i){
+        h += '<div class="iobox">'
+           + '<label style="margin-top:0">この項目の名前を直す</label>'
+           + '<input class="inp" type="text" id="io_text" value="'+esc(x.text)+'">'
+           + '<p class="note" style="margin-top:5px">直した内容は<b>このセットにそのまま残ります</b>。'
+           + '過去のメモと実績は、直す前の文言のほうに残ります（消えはしません）。</p>'
+           + '<div class="row" style="margin-top:8px">'
+           + '<button class="btn ghost" style="margin-top:0" onclick="closeInput()">やめる</button>'
+           + '<button class="btn save" style="margin-top:0" onclick="runRename('+i+')">直す</button>'
+           + '</div></div>';
+      }else if(inputOpen === "note:"+i){
+        h += '<div class="iobox">'
+           + '<label style="margin-top:0">やってみて、どう感じましたか</label>'
+           + '<input class="inp" type="text" id="io_text" placeholder="例）これは要らない気がする／もっと短くていい">'
+           + '<div class="row" style="margin-top:8px">'
+           + '<button class="btn ghost" style="margin-top:0" onclick="closeInput()">やめる</button>'
+           + '<button class="btn save" style="margin-top:0" onclick="runNote('+i+')">残す</button>'
+           + '</div></div>';
+      }else if(inputOpen === "del:"+i){
+        h += '<div class="iobox">'
+           + '<label style="margin-top:0">この項目を消します</label>'
+           + '<p class="note" style="margin-top:5px"><b>'+esc(x.text)+'</b> を<b>このセットから消します。</b>'
+           + '<b>次回以降も出てきません</b>（その回だけ飛ばす「次へ ▶」とは別です）。'
+           + '<br>元に戻す仕組みはありません。必要になったら編集画面から足し直してください。'
+           + '<br>いままでの実績の記録は<b>消えません</b>（今日やったことはそのまま残ります）。</p>'
+           + '<div class="row" style="margin-top:8px">'
+           + '<button class="btn ghost" style="margin-top:0" onclick="closeInput()">やめる</button>'
+           + '<button class="btn danger" style="margin-top:0" onclick="aStepDel('+i+')">消す</button>'
+           + '</div></div>';
+      }else if(inputOpen === "add:"+(i+1)){
+        h += '<div class="iobox">'
+           + '<label style="margin-top:0">ここに1つ足す（この項目の次）</label>'
+           + '<div class="stline">' + msInputs("io_min","io_sec2",60)
+           + '<input class="inp" type="text" id="io_text" placeholder="やること"></div>'
+           + '<div class="row" style="margin-top:8px">'
+           + '<button class="btn ghost" style="margin-top:0" onclick="closeInput()">やめる</button>'
+           + '<button class="btn save" style="margin-top:0" onclick="runAdd('+(i+1)+')">足す</button>'
+           + '</div></div>';
+      }else{
+        h += '<div class="stbtns" style="margin:-4px 0 10px">'
+           + '<button onclick="openInput(\'name:'+i+'\')">✏️ 名前を直す</button>'
+           + '<button onclick="openInput(\'note:'+i+'\')">💬 メモ</button>'
+           + '<button onclick="aStepMove('+i+',-1)"'+((!fut || i-1<=curStep)?' disabled':'')+'>↑ 上へ</button>'
+           + '<button onclick="aStepMove('+i+',1)"'+((!fut || i+1>=st.length)?' disabled':'')+'>↓ 下へ</button>'
+           + '<button onclick="openInput(\'add:'+(i+1)+'\')"'+((i<curStep)?' disabled':'')+'>＋ 次に足す</button>'
+           + '<button onclick="openInput(\'del:'+i+'\')"'+(fut?'':' disabled')+'>🗑 消す</button>'
+           + '</div>';
+        if(!fut) h += '<p class="note" style="margin:-4px 0 10px">済んだ項目・いまの項目は、消したり動かしたりできません（位置が巻き戻るため）。</p>';
+      }
+    }
+    h += '</div>';
+  });
+  h += '<button class="btn ghost" onclick="aEditOpen(0)">閉じる</button></div>';
+  return h;
+}
 function moveStep(i, d){
   var s = setOf(curId); if(!s) return;
   var j = i + d;
@@ -3048,6 +3243,7 @@ function removeStep(i){
   commitSeg();
   delete runTimes[i];               /* 実績そのもの（DB.times）は残す */
   s.steps.splice(i, 1);             /* ★ここが恒久的な変更 */
+  guideDrift();                     /* v55 */
   doneSet   = unshiftK(doneSet, i);
   stepAcc   = unshiftK(stepAcc, i);
   stepExtra = unshiftK(stepExtra, i);
@@ -3743,15 +3939,24 @@ function viewHome(){
      + '<br><b>鳴らしているあいだ、Spotify・YouTubeの音は止まります。</b>そのため「開始時にプレイリストを開く」がオンのセットでは使いません（そちらは下の標準タイマーが受け持ちます）。'
      + '<br><b>iPhoneの実機では確かめていません。</b>鳴らなければここを切ってください。下の標準タイマーに自動で切り替わります。'
      + '<br>40分より長い残りには仕掛けません（音声が大きくなりすぎるため）。</p>'
-     + '<div class="toggle" style="margin-top:12px"><b>項目を進めるたび、iPhone標準タイマーへ渡す</b>'
-     + '<button class="sw'+(DB.awayTimer?' on':'')+'" onclick="DB.awayTimer=!DB.awayTimer;save();render()"><i></i></button></div>'
-     + '<p class="note">「✓ できた — 次へ」「↷ スキップ」「＋延長」を押すたびに、<b>その項目の残り時間</b>を'
-     + 'ショートカット「'+esc(DB.scName)+'」経由で標準タイマーへ渡します。ロック画面に残り時間が出ます。'
-     + '<br><b>渡す瞬間、毎回ショートカットAppへ画面が飛びます。</b>上の「離席中の音」が仕掛かった回は飛びません。</p>'
-     + '<label style="margin-top:12px">短い項目には渡さない（秒）</label>'
-     + '<input class="inp" type="number" min="0" step="10" value="'+(DB.awayMin||0)+'" onchange="DB.awayMin=Math.max(0,parseInt(this.value,10)||0);save();render()">'
-     + '<p class="note">この秒数より短い項目では、標準タイマーへ渡しません（30秒の項目のたびに画面が飛ぶほうが手が止まるため）。'
-     + '<b>0にすると、すべての項目で渡します。</b>上の「離席中の音」にはこの秒数は効きません（短い項目でも仕掛けます）。</p></div>';
+     + '<div class="toggle" style="margin-top:12px"><b>離席中の案内を、開始時に1度だけ渡す</b>'
+     + '<button class="sw'+(DB.guide?' on':'')+'" onclick="DB.guide=!DB.guide;save();render()"><i></i></button></div>'
+     + '<label style="margin-top:8px">ショートカットの名前</label>'
+     + '<input class="inp" type="text" value="'+esc(DB.guideSc||"")+'" onchange="DB.guideSc=this.value.trim();save();render()">'
+     + '<p class="note"><b>自動で進むセットだけ</b>に効きます。始めた1回だけ、全項目の「秒数｜次にやること」を'
+     + 'ショートカットへ渡し、以後の切り替わりは<b>iPhone側の通知</b>が知らせます。'
+     + '<b>画面がショートカットAppへ飛ぶのは、開始の1回だけです。</b>'
+     + '<br>ショートカット側は「待機 → 通知を表示 → テキストを読み上げる」のくり返し'
+     + '（Gymアプリの有酸素の案内と同じ作り）。<b>名前が1字でも違うと動きません。</b>'
+     + '<br><b>ショートカットを作る前にオンにすると、開始のたびに「見つかりません」の画面へ飛ばされます。</b>'
+     + 'だから既定はオフです。'
+     + '<br>⏸ 呼ばれた・🌾 差し込み・⏸ 一時停止・次へ ▶・延長・項目を消す を使うと、'
+     + '<b>案内の時刻はずれます。</b>走り出した案内はこのページから止められないため、'
+     + '渡し直す口は作っていません（二重に鳴るため）。ずれた回は実行中の画面に1行出します。</p>'
+     + '<p class="note"><b>「項目を進めるたびに標準タイマーへ渡す」（v35〜v54）は v55 で廃止しました。</b>'
+     + '2026-10-02のご記入「セットが次に移動するたびにショートカット画面に切り替わるのがうざい」のためです。'
+     + '離席中に鳴るものは、①上の「離席中の音」②この案内 ③実行中の画面から手で押す'
+     + '「⏰ この項目の残りを渡す」の3つになりました。<b>自動で画面が飛ぶ経路はもうありません。</b></p></div>';
   h += '<div class="card"><label>Spotifyプレイリストの既定URL</label>'
      + '<input class="inp" type="text" id="spurl" placeholder="https://open.spotify.com/playlist/..." value="'+esc(DB.spotifyUrl)+'" onchange="DB.spotifyUrl=this.value.trim();save()">'
      + '<p class="note"><b>セットごとにURLを入れていないとき</b>に、ここのURLを使います。'
@@ -4386,6 +4591,7 @@ function viewRunAuto(s){
      + (nx ? '次： '+esc(nx.text)+'<br>' : '次でおしまいです<br>')
      + '全体の経過 '+mmss(e)+' ／ 目安 '+durLabel(limitOf(s))+'</p>';
   h += '</div>';
+  h += guideNote();   /* v55: 渡した案内がずれたときだけ1行出す */
   h += '<p class="note">タップして進める必要はありません。'+(s.voice?'合図（音・声）':'合図（音）')+'に合わせて進めてください。<br>合わない長さのときは、下の「次へ」で先に進めます。</p>';
   /* v18: 「次へ▶」を操作しやすくした（2026-09-01ご依頼）。
      従来は「一時停止」と横並びの.btn.ghost（幅50%・小さめ）で、暗い部屋・
@@ -4432,6 +4638,7 @@ function viewRunAuto(s){
     h += '<button class="btn ghost" onclick="openSpotify()">🎵 プレイリストを開く'+(spUrl(s)?'':'（未設定）')+'</button>';
     if(!spUrl(s)) h += '<p class="note">このセットの編集画面か、ホーム画面の「設定」にプレイリストのURLを入れると、次回からここで開けます。</p>';
   }
+  h += aEditUI(s);   /* v55（2026-10-02 ご記入①）: 項目を直す口。既定では畳んである */
   h += '<button class="btn" onclick="finishNow()">'+(curId==="anger"&&inDetour() ? 'ここまでにして、さっきの続きに戻る' : 'ここまでで終える')+'</button>';
   /* v26: 🧸 は上（「次へ ▶」の下）へ移した。ここには出さない。 */
   h += backToFocus();
