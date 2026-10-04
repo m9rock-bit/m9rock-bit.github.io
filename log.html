@@ -91,7 +91,7 @@ h1{font-size:21px;margin:2px 0 4px}
 var HKEY = "bmc_log_hub_v1";
 var RKEY = "bmc_routine_v1";
 var GKEY = "bmc_gym_v1";
-var APPVER = "B.M.C. 記録ハブ v6 ・ 2026-09-12";
+var APPVER = "B.M.C. 記録ハブ v7 ・ 2026-10-04";
 
 var H = {
   vault: "My Valut",
@@ -101,7 +101,8 @@ var H = {
   since: "",        /* YYYY-MM-DD。空なら初回に今日を入れる */
   maxRows: 15,      /* 1回の送信に入れる行数の上限 */
   maxLen: 6000,     /* 組み上がったURIの長さの上限（これを超える前に切る） */
-  sent: []          /* 送信済みのID。古いものから捨てる */
+  sent: [],         /* 送信済みのID。古いものから捨てる */
+  items: false      /* v7: routineの「項目」行を送るか。既定は送らない（1日数十行出て、gymの記録が後ろで詰まっていた） */
 };
 var SENTMAX = 4000;
 var cfg = false, justSent = 0, justWhat = "";
@@ -118,6 +119,7 @@ function hLoad(){
       if(typeof o.since==="string") H.since = o.since;
       if(typeof o.maxRows==="number" && o.maxRows>0) H.maxRows = o.maxRows;
       if(Array.isArray(o.sent)) H.sent = o.sent;
+      if(typeof o.items==="boolean") H.items = o.items;
     }
   }catch(e){}
   /* 初回だけ、開始日を今日にする。過去の記録は対象外として数えない
@@ -279,7 +281,10 @@ function collect(){
        アプリは**触った項目だけ**を DB.times に入れる（飛ばした項目は入らない）。
        したがって「セット定義にあるのに、この回の項目行が無い」＝やらなかった、
        と読む。就寝・中途覚醒は別の種別として下で拾う。 */
-    (r.times||[]).forEach(function(x){
+    /* v7 (2026-10-04): 項目行は H.items が true のときだけ。既定では送らない。
+       ご報告「ジムの記録が一度も届いていない」の原因＝項目行が1日数十行たまり、
+       古い順15行ずつの送信ではgymの行まで順番が回らなかった。 */
+    if(H.items) (r.times||[]).forEach(function(x){
       if(!x || !x.t) return;
       if(x.sid === "sleep" || x.sid === "wake") return;
       var nm = (map[x.sid] || x.sid || "") + " › " + (x.step||"");
@@ -422,7 +427,12 @@ function defLinesGym(){
 }
 
 function isSent(id){ return H.sent.indexOf(id) >= 0; }
-function unsentLog(){ return collect().filter(function(x){ return !isSent(x.id); }); }
+/* v7: gym（g=筋トレ c=有酸素 v=有酸素区間）を先に送る。同じ種類の中は古い順のまま。 */
+function isGym(id){ return /^[gcv]/.test(id); }
+function unsentLog(){
+  var a = collect().filter(function(x){ return !isSent(x.id); });
+  return a.filter(function(x){ return isGym(x.id); }).concat(a.filter(function(x){ return !isGym(x.id); }));
+}
 function unsentDef(){ return defLines().concat(defLinesGym()).filter(function(x){ return !isSent(x.id); }); }
 
 /* ---------- 送信 ---------- */
@@ -459,6 +469,7 @@ function markSent(ids, what){
   hSave();
   return true;
 }
+function itemsGo(){ H.items = !H.items; hSave(); render(); }
 function resend(n){
   var k = Math.min(n, H.sent.length);
   H.sent = H.sent.slice(0, H.sent.length - k);
@@ -509,7 +520,8 @@ function sendBlock(list, path, label, cls, taid, what){
   h += '<p class="note">送り先： <b>'+esc(path)+'</b> の末尾'
      + (H.mode==="prepend" ? '（いまは先頭に入る設定）' : '')
      + (list.length > b.rows.length
-        ? '<br>残り '+(list.length-b.rows.length)+'件は、送ったあとにもう一度押してください。'
+        ? '<br><b>残り '+(list.length-b.rows.length)+'件。全部送るには、あと約'+Math.ceil((list.length-b.rows.length)/Math.max(1,b.rows.length))+'回押してください。</b>'
+          + (list.filter(function(x){return isGym(x.id);}).length ? '<br>ジムの記録 '+list.filter(function(x){return isGym(x.id);}).length+'件を先に送ります。' : '')
         : '')
      + '</p>';
   h += '<textarea id="'+taid+'" class="ta" readonly onclick="this.select()">'+esc(b.text)+'</textarea>';
@@ -586,6 +598,8 @@ function render(){
        + '<input class="inp" id="c_rows" type="number" min="1" max="60" value="'+H.maxRows+'">';
     h += '<button class="btn ghost" onclick="modeGo()">入れる位置： '
        + (H.mode==="append" ? "ファイルの末尾" : "ファイルの先頭") + '（押すと切り替え）</button>';
+    h += '<button class="btn ghost" onclick="itemsGo()">routineの項目ごとの行： '
+       + (H.items ? "送る" : "送らない（セット単位と🌊だけ）") + '（押すと切り替え）</button>';
     h += '<button class="btn ghost" onclick="cfgGo()">この内容で保存する</button>';
     h += '<p class="note">実績のある書き方は <b>末尾（append）</b>です。届かないときだけ先頭を試してください。</p>';
     h += '<div class="sec">送り直し</div>';
