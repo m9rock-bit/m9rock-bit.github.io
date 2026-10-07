@@ -584,6 +584,54 @@ function sighSteps(n){
   }
   return out;
 }
+/* ===== v58（2026-10-07 チャットでのご依頼・仕様書_2026-10-07_2）: 呼吸のプログラムの置き場 =====
+   ★ご指摘「1秒だと読み上げが途中で切れて煩わしい」「セットに呼吸の行がたくさん並ぶのが嫌」
+     「ストレッチと同じようにシーンに応じた一覧から選びたい」への答え。
+   ★セットの中の呼吸は**1行だけ**。行の「開くアプリ」欄に "breath:目的" を持たせる
+     （新しい列を足さない＝書き出す記録の形は変えない）。
+   ★中身は DB.brProgs（置き場）。行に来るたびに一覧から選ぶ（ご回答「毎回その場で選ぶ」）。
+     一覧は目的で分ける（ご回答）。選ぶまで時計は止める。
+   ★呼吸中は読み上げない。音の形で動作を分ける（brChime）。声は始めと終わりだけ。
+   ★sighSteps/breathSteps は**消していない**。v57以前の保存データが既定のままかを
+     見分ける（mig_br58）ために使う。 */
+var BR_PURPOSES = ["脳がつかれた","イライラ","落ち着く","眠る"];
+/* 実行中の呼吸の状態（回ごと）。brPick＝行番号→選んだプログラムのid／brAsk＝選んでいる最中の行（-1＝なし）
+   ★入れ物を足したら runSnap/loadRun にも足すこと（寄り道から戻ったときに行の長さが変わらないように）。 */
+var brPick = {}, brAsk = -1, brTab = "", brLastPh = "";
+var BR_PH = [["in","吸う"],["top","吸い足す"],["hold","止める"],["out","吐く"],["hold2","止める"]];
+function brDefaults(){ return [
+  { id:"br_sigh5", name:"ため息呼吸 5分", purpose:"脳がつかれた", desc:"鼻から吸って、少し吸い足して、長く吐く。職場・電車では鼻から吐いてよい。",
+    pat:{in:3,top:1,hold:0,out:6,hold2:0}, n:30 },
+  { id:"br_sigh2", name:"ため息呼吸 2分", purpose:"脳がつかれた", desc:"5分がとれないときの短い版。",
+    pat:{in:3,top:1,hold:0,out:6,hold2:0}, n:12 },
+  { id:"br_478x1", name:"4-7-8 を1回", purpose:"イライラ", desc:"子供の前でもできる長さ。",
+    pat:{in:4,top:0,hold:7,out:8,hold2:0}, n:1 },
+  { id:"br_box3", name:"ボックス呼吸 3分", purpose:"落ち着く", desc:"吸う・止める・吐く・止めるを同じ長さで。",
+    pat:{in:4,top:0,hold:4,out:4,hold2:4}, n:11 },
+  { id:"br_478x9", name:"4-7-8 を9回", purpose:"眠る", desc:"寝る前・夜中に目が覚めたとき。",
+    pat:{in:4,top:0,hold:7,out:8,hold2:0}, n:9 }
+]; }
+function brProgs(){ if(!Array.isArray(DB.brProgs)) DB.brProgs = brDefaults(); return DB.brProgs; }
+function brGet(id){ var a = brProgs(); for(var i=0;i<a.length;i++){ if(a[i].id===id) return a[i]; } return null; }
+function brPhases(g){
+  var p = (g && g.pat) || {};
+  return BR_PH.filter(function(x){ return (+p[x[0]]||0) > 0; })
+              .map(function(x){ return { k:x[0], label:x[1], sec:+p[x[0]] }; });
+}
+function brCycle(g){ return brPhases(g).reduce(function(a,b){ return a+b.sec; },0); }
+function brTotal(g){ return Math.max(1, brCycle(g) * Math.max(1, Math.round(+g.n||1))); }
+function brPatLabel(g){ return brPhases(g).map(function(x){ return x.label+x.sec; }).join("・"); }
+function brPurposes(){
+  var a = BR_PURPOSES.slice();
+  brProgs().forEach(function(g){ var q = String(g.purpose||"").trim(); if(q && a.indexOf(q)<0) a.push(q); });
+  return a;
+}
+function brOfPurpose(q){ return brProgs().filter(function(g){ return String(g.purpose||"")===q; }); }
+/* 行が呼吸かどうか（"breath" または "breath:目的"） */
+function isBreath(x){ return !!(x && /^breath(:|$)/.test(String(x.app||""))); }
+function brPurposeOf(x){ var m = String(x&&x.app||"").match(/^breath:(.*)$/); return m ? m[1].trim() : ""; }
+/* 選ぶ前の行の長さ（見積もり）＝その目的のタブの先頭のプログラム。無ければ行の秒数。 */
+function brEstimate(x){ var g = brOfPurpose(brPurposeOf(x))[0]; return g ? brTotal(g) : x.sec; }
 
 /* --- 既定のルーティン ---------------------------------------
    すべて既存の記録から採っています（新しく思いついた行動は入れていません）。
@@ -630,10 +678,10 @@ function defaults(){ return [
       "40|残り半分に、手のひら1枚の主菜 と こぶし1個のごはん",
       "40|タレ・ドレッシングは小皿へ。今日は焼く・蒸す・煮る・レンジ"
     ]},
-  { id:"breath478", icon:"🫁", name:"4-7-8呼吸法（ストレス解消・約3分）", limit:171,
+  { id:"breath478", icon:"🌬️", name:"呼吸法（一覧から選ぶ）", limit:171,
     auto:true, voice:true, spotify:true,
-    note:"吸う4秒・止める7秒・吐く8秒 × 9回。タップして進める必要はありません。合図（音・声）に合わせて呼吸するだけです。",
-    steps: breathSteps(9) },
+    note:"始めると呼吸のプログラムの一覧が出ます。1つ選ぶと、音の合図に合わせて進みます（v58から1行。4-7-8は「眠る」にあります）。",
+    steps: ["171|呼吸（一覧から選んで始める）||breath:眠る"] },
   /* v24（2026-09-05・問9のK）: 子供と一緒のときにイライラしたとき。
      文言は H.M.C. の納品（指示_2026-09-05_4）をそのまま使っている。こちらで作文していない。
      ★呼吸は breathSteps() を呼んで**同じ生成器を流用**している（4-7-8を二重に実装しない）。
@@ -647,8 +695,8 @@ function defaults(){ return [
   { id:"anger", icon:"🧸", name:"イライラしたとき（子供と一緒のとき）", limit:65,
     auto:true, voice:true,
     note:"子供が目の前にいるままできます。席を外す必要はありません。点数も記録も付きません。",
-    steps: ["8|心の中で「今、イライラしている」と認める。良い悪いは決めない"]
-      .concat(breathSteps(1))
+    steps: ["8|心の中で「今、イライラしている」と認める。良い悪いは決めない",
+            "19|呼吸（一覧から選んで始める）||breath:イライラ"]
       .concat([
         "8|「ちょっと待ってね、今考えてる」と、声に出して伝える",
         "30|いちばん小さい一歩を1つだけ選ぶ（1分だけ黙って見る／代わりの言葉をかける／抱きしめる）"
@@ -713,8 +761,9 @@ function defaults(){ return [
     steps: [
       "10|手を止める。PCはロック、スマホはこの画面だけにする|手を止めます",
       "20|温かい飲み物をひと口（無ければ水。それも無ければ、そのまま次へ）|温かい飲み物を、ひと口",
-      "10|音と声が聞こえていれば、目を閉じる。聞こえなければ、目は閉じずに視線を落として画面の文字だけ追う|目を閉じます"
-    ].concat(sighSteps(30)).concat([
+      "10|音と声が聞こえていれば、目を閉じる。聞こえなければ、目は閉じずに視線を落として画面の文字だけ追う|目を閉じます",
+      "300|呼吸（一覧から選んで始める）||breath:脳がつかれた"
+    ].concat([
       "10|目を開ける。いちばん遠くを見る（窓の外・部屋や車内のいちばん奥）|目を開けて、遠くを見ます",
       "40|場所の一手：歩けるなら少し歩く（トイレ・廊下・ホーム）／立てるなら立って肩を5回まわす／座ったままなら肩をすくめて落とすを5回|体を少し動かします",
       "20|次にやることを1つだけ決める。紙があれば書く、無ければ心の中で言う。決めるのはそれ1つだけ|次にやることを、1つだけ決めます"
@@ -798,7 +847,9 @@ try{
     /* v50: 🌊 を一度だけ差し込んだ印。**この行が無いと、ご本人が 🌊 を削除しても
        開き直すたびに復活する**（読み戻しは列挙した項目だけを拾う作りのため）。 */
     if(p.mig_urge===true) DB.mig_urge = true;
-    if(p.mig_breather===true) DB.mig_breather = true;   /* v57: 🍵（★無いと削除しても復活する） */
+    if(p.mig_breather===true) DB.mig_breather = true;
+    if(Array.isArray(p.brProgs)) DB.brProgs = p.brProgs;   /* v58: 呼吸の置き場（★無いと開き直すたびに既定へ戻る） */
+    if(p.mig_br58===true) DB.mig_br58 = true;            /* v58 */   /* v57: 🍵（★無いと削除しても復活する） */
     /* v16: 就寝の見守り状態。アプリを閉じても経過時間が消えないよう、
        開始時刻そのものを保存し、毎回いまの時刻から計算し直す。 */
     if(typeof p.sleepActive==="boolean") DB.sleepActive = p.sleepActive;
@@ -968,6 +1019,38 @@ if(!DB.mig_breather){
   }
   save();
 }
+/* v58（2026-10-07）：呼吸の行を1行にまとめる。**保存されている中身が既定のまま（v57以前の
+   生成どおり）のときだけ**置き換える。ご自分で直したセットは触らない（直した内容が正）。
+   アイコン 🫁 はご指定で 🌬️ に変える（中身を直したセットでも、アイコンが 🫁 のままなら変える）。 */
+if(!DB.mig_br58){
+  DB.mig_br58 = true;
+  brProgs();   /* 置き場が無ければ既定の5つを入れる */
+  var LEG = {
+    breath478: breathSteps(9),
+    anger: ["8|心の中で「今、イライラしている」と認める。良い悪いは決めない"].concat(breathSteps(1)).concat([
+      "8|「ちょっと待ってね、今考えてる」と、声に出して伝える",
+      "30|いちばん小さい一歩を1つだけ選ぶ（1分だけ黙って見る／代わりの言葉をかける／抱きしめる）"]),
+    breather: [
+      "10|手を止める。PCはロック、スマホはこの画面だけにする|手を止めます",
+      "20|温かい飲み物をひと口（無ければ水。それも無ければ、そのまま次へ）|温かい飲み物を、ひと口",
+      "10|音と声が聞こえていれば、目を閉じる。聞こえなければ、目は閉じずに視線を落として画面の文字だけ追う|目を閉じます"
+    ].concat(sighSteps(30)).concat([
+      "10|目を開ける。いちばん遠くを見る（窓の外・部屋や車内のいちばん奥）|目を開けて、遠くを見ます",
+      "40|場所の一手：歩けるなら少し歩く（トイレ・廊下・ホーム）／立てるなら立って肩を5回まわす／座ったままなら肩をすくめて落とすを5回|体を少し動かします",
+      "20|次にやることを1つだけ決める。紙があれば書く、無ければ心の中で言う。決めるのはそれ1つだけ|次にやることを、1つだけ決めます"])
+  };
+  var NEWD = {};
+  defaults().forEach(function(d){ NEWD[d.id] = d; });
+  DB.sets.forEach(function(s){
+    if(LEG[s.id] && JSON.stringify(s.steps) === JSON.stringify(LEG[s.id])){
+      s.steps = NEWD[s.id].steps.slice();
+      s.limit = NEWD[s.id].limit;
+      if(s.id==="breath478"){ s.name = NEWD.breath478.name; s.note = NEWD.breath478.note; }
+    }
+    if(s.icon==="🫁") s.icon = "🌬️";
+  });
+  save();
+}
 
 function save(){ try{ localStorage.setItem(KEY, JSON.stringify(DB)); }catch(e){} }
 
@@ -997,7 +1080,7 @@ function runSnap(){
   if(stepAt && curStep!=null && curStep>=0 && !(s0 && s0.auto)){
     acc[curStep] = (acc[curStep]||0) + segUsed();
   }
-  return { id:curId, at:Date.now(), elapsed:Math.max(0, elapsed()),
+  return { id:curId, at:Date.now(), elapsed:Math.max(0, (s0 && s0.auto) ? curElapsed() : elapsed()),   /* v58: 止めている最中（呼吸を選んでいる間など）は止めた時点の位置を控える */
            doneSet:doneSet, curStep:curStep, acc:acc, extra:stepExtra,
            runIdx:runIdx, fromPreSleep:fromPreSleep, fromWake:fromWake,
            autoPaused:autoPaused, autoFinished:autoFinished, autoShift:autoShift,
@@ -1006,7 +1089,8 @@ function runSnap(){
            jAt:joyAt, jTk:joyTaken,   /* v41: 差し込み中の楽しみ（★loadRun にも足してある） */
            bAt:blEndAt, bNm:blName, bTk:blTaken, bDn:blDone,   /* v44（★loadRun にも足してある） */
            brI:foldBrkI, brM:foldBrkM, brU:foldBrkUsed,   /* v54（★loadRun にも足してある） */
-           snStep:snStep, snAt:snAt };   /* v37: 後回し（★入れ物を足したら loadRun にも足すこと） */
+           snStep:snStep, snAt:snAt,
+           bp:brPick, ba:brAsk };   /* v58: 呼吸（★loadRun にも足してある） */   /* v37: 後回し（★入れ物を足したら loadRun にも足すこと） */
 }
 function saveRun(){ if(!curId) return; DB.run = runSnap(); save(); lastRunSave = Date.now(); }
 function clearRun(){ if(DB.run){ DB.run = null; save(); } }
@@ -1074,6 +1158,10 @@ function loadRun(r){
   snAt   = (typeof r.snAt==="number") ? r.snAt : 0;
   snSaid = snStep>=0 && snAt>0 && Date.now()>=snAt;
   snAsk  = false;
+  /* v58: 呼吸。無い控え（v57以前）は選んでいない状態。 */
+  brPick = (r.bp && typeof r.bp==="object") ? r.bp : {};
+  brAsk = (typeof r.ba==="number") ? r.ba : -1;
+  brLastPh = "";
   startAt = Date.now() - Math.max(0, r.elapsed||0)*1000;
   pauseAt = autoPaused ? Date.now() : 0;
 }
@@ -1404,7 +1492,7 @@ function parkBtn(){
 
 /* --- 状態 --- */
 /* v27: 版の表示（ホーム最下部）。中身を変えたら、ここも必ず上げる。 */
-var APPVER = "切り替えルーティン v57 ・ 2026-10-07";
+var APPVER = "切り替えルーティン v58 ・ 2026-10-07";
 var view = "home";
 var curId = null;
 var startAt = 0;
@@ -1587,6 +1675,7 @@ function tickRender(){
      **貼り付けた文字が消える**（v13・v15・v27と同じ踏み方。4回目）。
      ★入力欄を置く画面を足したら、必ずこの一覧にも足すこと。 */
   if(view==="bl") return;
+  if(view==="brlib" || view==="brimp") return;   /* v58: 呼吸のプログラムの入力欄・貼り付け欄 */
   /* v15: 「次に何をしますか」の入力待ちも同じ。描き直すと打ち込んだ文字が消える。
      このあいだ時計は止めてあるので、描き直さなくても表示はずれない。 */
   if(fAsking && view==="focus") return;
@@ -2203,19 +2292,83 @@ function autoTick(s){
     autoFinished = true;
     if(tick){ clearInterval(tick); tick = null; }
     chimeDone();
+    /* v58: 自然に終わったときも「メディア再生」の指定を戻す（v57では完了画面を離れるまで残っていた）。
+       終わりのチャイムが消音中でも鳴り切るよう、少し待ってから戻す。 */
+    setTimeout(function(){ if(!curId || !(setOf(curId)||{}).media || autoFinished) mediaAudio(false); }, 1500);
     logRun();
     if(fromPreSleep){ fromPreSleep=false; stop(); sleepEnterWatch(); view="sleepWatch"; }
     else if(fromWake){ fromWake=false; stop(); sleepBackToWatch(); view="sleepWatch"; }
+    /* v58: 🌊・🍵・🧸 の寄り道は、終わったら完了画面を挟まず元のセットの続きへ。
+       ここは render() の中なので、戻す処理（render を呼ぶ）は次の一拍に回す。 */
+    else if(autoBack()){ view = "done"; setTimeout(function(){ angerReturn(); }, 0); }
     else { view = "done"; }
     return;
   }
   if(idx !== curStep){
+    var wasBr = isBreath(st[curStep]) && !!brPick[curStep];
     for(var j=curStep; j<idx && j<st.length; j++){ if(!doneSet[j]) doneSet[j] = "done"; }
     curStep = idx;
-    phaseChime(st[idx].text);   /* v16: 呼吸法は吸う・止める・吐くで音を変える。それ以外は従来どおりの音 */
-    if(s.voice) speak(sayOf(st[idx]));  /* 3列目があればそれを、無ければ（…）を外した文言を読む */
+    if(!isBreath(st[idx])){
+      phaseChime(st[idx].text);   /* v16: 呼吸法は吸う・止める・吐くで音を変える。それ以外は従来どおりの音 */
+      if(s.voice) speak((wasBr ? "呼吸はここまでです。" : "") + sayOf(st[idx]));  /* 3列目があればそれを、無ければ（…）を外した文言を読む */
+    }
+  }
+  /* v58: 呼吸の行。選んでいなければ時計を止めて一覧を出す。選んだあとは動作が変わるたびに音だけ。 */
+  if(isBreath(st[idx])){
+    if(!brPick[idx]){
+      if(brAsk !== idx){
+        brAsk = idx; brTab = brPurposeOf(st[idx]) || brPurposes()[0];
+        autoPaused = true; pauseAt = Date.now();
+        chimeStep();
+        if(s.voice) speak("呼吸を選んでください");
+        saveRun();
+      }
+      return;
+    }
+    var bi = brInfo(s, idx, e);
+    if(bi && bi.key !== brLastPh){ brLastPh = bi.key; brChime(bi.ph.k); }
   }
 }
+/* v58: 呼吸の行のいまの位置（何回目・どの動作・その動作の残り） */
+function brInfo(s, idx, e){
+  var g = brGet(brPick[idx]); if(!g) return null;
+  var st = stepsOf(s), cb = 0;
+  for(var i=0;i<idx;i++) cb += st[i].sec;
+  var ph = brPhases(g), cy = brCycle(g), n = Math.max(1, Math.round(+g.n||1));
+  if(!ph.length || cy<=0) return null;
+  var t = Math.max(0, e - cb), c = Math.min(n-1, Math.floor(t / cy)), r = t - c*cy, k = 0, acc = 0;
+  for(k=0;k<ph.length;k++){ if(r < acc + ph[k].sec) break; acc += ph[k].sec; }
+  if(k>=ph.length) k = ph.length-1;
+  return { g:g, c:c, n:n, ph:ph[k], left:Math.max(0, acc + ph[k].sec - r), key:c+":"+k };
+}
+/* v58: 呼吸の合図（読み上げの代わり）。吸う＝上がる2音／吸い足す＝高い短い1音／止める＝平らな1音／吐く＝下がる2音 */
+function brChime(k){
+  if(k==="in"){ beep(520,.14); setTimeout(function(){beep(700,.16);},110); }
+  else if(k==="top"){ beep(940,.09); }
+  else if(k==="hold" || k==="hold2"){ beep(780,.22); }
+  else if(k==="out"){ beep(700,.14); setTimeout(function(){beep(520,.18);},110); }
+}
+function brChoose(id){
+  var s = setOf(curId); if(!s || brAsk<0 || !brGet(id)) return;
+  var i = brAsk, st;
+  brPick[i] = id; brAsk = -1; brLastPh = "";
+  st = stepsOf(s);
+  var cb = 0; for(var k=0;k<i;k++) cb += st[k].sec;
+  startAt = Date.now() - cb*1000; autoPaused = false; pauseAt = 0;
+  if(s.voice) speak("呼吸を始めます");
+  saveRun(); render();
+}
+function brSkipRow(){
+  var s = setOf(curId); if(!s || brAsk<0) return;
+  var i = brAsk, st = stepsOf(s), cum = 0;
+  for(var k=0;k<=i;k++) cum += st[k].sec;
+  doneSet[i] = "skip"; brAsk = -1;
+  startAt = Date.now() - (cum+0.05)*1000; autoPaused = false; pauseAt = 0;
+  saveRun(); render();
+}
+function brTabSet(q){ brTab = q; render(); }
+/* v58: 寄り道（🌊・🍵・🧸）の最中か。終わる・やめると元のセットの続きへ自動で戻る。 */
+function autoBack(){ return (curId==="anger" || curId==="urge" || curId==="breather") && inDetour(); }
 /* v4: 手動で次のステップへ進める（合わないときのための逃げ道） */
 function autoSkip(){
   var s = setOf(curId); if(!s || !s.auto) return;
@@ -2412,7 +2565,16 @@ function sceneDel(id){
   save(); render();
 }
 function rescues(){ return DB.sets.filter(function(s){return s.rescue && !s.archived;}); }
-function stepsOf(s){ return s.steps.map(parseStep); }
+function stepsOf(s){
+  var st = s.steps.map(parseStep);
+  /* v58: 呼吸の行の長さ＝選んだプログラムの長さ（実行中のセットだけ）。選ぶ前は見積もり。 */
+  st.forEach(function(x,i){
+    if(!isBreath(x)) return;
+    var g = (s.id===curId && brPick[i]) ? brGet(brPick[i]) : null;
+    x.sec = g ? brTotal(g) : brEstimate(x);
+  });
+  return st;
+}
 function sumSec(s){ return stepsOf(s).reduce(function(a,b){return a+b.sec;},0); }
 /* v9: 全体の時間は、タップ式・自動進行のどちらも**必ずステップの合計**から出す。
    v8までは、タップ式のセットだけ「全体の制限時間（秒）」を手入力できた。
@@ -2640,9 +2802,10 @@ function start(id, fromIndex, mode){   /* v38: mode = "rest" | "joy"（省略時
   stepAt = startAt; stepExtra = {}; runTimes = {}; stepAcc = {}; thirdSaid = {};
   runIdx = null;
   autoPaused = false; pauseAt = 0; autoFinished = false;
+  brPick = {}; brAsk = -1; brTab = ""; brLastPh = "";   /* v58: 呼吸も回ごと */
   var s = setOf(id);
   mediaAudio(!!(s && s.media));   /* v57: 🍵 のときだけ消音中でも鳴らす指定。それ以外は元へ */
-  if(s && s.voice){ var st0 = stepsOf(s)[curStep]; if(st0) speak(sayOf(st0)); }
+  if(s && s.voice){ var st0 = stepsOf(s)[curStep]; if(st0 && !isBreath(st0)) speak(sayOf(st0)); }   /* v58: 呼吸の行は一覧を出すので読まない */
   if(tick) clearInterval(tick);
   tick = setInterval(tickRender, 250);
   view = "run"; saveRun(); render();   /* v22: 始めた瞬間に控えを作る */
@@ -2661,7 +2824,7 @@ function start(id, fromIndex, mode){   /* v38: mode = "rest" | "joy"（省略時
      離席中に鳴るものを仕掛ける（外向きの動作は1つだけ、という v8 の線は維持）。 */
   else { awayArm(); }
 }
-function stop(){ mediaAudio(false);   /* v57 */ awayClear();   /* v35 */ snClear(); snAsk=false;   /* v37 */ clearRun(); if(tick) clearInterval(tick); tick=null; startAt=0; curId=null; doneSet={}; curStep=0; runIdx=null; autoPaused=false; pauseAt=0; autoFinished=false; stepAt=0; stepExtra={}; runTimes={}; stepAcc={}; inputOpen=null; autoShift=0; foldOn=false; foldAsking=false; foldRest="";
+function stop(){ mediaAudio(false);   /* v57 */ brPick = {}; brAsk = -1; brLastPh = "";   /* v58 */ awayClear();   /* v35 */ snClear(); snAsk=false;   /* v37 */ clearRun(); if(tick) clearInterval(tick); tick=null; startAt=0; curId=null; doneSet={}; curStep=0; runIdx=null; autoPaused=false; pauseAt=0; autoFinished=false; stepAt=0; stepExtra={}; runTimes={}; stepAcc={}; inputOpen=null; autoShift=0; foldOn=false; foldAsking=false; foldRest="";
   foldMode=""; joyName=""; joyMin=JOY_MIN_DEF; joyFeel=""; joyNote=""; joyPend=""; joyPendMin=JOY_MIN_DEF; modePick="";
   joyAsk=false; joyAt=0; joyTaken=0;
   blAsk=""; blEndAt=0; blName=""; blTaken=0; blDone=[];
@@ -3561,7 +3724,7 @@ function enterDone(){
   if(fromWake){ fromWake=false; stop(); sleepBackToWatch(); view="sleepWatch"; render(); return; }
   /* v25: 🧸 を終えたら、元のセットの続きへ戻る（完了画面は挟まない。
      「戻れた」ことが分かればよく、達成の画面を挟むと寄り道が儀式になるため） */
-  if(curId==="anger" && inDetour()){ angerReturn(); return; }
+  if(autoBack()){ angerReturn(); return; }   /* v58: 🌊・🍵 も同じ */
   view="done"; render();
 }
 function finishNow(){ enterDone(); }
@@ -3671,8 +3834,9 @@ function detourBack(){ if(!angerReturn()) go("home"); }
 function detourDrop(){ detour = null; DB.detour = null; save(); render(); }
 
 function leaveRun(){
-  /* v25: 🧸 を途中でやめた場合も、元のセットへ戻す（記録は残さない）。 */
-  if(curId==="anger" && inDetour()){ angerReturn(); return; }
+  /* v25: 🧸 を途中でやめた場合も、元のセットへ戻す（記録は残さない）。
+     v58: 🌊・🍵 も同じ。こちらは1つでもやれていれば記録に残してから戻る。 */
+  if(autoBack()){ if(curId!=="anger" && runIdx===null && doneCount()>0) logRun(); angerReturn(); return; }
   /* 途中でやめた回。1つでもやれていれば残し、0のままなら残さない
      （画面を開いただけ・押し間違いを増やさないため） */
   if(runIdx===null && doneCount()>0) logRun();
@@ -3719,6 +3883,8 @@ function render(){
   }
   else if(view==="mode") h = viewMode();   /* v38 */
   else if(view==="joylib") h = viewJoyLib();   /* v40 */
+  else if(view==="brlib") h = viewBrLib();   /* v58 */
+  else if(view==="brimp") h = viewBrImp();   /* v58 */
   else if(view==="done") h = viewDone();
   else if(view==="sleepWatch") h = viewSleepWatch();
   else if(view==="wakeChoice") h = viewWakeChoice();
@@ -3965,13 +4131,9 @@ function viewHome(){
        + '<button class="setb" style="margin-bottom:0" onclick="start(\''+s.id+'\')">'+esc(s.icon)+' '+esc(s.name)
        + '<small>'+durLabel(limitOf(s))+' ・ '+countLabel(s)
        + (s.note ? '<br>'+esc(s.note) : '')+'</small></button>'
-       + '<button class="btn ghost" style="flex:none;width:auto;margin-top:0;padding:0 13px;border-color:#7a9ec4;color:#bcd6ee" onclick="modeAsk(\''+s.id+'\',\'home\')">🌗</button>'
-       + '</div>';
+       + '</div>';   /* v58: 🌗 はご依頼でホームから外した（仕組みは残してある） */
   });
-  if(lst.length){
-    h += '<p class="note" style="margin:-2px 0 10px">🌗 は<b>今日の自分に</b>。押すと <b>🔋 休息</b>（疲れた・しんどい）か <b>🎉 楽しむ</b>（気持ちを緩めたい・お祝い）を選べます。'
-       + '<b>項目は減りません。順番も変わりません。</b>目安の時間が半分になり、「できた」が<b>手をつけたら済み</b>に変わるだけです。</p>';
-  }
+
   if(DB.sceneCur && !lst.length){
     h += '<p class="note">このタブに入れたセットがまだありません。「セットを編集」で、出したいセットに同じタグを入れてください。'
        + '<br><b>「すべて」を押せば、いつでも全部に戻れます。</b></p>';
@@ -3990,10 +4152,8 @@ function viewHome(){
   h += '<button class="btn ghost" onclick="go(\'words\')">🗣 声かけの言い換え（見るだけ・5つ）</button>';
   /* v25: 🧸 はホームの一覧から外した（実行中に押すもの）。
      ただし「どんな中身か1度見ておきたい」ときのために、小さな入口だけ残す。 */
-  if(angerSet()){
-    h += '<button class="btn link" style="padding:7px" onclick="start(\'anger\')">🧸 イライラしたときの1分を、試しに通してみる</button>';
-    h += '<p class="note" style="margin-top:0">ふだんは<b>ほかのセットや集中ブロックをやっている最中に、画面のボタンから呼び出します。</b>ここから始めても記録には残りません。</p>';
-  }
+  /* v58: 🧸 の試し通しはご依頼でホームから外した。 */
+
   if(!DB.sleepActive){
     h += '<div class="sec">夜</div>';
     h += '<button class="setb" onclick="sleepStart()">🛌 就寝'
@@ -4007,11 +4167,7 @@ function viewHome(){
          + (psl.sx?'（いま: '+esc(psl.sx.name)+'）':'')+'</button>';
     }
   }
-  h += '<div class="sec">崩れてしまったとき</div>';
-  rescues().forEach(function(s){
-    h += '<button class="setb rescue" onclick="start(\''+s.id+'\')">'+esc(s.icon)+' '+esc(s.name)
-       + (s.note ? '<small>'+esc(s.note)+'</small>' : '')+'</button>';
-  });
+  /* v58: 「崩れてしまったとき」（🛟）はご依頼でホームから外した。セットは編集画面に残してある。 */
   h += '<div class="sec">設定</div>';
   /* v40: 説明文をたたむのをやめる口。いちばん上に置く（探させないため）。 */
   h += '<div class="card"><div class="toggle"><b>説明文をいつも開いておく</b>'
@@ -4467,24 +4623,11 @@ function viewRun(){
        **いちばん急いで押したいときに、いちばん遠かった。**スキップの直下へ移した。
        この2つは「いま出た衝動・いま出たイライラ」に対する入口なので、
        スクロールを挟ませない。並びは横2つで、指が届く位置に置く。 */
-    var em = [];
-    if(!s.rescue && rescues().length)
-      em.push('<button class="btn ghost" style="margin-top:0;border-color:#c4a06a;color:#e8c99a" onclick="rescueGo(\''+rescues()[0].id+'\')">🛟 崩れた</button>');
-    if(curId !== "anger" && angerSet())
-      em.push('<button class="btn ghost" style="margin-top:0;border-color:#c98b8b;color:#e8b4b4" onclick="angerGo()">🧸 イライラした</button>');
-    /* v34→v38: 🌗 今日の自分に。**どのセットでも押せる**（2026-09-08 ご指定）。
-       🛟 と違って別のセットへは飛ばない。いまのセットをそのまま、基準だけゆるめる。
-       ★v38 で 🔋 単独から 🌗（押したあとに 🔋休息 / 🎉楽しむ）へ差し替えた。
-         ボタンの数は増えていない（🛟 🧸 🌗 の3つのまま）。 */
-    if(!foldOn) em.push('<button class="btn ghost" style="margin-top:0;border-color:#7a9ec4;color:#bcd6ee" onclick="modeAsk(\''+curId+'\',\'run\')">🌗 今日の自分に</button>');
-    else        em.push('<button class="btn ghost" style="margin-top:0;border-color:#7a9ec4;color:#bcd6ee" onclick="foldUndo()">🌗 やめる</button>');
-    if(em.length){
-      h += '<div class="row" style="margin-top:9px">'+em.join("")+'</div>';
-      h += '<p class="note" style="margin-top:4px">'
-         + (em.length>1 ? '<b>🛟</b>は復帰の1手へ、<b>🧸</b>は1分だけ離れる形へ。' : (curId!=="anger"&&angerSet() ? '<b>🧸</b>は1分だけ離れる形へ。' : '<b>🛟</b>は復帰の1手へ。'))
-         + 'どちらも<b>いまのセットはそのまま残ります</b>。🧸 は終わるとそのまま続きに戻り、'
-         + '🛟 は終わったあとに<b>「続きに戻る」</b>が出ます（押さなければ戻りません）。</p>';
-    }
+    /* v58（2026-10-07 ご依頼）: 🛟 崩れた・🧸 イライラした・🌗 今日の自分に は「ほとんど使っていない」ので外し、
+       🌊 いま来た・🍵 ひと息 を置いた。押すと寄り道して、終わる・やめると自動でこの続きへ戻る。
+       ★🌗 で畳んでいる最中の回（v57以前の控えから開き直した場合）だけ「🌗 やめる」を残す（戻せなくなるため）。 */
+    h += emUI();
+    if(foldOn) h += '<button class="btn ghost" style="border-color:#7a9ec4;color:#bcd6ee" onclick="foldUndo()">🌗 やめる</button>';
     /* v45（2026-09-21 ご指摘「実行中に📋が見当たらない」）: v44では画面の
        いちばん下に置いていた。**手が空いた瞬間に押すもの**なので、v26で
        🛟・🧸 を上へ移したのと同じ理由で、ここ（スキップの直下）へ移した。 */
@@ -4616,19 +4759,182 @@ function viewRun(){
   /* v26: 🛟・🧸 は上（スキップの直下）へ移した。ここには出さない。
      ただし**全項目を終えたあと**（curStep が範囲外）は上のブロックが出ないので、
      そのときだけ下に出す（終わってから「崩れた」になることがあるため）。 */
-  if(curStep >= st.length){
-    if(!s.rescue && rescues().length) h += '<button class="btn ghost" onclick="start(\''+rescues()[0].id+'\')">🛟 崩れた — 復帰の1手へ</button>';
-    h += angerBtn();
-  }
+  if(curStep >= st.length) h += emUI();   /* v58: 🛟・🧸 の代わりに 🌊・🍵 */
   h += backToFocus();
   if(curStep >= st.length) h += blUI();   /* v45: 全項目を終えたあとは上のブロックが出ないので、ここに出す */
   h += parkBtn();   /* v43 */
-  h += '<button class="btn link" onclick="leaveRun()">'+(inDetour()&&curId==="anger" ? 'やめて、さっきの続きに戻る' : 'やめて最初に戻る')+'</button>';
+  h += '<button class="btn link" onclick="leaveRun()">'+(autoBack() ? 'やめて、さっきの続きに戻る' : 'やめて最初に戻る')+'</button>';
   return h;
 }
 /* v25: 実行中に出る「🧸 イライラした」。押すと寄り道して、終わったらここへ戻る。
    ★🧸 自身の実行中には出さない（二重に飛ばない）
    ★寄り道であることを画面に書く。押しても、いまのセットは消えない */
+/* ===== v58: 実行中の 🌊・🍵 ===== */
+function emUI(){
+  if(curId==="urge" || curId==="breather") return '';
+  var b = [];
+  if(urgeSet()){
+    b.push('<button class="btn ghost" style="margin-top:0;padding:10px 6px;border-color:#5f93a8;color:#bfdbe8" onclick="urgeGo(\'watch\')">🌊 見たい</button>');
+    b.push('<button class="btn ghost" style="margin-top:0;padding:10px 6px;border-color:#5f93a8;color:#bfdbe8" onclick="urgeGo(\'eat\')">🌊 食べたい</button>');
+  }
+  if(breatherSet()) b.push('<button class="btn ghost" style="margin-top:0;padding:10px 6px;border-color:#8fa86a;color:#d3e4bd" onclick="breatherGo()">🍵 ひと息</button>');
+  if(!b.length) return '';
+  return '<div class="row" style="margin-top:9px;gap:6px">'+b.join("")+'</div>'
+       + '<p style="color:#8ea3b8;font-size:12px;line-height:1.7;margin:4px 0 0">押すと、いまのセットを控えてそちらを始めます。<b>終わる・やめると、自動でこの続きに戻ります。</b></p>';
+}
+/* ===== v58: 呼吸の行に来たときの一覧 ===== */
+function viewBrPick(s){
+  var tabs = brPurposes();
+  if(tabs.indexOf(brTab)<0) brTab = tabs[0];
+  var h = '<h1>'+esc(s.icon)+' '+esc(s.name)+'</h1>';
+  h += '<div class="card"><div class="bigsub" style="margin-bottom:8px">🌬️ 呼吸を選んでください（時計は止まっています）</div>';
+  h += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">';
+  tabs.forEach(function(q, qi){
+    var on = (q===brTab);
+    h += '<button class="btn ghost" style="margin-top:0;width:auto;padding:7px 11px;'+(on?'background:#2b3a4a;color:#e8ecf2;border:1px solid #7aa0c4':'')+'" onclick="brTabSet(brPurposes()['+qi+'])">'+esc(q)+'</button>';
+  });
+  h += '</div>';
+  var lst = brOfPurpose(brTab);
+  if(!lst.length) h += '<p class="note" style="margin:0">この目的のプログラムはまだありません。下の「プログラムを直す・足す」から作れます。</p>';
+  lst.forEach(function(g){
+    h += '<button class="setb" onclick="brChoose(\''+g.id+'\')">🌬️ '+esc(g.name)
+       + '<small>'+durLabel(brTotal(g))+' ・ '+esc(brPatLabel(g))+' × '+Math.max(1,Math.round(+g.n||1))+'回'
+       + (g.desc ? '<br>'+esc(g.desc) : '')+'</small></button>';
+  });
+  h += '</div>';
+  h += '<button class="btn ghost" onclick="brSkipRow()">呼吸をしないで次へ</button>';
+  h += '<button class="btn link" onclick="brLibGo(\'run\')">プログラムを直す・足す</button>';
+  h += '<button class="btn" onclick="finishNow()">'+(autoBack() ? 'ここまでにして、さっきの続きに戻る' : 'ここまでで終える')+'</button>';
+  h += '<button class="btn link" onclick="leaveRun()">'+(autoBack() ? 'やめて、さっきの続きに戻る' : 'やめて最初に戻る')+'</button>';
+  return h;
+}
+/* ===== v58: 呼吸のプログラムの置き場（直す・足す・複製・消す・取り込み） =====
+   ★入力欄がある画面なので、tickRender の「描き直さない画面」に入れてある（v48の教訓）。 */
+var brFrom = "edit", brEditId = null, brArmed = null, brMsg = "";
+var BR_FMT = '# ため息呼吸 5分\n目的: 脳がつかれた\n説明: 鼻から吸って、少し吸い足して、長く吐く\n形: 吸う3 吸い足す1 吐く6\n回数: 30\n\n# ボックス呼吸 3分\n目的: 落ち着く\n形: 吸う4 止める4 吐く4 止める4\n回数: 11';
+var BR_SPEC = 'routine.html（Switchアプリ）の「呼吸のプログラム」を、次の書式のテキストで書いてください。\n'
+  + '・1つのプログラムは「# 名前」で始める。複数並べてよい（空行で区切る）\n'
+  + '・目的: 脳がつかれた／イライラ／落ち着く／眠る のどれか（新しい目的名を書くと、そのタブが増える）\n'
+  + '・説明: 1行（省いてよい）\n'
+  + '・形: 1回の呼吸を、吸う・吸い足す・止める・吐く の順に「動作名＋秒数（整数）」で。吐いたあとに止めるなら、吐くの後ろに もう一度「止める」\n'
+  + '・回数: くり返す回数（整数）\n'
+  + '・同じ名前があれば上書き、無ければ追加されます。説明文や前置きは書かず、書式のテキストだけを返してください。\n\n例:\n' + BR_FMT;
+function brUid(){ return "br" + Date.now().toString(36) + Math.floor(Math.random()*900+100); }
+function brLibGo(from){ brFrom = from || "edit"; brEditId = null; brArmed = null; brMsg = ""; view = "brlib"; render(); }
+function brBack(){
+  brEditId = null; brArmed = null;
+  if(brFrom==="run" && curId){ view = "run"; if(!tick) tick = setInterval(tickRender, 250); render(); return; }
+  go("edit");
+}
+function brNum(id, d){ var el = document.getElementById(id); var v = el ? parseInt(el.value,10) : NaN; return isNaN(v) ? d : Math.max(0, Math.min(600, v)); }
+function brSaveForm(){
+  var g = brGet(brEditId); if(!g) return;
+  var nm = document.getElementById("bf_name"), pu = document.getElementById("bf_pur"), ds = document.getElementById("bf_desc");
+  if(nm && nm.value.trim()) g.name = nm.value.trim();
+  if(pu && pu.value.trim()) g.purpose = pu.value.trim();
+  if(ds) g.desc = ds.value.trim();
+  g.pat = { in:brNum("bf_in",0), top:brNum("bf_top",0), hold:brNum("bf_hold",0), out:brNum("bf_out",0), hold2:brNum("bf_hold2",0) };
+  g.n = Math.max(1, brNum("bf_n",1));
+  if(brCycle(g)<=0){ g.pat.in = 4; g.pat.out = 6; }   /* 全部0だと進めないので最低限を入れる */
+  save(); brEditId = null; brMsg = "保存しました。"; render();
+}
+function brAdd(){ var g = { id:brUid(), name:"新しい呼吸", purpose:brTab||BR_PURPOSES[0], desc:"", pat:{in:4,top:0,hold:0,out:6,hold2:0}, n:10 }; brProgs().push(g); save(); brEditId = g.id; brMsg = ""; render(); }
+function brDup(id){ var g = brGet(id); if(!g) return; var c = JSON.parse(JSON.stringify(g)); c.id = brUid(); c.name = g.name+"（複製）"; var a = brProgs(); a.splice(a.indexOf(g)+1, 0, c); save(); render(); }
+function brDel(id){
+  if(brArmed !== id){ brArmed = id; render(); return; }
+  DB.brProgs = brProgs().filter(function(g){ return g.id!==id; }); brArmed = null; save(); render();
+}
+function brParse(txt){
+  var out = [], cur = null;
+  String(txt||"").split(/\r?\n/).forEach(function(line){
+    var t = line.trim(); if(!t) return;
+    var m;
+    if((m = t.match(/^#+\s*(.+)$/))){ cur = { name:m[1].trim(), purpose:"", desc:"", pat:{in:0,top:0,hold:0,out:0,hold2:0}, n:1 }; out.push(cur); return; }
+    if(!cur) return;
+    if((m = t.match(/^目的\s*[:：]\s*(.*)$/))){ cur.purpose = m[1].trim(); return; }
+    if((m = t.match(/^説明\s*[:：]\s*(.*)$/))){ cur.desc = m[1].trim(); return; }
+    if((m = t.match(/^回数\s*[:：]\s*(\d+)/))){ cur.n = Math.max(1, parseInt(m[1],10)); return; }
+    if((m = t.match(/^形\s*[:：]\s*(.*)$/))){
+      var re = /(吸い足す|吸う|止める|吐く)\s*(\d+)/g, x, afterOut = false;
+      while((x = re.exec(m[1]))){
+        var v = parseInt(x[2],10);
+        if(x[1]==="吸う") cur.pat.in = v;
+        else if(x[1]==="吸い足す") cur.pat.top = v;
+        else if(x[1]==="吐く"){ cur.pat.out = v; afterOut = true; }
+        else if(x[1]==="止める"){ if(afterOut) cur.pat.hold2 = v; else cur.pat.hold = v; }
+      }
+    }
+  });
+  return out.filter(function(g){ return g.name && brCycle(g)>0; });
+}
+function brImport(){
+  var el = document.getElementById("br_in"); var got = brParse(el ? el.value : "");
+  if(!got.length){ brMsg = "読み取れるプログラムがありませんでした（「# 名前」と「形:」が要ります）。"; render(); return; }
+  var add = 0, up = 0;
+  got.forEach(function(q){
+    if(!q.purpose) q.purpose = BR_PURPOSES[0];
+    var ex = brProgs().filter(function(g){ return g.name===q.name; })[0];
+    if(ex){ ex.purpose = q.purpose; ex.desc = q.desc; ex.pat = q.pat; ex.n = q.n; up++; }
+    else { q.id = brUid(); brProgs().push(q); add++; }
+  });
+  save(); brMsg = "取り込みました（追加 "+add+"件・上書き "+up+"件）。"; view = "brlib"; render();
+}
+function brCopySpec(){
+  try{ navigator.clipboard.writeText(BR_SPEC); brMsg = "AIに渡す書式をコピーしました。"; }
+  catch(e){ brMsg = "コピーできませんでした。「テキストから取り込む」の下の枠から手で選んでコピーしてください。"; }
+  render();
+}
+function viewBrLib(){
+  var h = '<h1>🌬️ 呼吸のプログラム</h1>';
+  h += '<p class="sub">セットの「呼吸」の行に来たとき、ここに並んでいるものから選びます。目的ごとにタブで分かれます。</p>';
+  if(brMsg) h += '<div class="hint">'+esc(brMsg)+'</div>';
+  if(brEditId && brGet(brEditId)){
+    var g = brGet(brEditId), pt = g.pat||{};
+    var num = function(id, lab, v){ return '<div style="flex:1;min-width:64px"><label style="margin-top:6px">'+lab+'（秒）</label><input class="inp" type="number" inputmode="numeric" min="0" id="'+id+'" value="'+(+v||0)+'"></div>'; };
+    h += '<div class="card">';
+    h += '<label style="margin-top:0">名前</label><input class="inp" type="text" id="bf_name" value="'+esc(g.name)+'">';
+    h += '<label>目的（タブ）</label><input class="inp" type="text" id="bf_pur" list="bf_purl" value="'+esc(g.purpose||"")+'">';
+    h += '<datalist id="bf_purl">'+brPurposes().map(function(q){ return '<option value="'+esc(q)+'">'; }).join("")+'</datalist>';
+    h += '<label>説明（任意）</label><input class="inp" type="text" id="bf_desc" value="'+esc(g.desc||"")+'">';
+    h += '<div style="display:flex;flex-wrap:wrap;gap:8px">'
+       + num("bf_in","吸う",pt.in) + num("bf_top","吸い足す",pt.top) + num("bf_hold","止める",pt.hold)
+       + num("bf_out","吐く",pt.out) + num("bf_hold2","吐いて止める",pt.hold2) + '</div>';
+    h += '<label>回数</label><input class="inp" type="number" inputmode="numeric" min="1" id="bf_n" value="'+Math.max(1,Math.round(+g.n||1))+'">';
+    h += '<p class="note">0秒の動作は飛ばします。合計時間は「1回の秒数 × 回数」で自動で出ます（いまは '+durLabel(brTotal(g))+'）。</p>';
+    h += '<div class="row" style="margin-top:6px"><button class="btn ghost" style="margin-top:0" onclick="brEditId=null;render()">やめる</button>'
+       + '<button class="btn save" style="margin-top:0" onclick="brSaveForm()">保存する</button></div>';
+    h += '</div>';
+    return h;
+  }
+  brPurposes().forEach(function(q){
+    var lst = brOfPurpose(q); if(!lst.length) return;
+    h += '<div class="sec">'+esc(q)+'</div>';
+    lst.forEach(function(g){
+      h += '<div class="card"><b>🌬️ '+esc(g.name)+'</b>'
+         + '<p class="note" style="margin:4px 0 8px">'+durLabel(brTotal(g))+' ・ '+esc(brPatLabel(g))+' × '+Math.max(1,Math.round(+g.n||1))+'回'+(g.desc?'<br>'+esc(g.desc):'')+'</p>'
+         + '<div class="row"><button class="btn ghost" style="margin-top:0" onclick="brEditId=\''+g.id+'\';brMsg=\'\';render()">直す</button>'
+         + '<button class="btn ghost" style="margin-top:0" onclick="brDup(\''+g.id+'\')">複製</button>'
+         + '<button class="btn danger'+(brArmed===g.id?' armed':'')+'" style="margin-top:0" onclick="brDel(\''+g.id+'\')">'+(brArmed===g.id?'本当に消す':'消す')+'</button></div></div>';
+    });
+  });
+  if(!brProgs().length) h += '<p class="note">プログラムが1つもありません。下の「＋ 足す」か「テキストから取り込む」で作れます。</p>';
+  h += '<button class="btn ghost" onclick="brAdd()">＋ 足す</button>';
+  h += '<button class="btn ghost" onclick="brMsg=\'\';view=\'brimp\';render()">テキストから取り込む（AIが書いたもの）</button>';
+  h += '<button class="btn ghost" onclick="brCopySpec()">AIに渡す書式をコピーする</button>';
+  h += '<p class="note">「AIに渡す書式」を渡して作ってもらい、返ってきたテキストを取り込みます。同じ名前のものは上書き、無ければ追加です。</p>';
+  h += '<button class="btn" onclick="brBack()">'+(brFrom==="run"&&curId ? '呼吸を選ぶ画面に戻る' : '戻る')+'</button>';
+  return h;
+}
+function viewBrImp(){
+  var h = '<h1>🌬️ テキストから取り込む</h1>';
+  h += '<p class="sub">AIが書いたテキストを、そのまま貼ってください。</p>';
+  if(brMsg) h += '<div class="warn">'+esc(brMsg)+'</div>';
+  h += '<textarea id="br_in" placeholder="'+esc(BR_FMT)+'"></textarea>';
+  h += '<button class="btn save" onclick="brImport()">取り込む</button>';
+  h += '<label>AIに渡す書式（ここから手で選んでコピーもできます）</label><textarea readonly style="min-height:140px">'+esc(BR_SPEC)+'</textarea>';
+  h += '<button class="btn link" onclick="brMsg=\'\';view=\'brlib\';render()">戻る</button>';
+  return h;
+}
 function angerBtn(){
   if(curId === "anger") return '';
   if(!angerSet()) return '';
@@ -4653,6 +4959,8 @@ function viewRunAuto(s){
   var st = stepsOf(s), e = curElapsed();
   var cum = 0, stepEnd = 0, cur = st[Math.min(curStep,st.length-1)];
   var curText = cur ? cur.text : "";
+  /* v58: 呼吸の行で、まだ選んでいないときは一覧だけを出す（時計は止めてある） */
+  if(cur && isBreath(cur) && brAsk===curStep) return viewBrPick(s);
   for(var i=0;i<st.length;i++){
     cum += st[i].sec; stepEnd = cum;
     if(i===curStep) break;
@@ -4664,10 +4972,16 @@ function viewRunAuto(s){
   }else{
     head = 'ステップ '+Math.min(curStep+1, st.length)+' / '+st.length;
   }
+  /* v58: 呼吸中は、大きな文字を「吸う／吸い足す／止める／吐く」に、見出しを何回目かにする */
+  var bi = (cur && isBreath(cur) && brPick[curStep]) ? brInfo(s, curStep, e) : null;
+  if(bi){
+    curText = bi.ph.label;
+    head = '🌬️ '+esc(bi.g.name)+' ・ '+(bi.c+1)+' / '+bi.n+' 回目 ・ ステップ '+(curStep+1)+' / '+st.length;
+  }
   var nx = st[curStep+1];
   var h = '<h1>'+esc(s.icon)+' '+esc(s.name)+'</h1>'+(s.note ? '<p class="sub">'+esc(s.note)+'</p>' : '');
   /* v25: 寄り道であることを、戻り先の名前つきで出す */
-  if(curId==="anger" && inDetour()){
+  if(autoBack()){
     var bk = setOf((detour||DB.detour||{}).id);
     if(bk) h += '<div class="hint">終わると <b>'+esc(bk.icon)+' '+esc(bk.name)+'</b> の続きに戻ります。<br>そちらの済みの印も、使った時間も、そのまま残っています。</div>';
   }
@@ -4710,10 +5024,7 @@ function viewRunAuto(s){
      （タップ式には v14 から入っていたが、こちらには無かった） */
   /* v26（2026-09-05 ご指摘）: 自動で進むセットでも、🧸 を下まで探しに行かせない。
      「次へ ▶」「一時停止」のすぐ下に置く。 */
-  if(curId !== "anger" && angerSet()){
-    h += '<button class="btn ghost" style="margin-top:9px;border-color:#c98b8b;color:#e8b4b4" onclick="angerGo()">🧸 イライラした — 1分だけ離れる</button>';
-    h += '<p class="note" style="margin-top:4px"><b>いまのセットはそのまま残ります。</b>終わると、この続きに戻ります。</p>';
-  }
+  h += emUI();   /* v58: 🧸 をやめて 🌊・🍵 に（ご依頼「いまきたと一息がセットの途中でも」） */
   h += blUI();   /* v45: 下から「次へ ▶」の近くへ移した */
   h += '<div class="row" style="margin-top:9px">'
      + '<button class="btn ghost" style="margin-top:0" onclick="autoExtend(60)">＋1分 延長</button>'
@@ -4744,11 +5055,11 @@ function viewRunAuto(s){
     if(!spUrl(s)) h += '<p class="note">このセットの編集画面か、ホーム画面の「設定」にプレイリストのURLを入れると、次回からここで開けます。</p>';
   }
   h += aEditUI(s);   /* v55（2026-10-02 ご記入①）: 項目を直す口。既定では畳んである */
-  h += '<button class="btn" onclick="finishNow()">'+(curId==="anger"&&inDetour() ? 'ここまでにして、さっきの続きに戻る' : 'ここまでで終える')+'</button>';
+  h += '<button class="btn" onclick="finishNow()">'+(autoBack() ? 'ここまでにして、さっきの続きに戻る' : 'ここまでで終える')+'</button>';
   /* v26: 🧸 は上（「次へ ▶」の下）へ移した。ここには出さない。 */
   h += backToFocus();
   h += parkBtn();   /* v43 */
-  h += '<button class="btn link" onclick="leaveRun()">'+(inDetour()&&curId==="anger" ? 'やめて、さっきの続きに戻る' : 'やめて最初に戻る')+'</button>';
+  h += '<button class="btn link" onclick="leaveRun()">'+(autoBack() ? 'やめて、さっきの続きに戻る' : 'やめて最初に戻る')+'</button>';
   return h;
 }
 
@@ -6132,9 +6443,17 @@ function stepAdd(id, at){
   }, 30);
 }
 /* v14: 「開くアプリ」の選択肢 */
-function appOptions(cur){
+function appOptions(cur, auto){
   cur = String(cur||"").trim();
   var h = '<option value=""'+(cur?'':' selected')+'>なし</option>', known = false;
+  /* v58: 自動で進むセットでは「呼吸（一覧から選ぶ）」を選べる。目的＝最初に開くタブ */
+  if(auto){
+    brPurposes().forEach(function(q){
+      var v = "breath:"+q;
+      if(v===cur) known = true;
+      h += '<option value="'+esc(v)+'"'+(v===cur?' selected':'')+'>🌬️ 呼吸（'+esc(q)+'のタブから選ぶ）</option>';
+    });
+  }
   for(var k in APPS){
     if(k===cur) known = true;
     h += '<option value="'+k+'"'+(k===cur?' selected':'')+'>'+APPS[k].icon+' '+APPS[k].name+'</option>';
@@ -6177,12 +6496,12 @@ function stepRows(s){
        /* v14: この項目から他のアプリへ移れるようにする。
           自動で進むセットでは、すでに指定してあるとき以外は出さない
           （呼吸のような細かい刻みでアプリを開くことはないため）。 */
-       + ((!s.auto || x.app)
-          ? '<div class="stline" style="margin-top:6px">'
-            + '<span class="stunit" style="width:66px;text-align:left">開くアプリ</span>'
-            + '<select class="inp" id="ap_'+s.id+'_'+i+'">'+appOptions(x.app)+'</select>'
-            + '</div>'
-          : '')
+       /* v58: 自動で進むセットでも出す（呼吸の行にするため）。自動のときは呼吸の選択肢だけ */
+       + '<div class="stline" style="margin-top:6px">'
+         + '<span class="stunit" style="width:66px;text-align:left">'+(s.auto?'呼吸にする':'開くアプリ')+'</span>'
+         + '<select class="inp" id="ap_'+s.id+'_'+i+'">'+appOptions(x.app, s.auto)+'</select>'
+         + '</div>'
+       + (isBreath(x) ? '<p class="note" style="margin:4px 0 0">🌬️ 呼吸の行です。実行中にこの行に来ると一覧が出ます。<b>時間は選んだプログラムの長さになります</b>（ここの分・秒は使いません）。</p>' : '')
        + noteList(s.id, x.text)
        + '<div class="stbtns">'
        + '<button onclick="stepMove(\''+s.id+'\','+i+',-1)"'+(i===0?' disabled':'')+'>↑</button>'
@@ -6419,6 +6738,7 @@ function viewEdit(){
   h += '<div class="sec">ホーム画面に出るセット</div>';
   actives.forEach(function(s){ h += editRow(s, s.rescue ? '崩れたとき用' : ''); });
   h += '<button class="btn ghost" onclick="addSet()">＋ セットを追加する</button>';
+  h += '<button class="btn ghost" onclick="brLibGo(\'edit\')">🌬️ 呼吸のプログラム（'+brProgs().length+'件）</button>';   /* v58 */
   /* v23（問9のG）: シーン別タブの管理。ここ以外に置かない（タブの編集を探して迷わないよう、
      セットの一覧と同じ画面に置く）。 */
   h += '<div class="sec">ホームのタブ（シーン別の絞り込み）</div>';
