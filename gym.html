@@ -354,7 +354,7 @@ const CARDIO_DEF={
 const RATES=["かるすぎる","ちょうどよい","きつすぎる"];
 /* v9（2026-09-05）: 版の表示（ホーム最下部）。開いて1秒で新旧を見分けるため。
    中身を変えたら、ここも必ず上げる。 */
-const APPVER="B.M.C. ジム v21 ・ 2026-09-21";
+const APPVER="B.M.C. ジム v22 ・ 2026-10-08";
 const NORM=30;                    /* グラフの換算基準（30分あたり） */
 const HARDS=["余裕","ちょうどよい","きつい"];
 
@@ -2358,7 +2358,10 @@ function go(v){ if(typeof cPadClose==="function") cPadClose(); view=v; render();
 /* v5: 文字を打ち込む画面では、1秒ごとの自動再描画を止める（打っている途中で消えないように）。
    経過時間そのものは Date.now() から計算しているので、戻れば正しい値に追いつく。 */
 function isTyping(){ return !!cPad || view==="backup" || view==="edlist" || view==="edex" || view==="bands"
-    || view==="cin" || view==="cplan" || view==="cimp" || view==="ctext" || view==="cspec"; }
+    || view==="cin" || view==="cplan" || view==="cimp" || view==="ctext" || view==="cspec"
+    /* v22（2026-10-08）: ★入力欄・貼り付け欄を置く画面を足したら、必ずこの一覧にも足すこと。
+       routine.html では同じ踏み方を4回していて、貼った文字が250msの描き直しで消える。 */
+    || view==="gimp" || view==="gimpc" || view==="gtext" || view==="gspec" || view==="impmenu"; }
 
 /* ===== バックアップ（書き出し・読み込み）　2026-08-15追加 =====================
    記録はこの端末のブラウザの中だけにあります。ここのテキストを控えておけば、
@@ -2499,6 +2502,261 @@ function edReset(){
   if(DB.settings.alt[edEnv]) delete DB.settings.alt[edEnv][edId];
   save(); edId=null; edBuf=null; edMsg="最初の内容に戻しました。（記録は何も変わっていません）"; go("edlist");
 }
+
+/* ===== v22（2026-10-08・指示_2026-10-07_5）: 筋トレのテキスト取り込み・書き出し `#BMC-GYM v1` =====
+   ★ご記入（10/7 05:50）「gymのホームでもセットやAIの提案プログラムを取り込みたい」への段階1。
+   ★有酸素の `#BMC-CARDIO v1`（v9）と**同じ考え方**。アプリの中にAIは載せない。読み書きだけ。
+   ★**A/B/Cの枠・種目id・過去の記録・ダブルプログレッション（前回値と上限回数の判定）には
+     1バイトも触らない。**書き込み先は既存の `DB.settings.alt[env][id]`——
+     「🛠 自宅の種目を自分で決める」（v5）がすでに使っている入れ物そのもの。
+     取り込みは、あの画面を1種目ずつ手で埋める代わりに、テキストでまとめて埋める道を足すだけ。
+   ★したがって **ジム（gym）は取り込みの対象外**（v5 で「ジム版はここでは変えられません」と
+     決めているので、同じ線をそのまま引く。`isEditableEnv` を通す）。
+   ★**セット数（DB.settings.sets）は取り込みで変えない。**あれは種目ごとで環境をまたぐ設定なので、
+     自宅のテキストを貼るとジムのセット数まで動いてしまう。書式の説明にもそう書いてある。
+   ★記録ハブ（log.html）へ書き出すデータの形は**変えていない**＝Obsidian運用管理との調整は不要。
+   ★2026-10-07 の段階1は「取り込んだルーティンを A/B/C と並べる」と書いていたが、
+     現物を読むと A/B/C は PROGRAM（コード側の9種目）＋env ごとの上書きで出来ており、
+     有酸素の progs のような利用者データの入れ物を持っていない。新しいルーティンを増やすには
+     記録・前回値・判定が参照している「種目id」の持ち方から変えることになり、段階1には重い。
+     **そこで段階1を「いまある枠の中身をテキストで往復できる」までに下げた**（新しいルーティンは段階2）。
+   ===================================================================== */
+const GFMT_SAMPLE=[
+"#BMC-GYM v1",
+"場所: 自宅（ダンベルあり）",
+"---",
+"tri | ダンベルトライセップエクステンション（片手ずつ） | 3kg | 12 | 16 | 0.5 | 肘を高く固定し、前腕だけを動かす",
+"bul | ブルガリアンスクワット（ダンベル持ち） | 8kg | 10 | 13 | 1 | 後ろ足を椅子に乗せる。片足ずつ",
+"lat | ダンベルベントオーバーロウ（両手） | 6kg | 12 | 15 | 1 | 背中を丸めず、肘を後ろに引く",
+"add | サイドライイング内転筋レイズ | 自重 | 12 | 18 | 0 | 横向きに寝て下の脚を持ち上げる",
+"abd | サイドライイング脚上げ（外転） | 自重 | 15 | 20 | 0 |",
+"crm | ダンベルクランチ（胸の前で保持） | 3kg | 12 | 16 | 0.5 | 腰を反らさない",
+"che | ダンベルチェストプレス（フロアプレス） | 6kg | 10 | 14 | 1 | 肘は床につくところで止める",
+"rdl | ダンベルルーマニアンデッドリフト | 8kg | 12 | 15 | 1 | 股関節を折りたたむように下ろす",
+"bic | バイシクルクランチ | 自重 | 15 | 20 | 0 |"
+].join("\n");
+function gFmtSpec(){
+  return [
+"【B.M.C. 筋トレ 取り込みフォーマット v1】",
+"",
+"1行目に #BMC-GYM v1 と書き、--- の下に種目を1行ずつ並べてください。",
+"",
+"■ 行の形（| で区切る。7列。メモは省略できます）",
+"  枠 | 種目名 | 負荷 | 目安回数 | 上限回数 | 刻み | メモ",
+"",
+"■ 枠（いちばん左）",
+"  この9つのどれかです。**枠は増やせません**（増やすのは次の段階）。",
+"  左の記号でも、右のジム版の種目名でも、どちらで書いても構いません。",
+PROGRAM.map(function(e){ return "    "+e.id+"  … ルーティン"+e.r+" ／ "+e.name; }).join("\n"),
+"",
+"■ 負荷",
+"  ・重さは「12kg」「3.5kg」のように書く（kg は省略可）",
+"  ・自重のときは「自重」",
+"  ・ゴムバンドのときはバンドの呼び名をそのまま（いま登録されているのは "+bands().join(" / ")+"）",
+"",
+"■ 決まりごと",
+"  ・**場所は「自宅（ダンベルあり）」か「自宅（器具なし）」のどちらかです。**ジムの種目はこの道では変えません。",
+"  ・**セット数はこの書式では変わりません**（種目ごとの設定で、ジムと共通のため）。種目の画面で変えてください。",
+"  ・同じ枠を2行書いた場合は、**あとの行が残ります**。",
+"  ・書かなかった枠は、いまの内容がそのまま残ります（消えません）。",
+"  ・**過去の記録は何をしても変わりません。**",
+"",
+"■ 例",
+GFMT_SAMPLE
+  ].join("\n");
+}
+var gImpText="", gImpBuf=null, gTextBuf="", gImpEnv="home_db", gMsg="";
+function gEnvFromLabel(t){
+  var x=String(t||"");
+  if(/器具なし|器具無し|home_none|素手|自重のみ/.test(x)) return "home_none";
+  if(/ダンベル|home_db/.test(x)) return "home_db";
+  if(/ジム|gym/.test(x)) return "gym";
+  return "";
+}
+function gImpOpen(env){
+  var e = env || curEnv();
+  if(!isEditableEnv(e)) e = "home_db";
+  gImpEnv = e; gImpBuf = null; gMsg=""; go("gimp");
+}
+function gTextOpen(env){
+  var e = env || curEnv();
+  gTextBuf = gToText(e); go("gtext");
+}
+/* いまの内容を `#BMC-GYM v1` のテキストにする（どの場所でも書き出せる＝ジムの内容をAIに見せて
+   自宅版を作ってもらう、という使い方ができる。書き出しは読むだけなので env を縛らない） */
+function gToText(env){
+  var L=["#BMC-GYM v1","場所: "+envLabel(env).replace(/^[^ ]+ /,"")];
+  L.push("---");
+  ROUTINES.forEach(function(r){
+    exOf(r).forEach(function(e0){
+      var e=def(e0.id,env), ld=loadOf(e);
+      var load = (ld==="bw") ? "自重" : (ld==="band" ? (e.band||bands()[0]||"Light") : (Math.round((+e.w||0)*100)/100)+"kg");
+      L.push([e0.id, String(e.name||""), load, String(e.reps||""), String(e.cap||""),
+              String(e.step==null?"":e.step), String(e.memo||"")].join(" | "));
+    });
+  });
+  return L.join("\n");
+}
+function gNum(x){ var v=parseFloat(String(x==null?"":x).replace(/[^0-9.\-]/g,"")); return isNaN(v)?null:v; }
+/* 枠の特定：記号（id）か、ジム版の種目名（部分一致）か。見つからなければ null。 */
+function gSlot(tok){
+  var t=String(tok||"").trim(); if(!t) return null;
+  var byId=PROGRAM.filter(function(e){ return e.id===t.toLowerCase(); })[0];
+  if(byId) return byId.id;
+  var byName=PROGRAM.filter(function(e){ return e.name===t; })[0];
+  if(byName) return byName.id;
+  var part=PROGRAM.filter(function(e){ return t.indexOf(e.name)>=0 || e.name.indexOf(t)>=0; });
+  if(part.length===1) return part[0].id;
+  return null;
+}
+function parseGImport(text){
+  var lines=String(text||"").replace(/\r/g,"").split("\n");
+  var env="", items={}, errs=[], started=false;
+  lines.forEach(function(raw){
+    var line=raw.replace(/^[ 　\t]+|[ 　\t]+$/g,"");
+    if(!line) return;
+    if(/^```/.test(line) || /^#BMC-GYM/i.test(line)) return;
+    if(/^(場所|環境)\s*[:：]/.test(line)){ env=gEnvFromLabel(line.split(/[:：]/).slice(1).join(":")); return; }
+    if(/^-{3,}$/.test(line)){ started=true; return; }
+    if(!/\|/.test(line)){ if(started) errs.push(line); return; }
+    var c=line.split("|").map(function(x){return x.replace(/^[ 　\t]+|[ 　\t]+$/g,"");});
+    var id=gSlot(c[0]);
+    if(!id){ errs.push(line); return; }
+    var nm=c[1]||"", loadTxt=c[2]||"", band="", ld="kg", w=0;
+    if(/^自重|^bw$|^体重のみ/.test(loadTxt)){ ld="bw"; w=0; }
+    else if(bands().some(function(b){ return b && loadTxt && b.toLowerCase()===loadTxt.toLowerCase(); })){
+      ld="band"; band=bands().filter(function(b){ return b.toLowerCase()===loadTxt.toLowerCase(); })[0]; w=0;
+    }
+    else if(/^バンド/.test(loadTxt)){ ld="band"; band=loadTxt.replace(/^バンド\s*/,"")||bands()[0]||""; w=0; }
+    else { var v=gNum(loadTxt); if(v===null){ ld="bw"; w=0; } else { ld="kg"; w=v; } }
+    var reps=gNum(c[3]), cap=gNum(c[4]), step=gNum(c[5]);
+    var memo=(c.length>=7? c.slice(6).join(" | ") : "");
+    items[id]={ id:id, name:nm, load:ld, band:band, w:w,
+                reps:(reps===null?null:Math.max(1,Math.round(reps))),
+                cap:(cap===null?null:Math.max(1,Math.round(cap))),
+                step:(step===null?null:Math.max(0,step)),
+                memo:memo };
+  });
+  var list=[];
+  ROUTINES.forEach(function(r){ exOf(r).forEach(function(e0){ if(items[e0.id]) list.push(items[e0.id]); }); });
+  return { env:env, items:list, errs:errs };
+}
+function gImpCheck(){
+  var e=document.getElementById("gimp_t");
+  gImpText = e ? e.value : "";
+  gImpBuf = parseGImport(gImpText);
+  if(gImpBuf.env && isEditableEnv(gImpBuf.env)) gImpEnv = gImpBuf.env;
+  go("gimpc");
+}
+/* 保存。**書き込むのは DB.settings.alt[env][id] だけ。**
+   書かれていない項目は、いまの内容（def）をそのまま引き継ぐ＝空欄で消えない。 */
+function gImpSave(){
+  if(!gImpBuf || !gImpBuf.items.length) return;
+  if(!isEditableEnv(gImpEnv)){ gMsg="ジムの種目はこの道では変えられません。"; return render(); }
+  if(!DB.settings.alt[gImpEnv]) DB.settings.alt[gImpEnv]={};
+  var n=0;
+  gImpBuf.items.forEach(function(it){
+    var cur=def(it.id,gImpEnv)||{};
+    var o={ name:(it.name||cur.name||""), load:it.load,
+            reps:(it.reps==null? (+cur.reps||10) : it.reps),
+            cap:(it.cap==null? (+cur.cap||15) : it.cap),
+            step:(it.step==null? (+cur.step||0) : it.step),
+            memo:(it.memo||""), unit:unitOf(it.load) };
+    o.w = (it.load==="kg") ? (+it.w||0) : 0;
+    if(it.load==="band") o.band = it.band || cur.band || bands()[0] || "";
+    DB.settings.alt[gImpEnv][it.id]=o; n++;
+  });
+  save();
+  gMsg = n+"種目を取り込みました（"+envLabel(gImpEnv)+"）。過去の記録は何も変わっていません。";
+  gImpBuf=null; gImpText="";
+  edEnv = gImpEnv; edId=null; edBuf=null; edMsg=gMsg; edResetArmed=false;
+  go("edlist");
+}
+function viewGImp(){
+  return `
+  <h1>テキストから取り込む（筋トレ）</h1>
+  <p class="sub">AIに書いてもらった種目を、テキストのまま貼り付けて取り込みます。
+  はじめに下の「AIに渡すフォーマット」をコピーしてAIに見せてください。<br>
+  <strong>いまある9つの枠（ルーティンA・B・C）の中身が入れ替わるだけです。</strong>枠の数・過去の記録・セット数は変わりません。</p>
+  <div class="card">
+    <div class="sec" style="margin:0 0 6px">どの場所の種目として取り込みますか</div>
+    <div class="row">
+      ${ENVS.filter(function(x){return isEditableEnv(x.id)}).map(function(x){
+        return `<button class="btn ${x.id===gImpEnv?'':'ghost'}" style="margin-top:0" onclick="gImpEnv='${x.id}';render()">${x.label}</button>`;
+      }).join("")}
+    </div>
+    <p class="note">ジムの種目は、ここでは変えられません（8/31までの方針をそのまま守っています）。テキストに「場所:」の行があれば、そちらを優先します。</p>
+  </div>
+  <button class="btn ghost" onclick="go('gspec')">AIに渡すフォーマットを見る・コピーする</button>
+  <button class="btn ghost" onclick="gTextOpen(gImpEnv)">いまの内容をテキストで見る（AIに渡す元）</button>
+  <label>種目のテキスト<small>前後に余計な文章やコードブロックが付いていても取り込めます</small></label>
+  <textarea id="gimp_t" style="min-height:200px;font-family:ui-monospace,monospace;font-size:12.5px">${esc(gImpText)}</textarea>
+  <button class="btn" onclick="gImpCheck()">内容を確認する</button>
+  <button class="btn link" onclick="go('home')">戻る</button>`;
+}
+function viewGImpC(){
+  if(!gImpBuf) return viewGImp();
+  var b=gImpBuf;
+  return `
+  <h1>この内容で取り込みます</h1>
+  <p class="sub">${envLabel(gImpEnv)} ／ ${b.items.length}種目</p>
+  <div class="card">
+    ${b.items.map(function(it){
+      var cur=def(it.id,gImpEnv)||{}, base=ex(it.id);
+      var load=(it.load==="bw")?"自重":(it.load==="band"?("バンド "+(it.band||bands()[0]||"")):((Math.round((+it.w||0)*100)/100)+"kg"));
+      return `<div class="ex">
+        <div class="t"><h2>${esc(it.name||cur.name||"")}</h2><span class="pill">${esc(load)}</span></div>
+        <div class="prev">ルーティン ${base?base.r:"?"} ／ 枠「${esc(base?base.name:it.id)}」<br>
+        目安 <b>${it.reps==null?(cur.reps+"回（そのまま）"):(it.reps+"回")}</b>（上限 ${it.cap==null?(cur.cap+"回（そのまま）"):(it.cap+"回")}）／ 刻み ${it.step==null?(cur.step+"（そのまま）"):it.step}
+        ${it.memo?`<br><span style="color:#6f7a8c">${esc(it.memo)}</span>`:""}</div>
+      </div>`;
+    }).join("")}
+  </div>
+  ${b.errs.length?`<div class="warn"><b>読み取れなかった行があります。</b>取り込みは進められますが、下の行は無視されます。<br>${b.errs.map(function(x){return esc(x)}).join("<br>")}</div>`:``}
+  <div class="card"><p class="note">書かれていない枠は、いまの内容がそのまま残ります。<strong>セット数と過去の記録は変わりません。</strong>取り込んだあとは「🛠 自宅の種目を自分で決める」から1種目ずつ直せますし、各種目の「最初の内容に戻す」でいつでも戻せます。</p></div>
+  ${b.items.length?`<button class="btn" onclick="gImpSave()">この内容で取り込む</button>`
+                  :`<div class="warn">種目が1つも読み取れませんでした。左端の枠（記号かジム版の種目名）が書かれているか確認してください。</div>`}
+  <button class="btn ghost" onclick="go('gimp')">テキストを直す</button>
+  <button class="btn link" onclick="gImpBuf=null;go('home')">やめる</button>`;
+}
+function viewGText(){
+  return `
+  <h1>いまの内容のテキスト</h1>
+  <p class="sub">この形式のままAIに渡して直してもらえます。直したテキストを取り込み画面に貼り付けると、同じ枠の中身が入れ替わります。</p>
+  <textarea id="gtext_t" style="min-height:240px;font-family:ui-monospace,monospace;font-size:12.5px" readonly>${esc(gTextBuf)}</textarea>
+  <button class="btn" onclick="cCopy('gtext_t')">コピー</button>
+  <button class="btn ghost" onclick="gImpOpen(gImpEnv)">取り込み画面へ</button>
+  <button class="btn link" onclick="go('home')">戻る</button>`;
+}
+function viewGSpec(){
+  return `
+  <h1>AIに渡すフォーマット</h1>
+  <p class="sub">これをコピーしてAIに見せ、「この形式で◯◯向けのメニューを書いて」と頼んでください。</p>
+  <textarea id="gspec_t" style="min-height:300px;font-family:ui-monospace,monospace;font-size:12px" readonly>${esc(gFmtSpec())}</textarea>
+  <button class="btn" onclick="cCopy('gspec_t')">コピー</button>
+  <button class="btn ghost" onclick="gImpOpen(gImpEnv)">取り込み画面へ</button>
+  <button class="btn link" onclick="go('home')">戻る</button>`;
+}
+/* ホーム上部の1つの入口。筋トレ・有酸素のどちらにも、ここから入れる。
+   ★有酸素の既存の口（有酸素カードの中）は**残してある**（消していない）。 */
+function viewImpMenu(){
+  return `
+  <h1>テキストから取り込む</h1>
+  <p class="sub">AIに書いてもらったメニューを貼り付けて取り込みます。どちらを取り込みますか。</p>
+  <div class="card">
+    <button class="btn" onclick="gImpOpen()">🏋️ 筋トレ（ルーティンA・B・Cの中身）</button>
+    <p class="note">いまある9つの枠の中身が入れ替わります。<strong>自宅（ダンベルあり／器具なし）だけ</strong>。枠の数・セット数・過去の記録は変わりません。</p>
+    <button class="btn ghost" onclick="cImpOpen()">🏃 有酸素（トレッドミルのプログラム）</button>
+    <p class="note">プログラムが1本増えます（いままでのものは消えません）。有酸素カードの中の入口も、そのまま残っています。</p>
+  </div>
+  <div class="card">
+    <div class="sec" style="margin:0 0 6px">いまの内容をAIに渡す</div>
+    <button class="btn ghost" onclick="gTextOpen()">🏋️ 筋トレ：いまの内容をテキストで見る</button>
+    <button class="btn ghost" onclick="go('gspec')">🏋️ 筋トレ：AIに渡すフォーマットを見る</button>
+  </div>
+  <button class="btn link" onclick="go('home')">戻る</button>`;
+}
+
 function viewEdList(){
   const rows=ROUTINES.map(function(r){
     const inner=exOf(r).map(function(e0){
@@ -2631,6 +2889,11 @@ function viewBands(){
 
 function render(){
   const A=document.getElementById("app");
+  if(view==="impmenu") return void(A.innerHTML=viewImpMenu());   /* v22 */
+  if(view==="gimp")   return void(A.innerHTML=viewGImp());      /* v22 */
+  if(view==="gimpc")  return void(A.innerHTML=viewGImpC());     /* v22 */
+  if(view==="gtext")  return void(A.innerHTML=viewGText());     /* v22 */
+  if(view==="gspec")  return void(A.innerHTML=viewGSpec());     /* v22 */
   if(view==="backup") return void(A.innerHTML=viewBackup());
   if(view==="bands")  return void(A.innerHTML=viewBands());
   if(view==="edex" && edId && edBuf) return void(A.innerHTML=viewEdEx());
@@ -2670,6 +2933,11 @@ function viewHome(){
   return `
   <h1>筋トレ記録</h1>
   <p class="sub">1回15分・3種目・各3セット（<strong>セット数は種目ごとに変えられます</strong>。種目の画面の下にあります）。<strong>8/31までは重さを上げなくて構いません</strong>（いまの筋肉を減らさないことが目的です）。<br>始めると<strong>開始からの経過時間</strong>が出ます。15分は目安で、超えても構いません。</p>
+
+  <div class="card" style="padding-top:10px">
+    <button class="btn ghost" style="margin-top:0" onclick="go('impmenu')">📥 テキストから取り込む（筋トレ・有酸素）</button>
+    <p class="note">AIに書いてもらったメニューを貼り付けて取り込めます。<strong>枠の数・セット数・過去の記録は変わりません。</strong></p>
+  </div>
 
   <div class="sec">環境（今日はどこでやりますか）</div>
   <div class="card">

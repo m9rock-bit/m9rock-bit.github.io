@@ -1492,7 +1492,7 @@ function parkBtn(){
 
 /* --- 状態 --- */
 /* v27: 版の表示（ホーム最下部）。中身を変えたら、ここも必ず上げる。 */
-var APPVER = "切り替えルーティン v58 ・ 2026-10-07";
+var APPVER = "切り替えルーティン v59 ・ 2026-10-08";
 var view = "home";
 var curId = null;
 var startAt = 0;
@@ -3906,6 +3906,22 @@ function render(){
   else if(view==="backup") h = viewBackup();
   document.getElementById("app").innerHTML = h;
   foldNotes();   /* v40 */
+  fbLeaveBusy();   /* v59 */
+}
+
+/* v59（指示_2026-10-07 ②）: 実行中の画面から実行中でない画面へ戻った瞬間に、
+   未送信の「気になったこと」があれば既存のトーストで一言だけ出す。
+   ★送信ボタンは増やさない。送信経路（Advanced URI・本文・sent）には触らない。
+   ★書き出すデータの形は不変（Obsidian運用管理との調整は不要）。 */
+var fbPrevView = null;
+function fbLeaveBusy(){
+  try{
+    var busy = {run:1, sleepWatch:1, wakeChoice:1, wakeRun:1, focus:1};
+    var was = fbPrevView; fbPrevView = view;
+    if(!was || !busy[was] || busy[view]) return;
+    var n = fbUnsent().length;
+    if(n) fbToast("気になったこと"+n+"件が未送信です。右下の 🗒 から送れます。");
+  }catch(e){}
 }
 
 /* ===== v40（2026-09-12 ご指示「全体的に文字が多い」）: 説明文をたたむ ==============
@@ -5026,6 +5042,10 @@ function viewRunAuto(s){
      「次へ ▶」「一時停止」のすぐ下に置く。 */
   h += emUI();   /* v58: 🧸 をやめて 🌊・🍵 に（ご依頼「いまきたと一息がセットの途中でも」） */
   h += blUI();   /* v45: 下から「次へ ▶」の近くへ移した */
+  /* v59（指示_2026-10-07 ①）: 自動で進むセットの ✏️ 項目を直す を、いちばん下から
+     「次へ ▶」のかたまりの直下へ移した（v45 の 📋 と同じ理由）。要素は増やしていない。
+     既定で畳んである挙動（v55）は変えていない。 */
+  h += aEditUI(s);
   h += '<div class="row" style="margin-top:9px">'
      + '<button class="btn ghost" style="margin-top:0" onclick="autoExtend(60)">＋1分 延長</button>'
      + '<button class="btn ghost" style="margin-top:0" onclick="autoExtend(300)">＋5分 延長</button>'
@@ -5054,7 +5074,7 @@ function viewRunAuto(s){
     h += '<button class="btn ghost" onclick="openSpotify()">🎵 プレイリストを開く'+(spUrl(s)?'':'（未設定）')+'</button>';
     if(!spUrl(s)) h += '<p class="note">このセットの編集画面か、ホーム画面の「設定」にプレイリストのURLを入れると、次回からここで開けます。</p>';
   }
-  h += aEditUI(s);   /* v55（2026-10-02 ご記入①）: 項目を直す口。既定では畳んである */
+  /* v59: ✏️ 項目を直す は「次へ ▶」のかたまりの直下へ移した（下の行から移動・中身は不変） */
   h += '<button class="btn" onclick="finishNow()">'+(autoBack() ? 'ここまでにして、さっきの続きに戻る' : 'ここまでで終える')+'</button>';
   /* v26: 🧸 は上（「次へ ▶」の下）へ移した。ここには出さない。 */
   h += backToFocus();
