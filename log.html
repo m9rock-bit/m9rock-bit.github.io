@@ -91,7 +91,7 @@ h1{font-size:21px;margin:2px 0 4px}
 var HKEY = "bmc_log_hub_v1";
 var RKEY = "bmc_routine_v1";
 var GKEY = "bmc_gym_v1";
-var APPVER = "B.M.C. 記録ハブ v7 ・ 2026-10-04";
+var APPVER = "B.M.C. 記録ハブ v8 ・ 2026-10-12";
 
 var H = {
   vault: "My Valut",
@@ -204,8 +204,38 @@ function gymName(g, id){
       if(alt[env] && alt[env][id] && alt[env][id].name) return alt[env][id].name;
       if(alt[id] && alt[id].name) return alt[id].name;
     }
+    /* v8（2026-10-12・gym v23）: A・B・C 以外の取り込んだプログラムの種目（u_…）。
+       gym側の DB.settings.gymProgs に名前があるので、そこから引く。
+       **行の形（列の数・順番）は何も変えていない。**種目名のセルに
+       「u_xxx」ではなく実際の名前が入るだけ。 */
+    var ps = g && g.settings && g.settings.gymProgs;
+    if(Array.isArray(ps)){
+      for(var i=0;i<ps.length;i++){
+        var its = ps[i] && ps[i].items;
+        if(!Array.isArray(its)) continue;
+        for(var j=0;j<its.length;j++)
+          if(its[j] && its[j].id===id && its[j].name) return its[j].name;
+      }
+    }
+    /* 一覧から外したあとの控え（gym側 DB.settings.gymGone。id→名前だけ） */
+    var gone = g && g.settings && g.settings.gymGone;
+    if(gone && gone[id]) return gone[id];
   }catch(e){}
   return GYMNAME[id] || id;
+}
+/* v8: ルーティンの見出し。A/B/C は従来どおり「ルーティンA」。
+   取り込んだプログラム（u_…）はその名前をそのまま出す。 */
+function gymRoutine(g, r){
+  var s = String(r==null?"":r);
+  if(!/^u_/.test(s)) return "ルーティン"+s;
+  try{
+    var ps = g && g.settings && g.settings.gymProgs;
+    if(Array.isArray(ps))
+      for(var i=0;i<ps.length;i++) if(ps[i] && ps[i].id===s && ps[i].name) return ps[i].name;
+    var gone = g && g.settings && g.settings.gymGone;
+    if(gone && gone[s]) return gone[s];
+  }catch(e){}
+  return "プログラム";
 }
 /* v3: 有酸素の「区間」を、続けて同じ設定のものはひとまとめにする。
    インターバルは同じ設定が回数ぶん並ぶだけなので、10ループを10行にすると読めない。
@@ -319,7 +349,7 @@ function collect(){
         return gymName(g,id) + " " + (num(w) ? num(w)+"kg×" : "自重×") + reps;
       });
       add("g"+s.date, s.date, line(s.date, "gym", "筋トレ",
-        "ルーティン"+(s.routine||""), parts.join(" ・ "), mins(s.sec), "", "g"+s.date));
+        gymRoutine(g, s.routine), parts.join(" ・ "), mins(s.sec), "", "g"+s.date));
     });
     (g.cardio||[]).forEach(function(c){
       if(!c || !c.date) return;
