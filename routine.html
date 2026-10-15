@@ -679,7 +679,7 @@ function defaults(){ return [
       "40|タレ・ドレッシングは小皿へ。今日は焼く・蒸す・煮る・レンジ"
     ]},
   { id:"breath478", icon:"🌬️", name:"呼吸法（一覧から選ぶ）", limit:171,
-    auto:true, voice:true, spotify:true,
+    auto:true, voice:true, spotify:true, media:true,   /* v62: 夜のマナーモードでも合図を鳴らす */
     note:"始めると呼吸のプログラムの一覧が出ます。1つ選ぶと、音の合図に合わせて進みます（v58から1行。4-7-8は「眠る」にあります）。",
     steps: ["171|呼吸（一覧から選んで始める）||breath:眠る"] },
   /* v24（2026-09-05・問9のK）: 子供と一緒のときにイライラしたとき。
@@ -857,7 +857,8 @@ try{
     if(p.mig_breather===true) DB.mig_breather = true;
     if(Array.isArray(p.brProgs)) DB.brProgs = p.brProgs;   /* v58: 呼吸の置き場（★無いと開き直すたびに既定へ戻る） */
     if(p.mig_br58===true) DB.mig_br58 = true;            /* v58 */   /* v57: 🍵（★無いと削除しても復活する） */
-    if(p.mig_med60===true) DB.mig_med60 = true;          /* v60: 💊 を一度だけ差し込んだ印（★無いと、消しても毎回戻る） */
+    if(p.mig_med60===true) DB.mig_med60 = true;
+    if(p.mig_br62===true) DB.mig_br62 = true;            /* v62: 🌬️ に「消音中でも鳴らす」を1回だけ入れた印（★無いと、オフにしても毎回オンに戻る） */          /* v60: 💊 を一度だけ差し込んだ印（★無いと、消しても毎回戻る） */
     /* v16: 就寝の見守り状態。アプリを閉じても経過時間が消えないよう、
        開始時刻そのものを保存し、毎回いまの時刻から計算し直す。 */
     if(typeof p.sleepActive==="boolean") DB.sleepActive = p.sleepActive;
@@ -1075,6 +1076,18 @@ if(!DB.mig_br58){
     }
     if(s.icon==="🫁") s.icon = "🌬️";
   });
+  save();
+}
+
+/* v62（2026-10-15 チャットでのご依頼「睡眠後に押す呼吸のプログラムに吸う・止める・吐くの合図の音を」）：
+   ご回答＝「まったく鳴らない」「夜はマナーモード」。合図音（brChime）は v58 から入っており、v60 で音量も
+   上げてあった。鳴らない原因は音量ではなく**消音スイッチ**（Safari の音はふだん消音スイッチに従う）。
+   🍵 には media（消音中でも鳴らす）が入っていたが、睡眠後に始まる 🌬️ には入っていなかった。
+   → 🌬️ の media を1回だけオンにする。スイッチ自体は v57 からセット編集画面にあるので、
+     ご本人がオフにしたら、それが正（mig_br62 が立っているので二度とオンに戻さない）。 */
+if(!DB.mig_br62){
+  DB.mig_br62 = true;
+  DB.sets.forEach(function(s){ if(s.id==="breath478") s.media = true; });
   save();
 }
 
@@ -1518,7 +1531,7 @@ function parkBtn(){
 
 /* --- 状態 --- */
 /* v27: 版の表示（ホーム最下部）。中身を変えたら、ここも必ず上げる。 */
-var APPVER = "切り替えルーティン v61 ・ 2026-10-14";
+var APPVER = "切り替えルーティン v62 ・ 2026-10-15";
 var view = "home";
 var curId = null;
 var startAt = 0;
@@ -2361,7 +2374,14 @@ function autoTick(s){
       return;
     }
     var bi = brInfo(s, idx, e);
-    if(bi && bi.key !== brLastPh){ brLastPh = bi.key; brChime(bi.ph.k); }
+    if(bi && bi.key !== brLastPh){
+      brLastPh = bi.key;
+      /* v62: 🌬️（睡眠後に入る呼吸法）だけ、声の合図を足し、ホームの「終了音」「読み上げ」がオフでも出す
+         （夜中は目を閉じたまま設定を確かめられないため。ご了承済み）。🍵・🧸 は従来どおり音だけ・設定に従う。 */
+      var brSleep = (curId==="breath478");
+      brChime(bi.ph.k, brSleep);
+      if(brSleep) brSay(bi.ph.k);
+    }
   }
 }
 /* v58: 呼吸の行のいまの位置（何回目・どの動作・その動作の残り） */
@@ -2390,12 +2410,25 @@ function brInfo(s, idx, e){
    ★消音スイッチ（マナーモード）側は別の経路（navigator.audioSession の "playback"・v57）で、
      ここでは触っていない。音量と波形の問題と、消音スイッチの問題を混ぜないため。 */
 var BR_VOL = .9, BR_WAVE = "triangle";   /* v60 */
-function brChime(k){
-  var V = BR_VOL, W = BR_WAVE;
-  if(k==="in"){ beep(520,.26,false,V,W); setTimeout(function(){beep(700,.32,false,V,W);},150); }
-  else if(k==="top"){ beep(940,.20,false,V,W); }
-  else if(k==="hold" || k==="hold2"){ beep(780,.36,false,V,W); }
-  else if(k==="out"){ beep(700,.26,false,V,W); setTimeout(function(){beep(520,.36,false,V,W);},150); }
+function brChime(k, force){
+  var V = BR_VOL, W = BR_WAVE, F = !!force;   /* v62: force＝ホームの「終了音」オフでも鳴らす（🌬️ だけ） */
+  if(k==="in"){ beep(520,.26,F,V,W); setTimeout(function(){beep(700,.32,F,V,W);},150); }
+  else if(k==="top"){ beep(940,.20,F,V,W); }
+  else if(k==="hold" || k==="hold2"){ beep(780,.36,F,V,W); }
+  else if(k==="out"){ beep(700,.26,F,V,W); setTimeout(function(){beep(520,.36,F,V,W);},150); }
+}
+/* v62: 🌬️ の声の合図。speak() と違い、ホームの「読み上げ」に関係なく話す。
+   短い言葉にしてある（4-7-8 の4秒・ボックスの4秒でも言い切れるように）。 */
+var BR_SAY = { in:"吸って", top:"もう少し吸って", hold:"止めて", out:"吐いて", hold2:"止めて" };
+function brSay(k){
+  var t = BR_SAY[k]; if(!t) return;
+  try{
+    if(!window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+    var u = new SpeechSynthesisUtterance(t);
+    u.lang = "ja-JP"; u.rate = 0.95;
+    window.speechSynthesis.speak(u);
+  }catch(e){}
 }
 function brChoose(id){
   var s = setOf(curId); if(!s || brAsk<0 || !brGet(id)) return;
@@ -2927,9 +2960,12 @@ function sleepTickStart(){
 }
 function sleepTickStop(){ if(wtick){ clearInterval(wtick); wtick=null; } }
 function sleepWake(){ view="wakeChoice"; render(); }
-function wakeCancel(){ wake=null; view="sleepWatch"; render(); }
+function wakeCancel(){ mediaAudio(false); /* v62 */ wake=null; view="sleepWatch"; render(); }
 function sleepChoose(choice){
   unlockAudio();
+  /* v62: 3分タイマーの終わりの合図（chimeWake）も消音スイッチで消えていたため、
+     3分の段階から 🌬️ と同じ指定にする。🌬️ の「消音中でも鳴らす」をオフにすれば、ここもオフ。 */
+  mediaAudio(!!((setOf("breath478")||{}).media));
   wake = { choice:choice, startAt:Date.now(), text:"" };
   view = "wakeRun"; render();
   sleepTickStart();
