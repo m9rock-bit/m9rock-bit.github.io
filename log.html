@@ -91,7 +91,7 @@ h1{font-size:21px;margin:2px 0 4px}
 var HKEY = "bmc_log_hub_v1";
 var RKEY = "bmc_routine_v1";
 var GKEY = "bmc_gym_v1";
-var APPVER = "B.M.C. 記録ハブ v8 ・ 2026-10-12";
+var APPVER = "B.M.C. 記録ハブ v9 ・ 2026-10-14";
 
 var H = {
   vault: "My Valut",
@@ -297,8 +297,11 @@ function collect(){
          v6 (2026-09-12): 🌗 今日の自分に の分岐に合わせ、休息は 🔋・楽しむは 🎉 を付ける。
          mode が無い古い記録（routine v37以前）は、これまでどおり 🔋。 */
       var mk = x.fold ? (x.mode==="joy" ? " 🎉" : " 🔋") : "";
+      /* v9 (2026-10-14): 🌊 いま来た は「食べたい／見たい」を結果の列に添える（routine v50 から x.uk に入っている）。
+         列は8列のまま。名前の列は変えない（回数を名前で数えている読み手がいるため）。 */
+      var uk = (x.uk === "eat") ? "・食べたい" : (x.uk === "watch") ? "・見たい" : "";
       add("r"+x.t, x.t, line(x.t, "routine", "セット",
-        (x.icon?x.icon+" ":"")+(x.name||"")+mk, num(x.d)+"/"+num(x.n), mins(x.sec), "", "r"+x.t));
+        (x.icon?x.icon+" ":"")+(x.name||"")+mk, num(x.d)+"/"+num(x.n)+uk, mins(x.sec), "", "r"+x.t));
       /* v6: 🎉 の回は、選んだ楽しみと感想を**そのセット行に続く1行**として送る。
          8列＋#ID の形は崩さない（列は増やさない）。#ID は "j"+t で重複しない。 */
       if(x.fold && x.mode==="joy" && x.joy){
@@ -658,7 +661,25 @@ try{
 }catch(e){}
 
 hLoad();
-render();
+/* v9 (2026-10-14): routine v61 の「🌅 起きた」から log.html#auto で開かれたら、
+   未送信の実施ログを1回ぶん自動で送る（ご選択「朝『起きた』で送る」）。
+   印は送る直前に付ける（手で押したときと同じ）。届かなければ設定の「未送信に戻す」で戻せる。
+   1回で送るのは最大30行（URIの長さの上限はそのまま）。残りがあれば画面に残りの数が出る。 */
+(function(){
+  var auto = false;
+  try{ auto = (location.hash === "#auto"); if(auto) history.replaceState(null, "", location.pathname + location.search); }catch(e){}
+  render();
+  if(!auto) return;
+  var un = unsentLog();
+  if(!un.length){ toast("送るものはありません。"); return; }
+  var keep = H.maxRows; H.maxRows = Math.max(H.maxRows, 30);
+  var path = fileName(), b = batchOf(un, path);
+  H.maxRows = keep;
+  if(!b.rows.length) return;
+  markSent(b.rows.map(function(x){ return x.id; }), "実施ログ・起きたときに自動");
+  render();
+  location.href = uriOf(b.text, path);
+})();
 </script>
 </body>
 </html>

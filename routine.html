@@ -704,10 +704,17 @@ function defaults(){ return [
   /* 2026-09-01追加（v16）：🛌就寝を押すと自動で始まる下ごしらえ。ホーム画面には
      単独のボタンとして出さない（hidden:true）。ストレッチの中身は
      ストレッチアプリ「夜の基本（就寝前・毎日・5分）」プログラムをそのまま7項目。 */
-  { id:"presleep", icon:"🌙", name:"就寝前のストレッチ", limit:390,
+  { id:"presleep", icon:"🌙", name:"就寝前のストレッチ", limit:405,
     auto:true, voice:true, hidden:true,
     note:"「🛌 就寝」を押すと自動で始まります。ホーム画面には単独では出しません（編集はここから可能です）。",
     steps:[
+      /* v60（2026-10-11）: 寝る前のお薬を思い出す1行。[[行動計画_2026-10-09]] のご回答「イ」。
+         ★作るのは**思い出す経路だけ**。飲む／飲まないと、量・時刻は処方した先生とご本人の領域なので、
+           ここでは尋ねないし、記録も残さない（チェック欄・成否欄を1つも作っていない）。
+         ★置き場所を**セットの先頭**にしたのは、就寝セットが10月に1度も使われていない（実施ログ0行）ため。
+           「🛌 就寝」を押した直後の1画面目に出る位置が、イの中でいちばん届く形。ここはAI側で決めた
+           （同じ問いをご本人に作り直さない、という 指示_2026-10-11_2 のご指定に従った）。 */
+      "15|💊 寝る前のお薬を思い出す（飲む・飲まないは決めなくて大丈夫です。記録もしません）|寝る前のお薬",
       "30|イヤホンを、寝る用に切り替える",
       "30|ストレッチを始めます（5分・仰向け／座位）",
       "30|ポール：内ももローリング（右）・うつ伏せで片脚を横に開き、内ももを乗せて往復|ポール、内もも、右",
@@ -850,6 +857,7 @@ try{
     if(p.mig_breather===true) DB.mig_breather = true;
     if(Array.isArray(p.brProgs)) DB.brProgs = p.brProgs;   /* v58: 呼吸の置き場（★無いと開き直すたびに既定へ戻る） */
     if(p.mig_br58===true) DB.mig_br58 = true;            /* v58 */   /* v57: 🍵（★無いと削除しても復活する） */
+    if(p.mig_med60===true) DB.mig_med60 = true;          /* v60: 💊 を一度だけ差し込んだ印（★無いと、消しても毎回戻る） */
     /* v16: 就寝の見守り状態。アプリを閉じても経過時間が消えないよう、
        開始時刻そのものを保存し、毎回いまの時刻から計算し直す。 */
     if(typeof p.sleepActive==="boolean") DB.sleepActive = p.sleepActive;
@@ -1017,6 +1025,24 @@ if(!DB.mig_breather){
     DB.sets.forEach(function(s,i){ if(s.rescue && i<at6) at6 = i; });
     DB.sets.splice(at6, 0, bz);
   }
+  save();
+}
+/* v60（2026-10-11）：💊 寝る前のお薬を思い出す1行を、保存済みの 🌙 就寝前のストレッチの
+   **先頭にだけ**差し込む。一度だけ（mig_med60）。
+   ★ほかの移行（mig_br58 等）と違って「既定のままのときだけ」という条件を付けていない。
+     これは中身の作り直しではなく、ご本人がご自分で選ばれた1行の追加（ご回答「イ」）なので、
+     ご自分で並べ替えた就寝セットにも入ってほしい。代わりに、**すでにお薬の行があれば何もしない**
+     （文言を直されていても二重にしない）という条件にした。
+   ★消された場合は mig_med60 が立っているので二度と戻らない（削除を正として扱う既存の原則どおり）。 */
+if(!DB.mig_med60){
+  DB.mig_med60 = true;
+  DB.sets.forEach(function(s){
+    if(s.id !== "presleep") return;
+    var has = (s.steps||[]).some(function(x){ return /お薬|服薬|💊/.test(String(x)); });
+    if(has) return;
+    s.steps.unshift("15|💊 寝る前のお薬を思い出す（飲む・飲まないは決めなくて大丈夫です。記録もしません）|寝る前のお薬");
+    if(typeof s.limit === "number" && s.limit > 0) s.limit = s.limit + 15;
+  });
   save();
 }
 /* v58（2026-10-07）：呼吸の行を1行にまとめる。**保存されている中身が既定のまま（v57以前の
@@ -1492,7 +1518,7 @@ function parkBtn(){
 
 /* --- 状態 --- */
 /* v27: 版の表示（ホーム最下部）。中身を変えたら、ここも必ず上げる。 */
-var APPVER = "切り替えルーティン v59 ・ 2026-10-08";
+var APPVER = "切り替えルーティン v61 ・ 2026-10-14";
 var view = "home";
 var curId = null;
 var startAt = 0;
@@ -1809,19 +1835,28 @@ function quietOf(s){ return !!(s && s.quiet); }
 /* ★ここは音を鳴らす手前で毎回通る。読み込みの途中（DB.sets がまだ無い）に
    呼ばれても音を止めてしまわないよう、失敗したら false を返す。 */
 function quietNow(){ try{ return quietOf(setOf(curId)); }catch(e){ return false; } }
-function beep(f,d,force){
+function beep(f,d,force,vol,wave){
   /* force=true は集中ブロック用。集中の音は DB.focus.sound で別に持っており、
-     セットの「終了音を鳴らす」（DB.chime）とは独立させる。 */
+     セットの「終了音を鳴らす」（DB.chime）とは独立させる。
+     v60: vol（ピークの大きさ）と wave（波形）を**省略できる引数**として足した。
+     省略したときは従来とまったく同じ（.28 ・ sine ・ 立ち上がりのあとすぐ減衰）。
+     ★既存の呼び出し元は1つも書き換えていない＝項目の終了音・残り30秒・集中ブロック・
+     中途覚醒の合図は1バイトも変わらない。大きくするのは呼吸の合図（brChime）だけ。 */
   if(!DB.chime && !force) return;
   if(!force && quietNow()) return;   /* v36: 音を出さないセット */
   try{
     if(!ac) ac = new (window.AudioContext||window.webkitAudioContext)();
     if(ac.state === "suspended" && ac.resume) ac.resume();
     var o = ac.createOscillator(), g = ac.createGain();
+    var pk = (typeof vol === "number" && vol > 0) ? Math.min(.95, vol) : .28;
     o.connect(g); g.connect(ac.destination);
-    o.frequency.value = f; o.type = "sine";
+    o.frequency.value = f; o.type = wave || "sine";
     g.gain.setValueAtTime(.0001, ac.currentTime);
-    g.gain.exponentialRampToValueAtTime(.28, ac.currentTime+.02);
+    g.gain.exponentialRampToValueAtTime(pk, ac.currentTime+.02);
+    /* v60: 引数で音量を指定したときだけ、長さの半分までは減らさずに保つ。
+       短い音（0.1秒前後）は、鳴ってはいても耳が音量を取り切る前に消えるため、
+       「鳴っていない」ではなく「ほとんど聞こえない」という聞こえ方になる。 */
+    if(typeof vol === "number" && vol > 0) g.gain.setValueAtTime(pk, ac.currentTime+Math.max(.03, d*.5));
     g.gain.exponentialRampToValueAtTime(.0001, ac.currentTime+d);
     o.start(); o.stop(ac.currentTime+d+.02);
   }catch(e){}
@@ -2341,12 +2376,26 @@ function brInfo(s, idx, e){
   if(k>=ph.length) k = ph.length-1;
   return { g:g, c:c, n:n, ph:ph[k], left:Math.max(0, acc + ph[k].sec - r), key:c+":"+k };
 }
-/* v58: 呼吸の合図（読み上げの代わり）。吸う＝上がる2音／吸い足す＝高い短い1音／止める＝平らな1音／吐く＝下がる2音 */
+/* v58: 呼吸の合図（読み上げの代わり）。吸う＝上がる2音／吸い足す＝高い短い1音／止める＝平らな1音／吐く＝下がる2音
+   v60（2026-10-11）: ご記入「呼吸のプログラムの音がほとんど聞こえない」（2026-10-10 14:42）への対応。
+   ★10/7の「音がならなかった」とは症状が違う。あれは**実装済み・未配布**で、配布先が v57 のままだった
+     （v59 を10/8に配布済み）。今回は配布後のご記入で、しかも「鳴らない」ではなく「ほとんど聞こえない」
+     ＝鳴ってはいる。だからご本人に聞き直さず、コード側で原因を3つに絞った。いずれも beep() の既定値：
+       ①ピークが .28（1.0まで取れるのに、3割弱しか使っていなかった）
+       ②波形が sine（倍音が1つも無く、同じ振幅でも耳には小さく聞こえる）
+       ③長さが 0.09〜0.22秒（短すぎて、耳が音量を取り切る前に消える）
+     ★呼吸の合図は**読み上げの代わり**（呼吸中は声を出さない仕様）なので、ほかの音と違って
+       「気づけなければ機能そのものが成立しない」。ここだけ別の値を持たせる。
+   → VOL=.9・triangle・長さを約2倍に。2音の間も110→150msへ（2つが1つに潰れて聞こえないように）。
+   ★消音スイッチ（マナーモード）側は別の経路（navigator.audioSession の "playback"・v57）で、
+     ここでは触っていない。音量と波形の問題と、消音スイッチの問題を混ぜないため。 */
+var BR_VOL = .9, BR_WAVE = "triangle";   /* v60 */
 function brChime(k){
-  if(k==="in"){ beep(520,.14); setTimeout(function(){beep(700,.16);},110); }
-  else if(k==="top"){ beep(940,.09); }
-  else if(k==="hold" || k==="hold2"){ beep(780,.22); }
-  else if(k==="out"){ beep(700,.14); setTimeout(function(){beep(520,.18);},110); }
+  var V = BR_VOL, W = BR_WAVE;
+  if(k==="in"){ beep(520,.26,false,V,W); setTimeout(function(){beep(700,.32,false,V,W);},150); }
+  else if(k==="top"){ beep(940,.20,false,V,W); }
+  else if(k==="hold" || k==="hold2"){ beep(780,.36,false,V,W); }
+  else if(k==="out"){ beep(700,.26,false,V,W); setTimeout(function(){beep(520,.36,false,V,W);},150); }
 }
 function brChoose(id){
   var s = setOf(curId); if(!s || brAsk<0 || !brGet(id)) return;
@@ -2916,6 +2965,10 @@ function sleepEnd(){
   DB.sleepActive = false; DB.sleepStartAt = 0;
   wake = null;
   save();
+  /* v61 (2026-10-14 ご選択「朝『起きた』で送る」): 起きたら記録ハブを開き、
+     前日の分と睡眠をまとめて1回で送る（log.html v9 の #auto）。
+     ハブが同じ場所に無いときは、従来どおりホームへ。 */
+  try{ location.href = "log.html#auto"; return; }catch(e){}
   go("home");
 }
 /* v14: いまの項目に許された秒数（この回の延長を足したもの）と、その残り */
