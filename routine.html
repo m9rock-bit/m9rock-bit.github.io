@@ -726,6 +726,26 @@ function defaults(){ return [
       "60|開脚前屈・開ける角度で開脚し、背すじを伸ばしたまま股関節から前傾|開脚前屈",
       "30|音声プレイリストに切り替えて、目を閉じる"
     ]},
+  /* v64（2026-10-16 チャットでのご依頼「起きたを押したときに、朝ベッドでできるストレッチを開始する5分の流れ」）:
+     「🌅 起きた」→1問（夜中に食べたか）→ 自動でこの5分 → 終わったら記録ハブ（log.html#auto）。
+     ★ベッドの上・仰向けから座るまでで完結する項目だけ。立つ・床に降りる項目は入れていない。
+     ★presleep と同じく hidden（ホームには出さない）。中身はセット編集画面から直せる（直した内容が正）。
+     ★とばしたい朝は、実行中の「やめて最初に戻る」でそのまま記録ハブへ進む（ホームには戻らない）。 */
+  { id:"mornbed", icon:"🌅", name:"朝のベッドストレッチ", limit:300,
+    auto:true, voice:true, hidden:true,
+    note:"「🌅 起きた」で1問に答えると自動で始まります（5分）。ホーム画面には単独では出しません。",
+    steps:[
+      "20|仰向けのまま大きく伸び・両手を頭の上へ、つま先を遠くへ|大きく伸び",
+      "30|足首を動かす・つま先を立てる、倒すをゆっくりくり返す|足首",
+      "30|両膝を胸に抱える・腰を丸めて左右にゆらゆら|両膝を抱える",
+      "30|片膝抱え（右）・右膝を胸へ、左脚は伸ばしたまま|片膝、右",
+      "30|片膝抱え（左）・反対側も同じ|片膝、左",
+      "30|仰向けねじり（右へ倒す）・両膝を揃えて右へ、顔は左へ|ねじり、右",
+      "30|仰向けねじり（左へ倒す）・反対側も同じ|ねじり、左",
+      "30|お尻上げ・膝を立てて、ゆっくり上げて下ろすをくり返す|お尻上げ",
+      "30|横向きになってから起き上がり、座って首と肩をゆっくり回す|首と肩",
+      "40|座ったまま深呼吸を3回・今日いちばん先にやることを1つだけ思い浮かべる|深呼吸"
+    ]},
   /* v50（2026-09-30 ご依頼）: 「いま来た」＝YouTube・スマホのながら見／過食の衝動を受ける90秒。
      ★中身は**衝動サーフィン**（衝動を消そうとせず、波として眺めて、引くまで待つ）。
        依存・過食の再発予防でいちばん根拠が厚い手法の1つで、「我慢」ではないため
@@ -858,7 +878,8 @@ try{
     if(Array.isArray(p.brProgs)) DB.brProgs = p.brProgs;   /* v58: 呼吸の置き場（★無いと開き直すたびに既定へ戻る） */
     if(p.mig_br58===true) DB.mig_br58 = true;            /* v58 */   /* v57: 🍵（★無いと削除しても復活する） */
     if(p.mig_med60===true) DB.mig_med60 = true;
-    if(p.mig_br62===true) DB.mig_br62 = true;            /* v62: 🌬️ に「消音中でも鳴らす」を1回だけ入れた印（★無いと、オフにしても毎回オンに戻る） */          /* v60: 💊 を一度だけ差し込んだ印（★無いと、消しても毎回戻る） */
+    if(p.mig_br62===true) DB.mig_br62 = true;
+    if(p.mig_mornbed64===true) DB.mig_mornbed64 = true;   /* v64（★無いと、消しても毎回戻る） */            /* v62: 🌬️ に「消音中でも鳴らす」を1回だけ入れた印（★無いと、オフにしても毎回オンに戻る） */          /* v60: 💊 を一度だけ差し込んだ印（★無いと、消しても毎回戻る） */
     /* v16: 就寝の見守り状態。アプリを閉じても経過時間が消えないよう、
        開始時刻そのものを保存し、毎回いまの時刻から計算し直す。 */
     if(typeof p.sleepActive==="boolean") DB.sleepActive = p.sleepActive;
@@ -1085,6 +1106,16 @@ if(!DB.mig_br58){
    🍵 には media（消音中でも鳴らす）が入っていたが、睡眠後に始まる 🌬️ には入っていなかった。
    → 🌬️ の media を1回だけオンにする。スイッチ自体は v57 からセット編集画面にあるので、
      ご本人がオフにしたら、それが正（mig_br62 が立っているので二度とオンに戻さない）。 */
+/* v64：🌅 朝のベッドストレッチを一度だけ差し込む（presleep の直後）。以後は編集・削除した内容が正。 */
+if(!DB.mig_mornbed64){
+  DB.mig_mornbed64 = true;
+  if(!DB.sets.some(function(s){return s.id==="mornbed";})){
+    var mb = defaults().filter(function(s){return s.id==="mornbed";})[0];
+    var atM = idxOf("presleep"); atM = (atM<0) ? DB.sets.length : atM+1;
+    if(mb) DB.sets.splice(atM, 0, mb);
+  }
+  save();
+}
 if(!DB.mig_br62){
   DB.mig_br62 = true;
   DB.sets.forEach(function(s){ if(s.id==="breath478") s.media = true; });
@@ -1121,7 +1152,7 @@ function runSnap(){
   }
   return { id:curId, at:Date.now(), elapsed:Math.max(0, (s0 && s0.auto) ? curElapsed() : elapsed()),   /* v58: 止めている最中（呼吸を選んでいる間など）は止めた時点の位置を控える */
            doneSet:doneSet, curStep:curStep, acc:acc, extra:stepExtra,
-           runIdx:runIdx, fromPreSleep:fromPreSleep, fromWake:fromWake,
+           runIdx:runIdx, fromPreSleep:fromPreSleep, fromWake:fromWake, fromMorning:fromMorning,
            autoPaused:autoPaused, autoFinished:autoFinished, autoShift:autoShift,
            fold:foldOn,     /* v34: 畳んだ状態も控える（開き直しても畳んだまま） */
            mode:foldMode, joy:joyName, jmin:joyMin,   /* v38（★入れ物を足したら loadRun にも足すこと） */
@@ -1162,6 +1193,7 @@ function loadRun(r){
   runIdx = (typeof r.runIdx==="number") ? r.runIdx : null;
   fromPreSleep = !!r.fromPreSleep;
   fromWake = !!r.fromWake;
+  fromMorning = !!r.fromMorning;   /* v64 */
   autoPaused = !!r.autoPaused;
   autoFinished = !!r.autoFinished;
   autoShift = (typeof r.autoShift==="number") ? r.autoShift : 0;
@@ -1221,7 +1253,7 @@ function finishPending(){
   loadRun(r);
   stepAt = 0;
   if(pendDone(r) > 0 || runIdx !== null) logRun();
-  fromPreSleep = false; fromWake = false;
+  fromPreSleep = false; fromWake = false; fromMorning = false;
   stop();
   go("home");
 }
@@ -1244,7 +1276,7 @@ function canPark(){
   if(inDetour() || curId==="anger") return false;
   if(joyAt > 0) return false;
   if(blEndAt > 0) return false;   /* v44 */
-  if(fromPreSleep || fromWake) return false;
+  if(fromPreSleep || fromWake || fromMorning) return false;
   var s0 = setOf(curId); if(s0 && s0.rescue) return false;
   return true;
 }
@@ -1253,7 +1285,7 @@ function parkLog(r){
   loadRun(r);
   stepAt = 0;
   if(pendDone(r) > 0 || runIdx !== null) logRun();
-  fromPreSleep = false; fromWake = false;
+  fromPreSleep = false; fromWake = false; fromMorning = false;
   stop();
 }
 function parkRun(){
@@ -1531,7 +1563,7 @@ function parkBtn(){
 
 /* --- 状態 --- */
 /* v27: 版の表示（ホーム最下部）。中身を変えたら、ここも必ず上げる。 */
-var APPVER = "切り替えルーティン v62 ・ 2026-10-15";
+var APPVER = "切り替えルーティン v64 ・ 2026-10-16";
 var view = "home";
 var curId = null;
 var startAt = 0;
@@ -1566,6 +1598,8 @@ var autoPaused = false, pauseAt = 0, autoFinished = false;
    DB.sleepActive / DB.sleepStartAt は localStorage に保存し、アプリを
    閉じても経過時間が消えないようにする（時刻から毎回計算し直す）。 */
 var fromPreSleep = false, fromWake = false;
+var fromMorning = false;   /* v64: 🌅 起きた → 朝のベッドストレッチの回。終わったら記録ハブへ */
+function morningOut(){ fromMorning = false; stop(); try{ location.href = "log.html#auto"; return; }catch(e){} go("home"); }
 var wake = null;        /* {choice, startAt, text} … 🌃のあと、3分だけ動く */
 var wtick = null;       /* sleepWatch/wakeChoice/wakeRun 用の250ms時計。runの tick とは別 */
 var WAKE_SEC = 180;
@@ -2346,6 +2380,7 @@ function autoTick(s){
     logRun();
     if(fromPreSleep){ fromPreSleep=false; stop(); sleepEnterWatch(); view="sleepWatch"; }
     else if(fromWake){ fromWake=false; stop(); sleepBackToWatch(); view="sleepWatch"; }
+    else if(fromMorning){ view="done"; setTimeout(morningOut, 0); }   /* v64 */
     /* v58: 🌊・🍵・🧸 の寄り道は、終わったら完了画面を挟まず元のセットの続きへ。
        ここは render() の中なので、戻す処理（render を呼ぶ）は次の一拍に回す。 */
     else if(autoBack()){ view = "done"; setTimeout(function(){ angerReturn(); }, 0); }
@@ -2993,9 +3028,27 @@ function wakeTimeUp(){
   fromWake = true;
   start("breath478");
 }
-function sleepEnd(){
+/* v63（2026-10-16 指示_2026-10-16_中途覚醒の無意識の間食と起きている間の間食を分けて記録したい）:
+   「🌅 起きた」で、夜中に起きて食べたかを1問だけ聞く（翌朝のご本人の申告。個数・時刻から機械判定しない）。
+   夜中に食べた分＝実施ログの「中途覚醒」行（翌朝の申告）／起きている間の間食＝日次ノートの食事記録（間食）、で分かれる。
+   ★新しい種別・列・プロパティは作っていない。log.html は sid:"wake" を従来どおり「中途覚醒」として送る（行の形は不変）。
+   ★点（加点ルール）には触れていない。答えずに戻ることもできる（そのときは何も記録しない）。 */
+var WAKE_ATE = { ate:"翌朝の申告：夜中に起きて食べた", no:"翌朝の申告：夜中は食べていない" };
+function sleepAteAsk(){ view="wakeAte"; render(); }
+function viewWakeAte(){
+  var h = '<h1>🌅 おはようございます</h1><p class="sub">1つだけ。<b>夜中に起きて、何か食べましたか？</b><br>数や量は要りません。責めるための記録ではなく、夜中の分と昼間の分を分けて見るためのものです。<br>答えると、そのまま🌅 朝のベッドストレッチ（5分）が始まります。</p>';
+  h += '<button class="setb" onclick="sleepEnd(\'no\')">🙂 食べていない</button>';
+  h += '<button class="setb" onclick="sleepEnd(\'ate\')">🍪 食べた</button>';
+  h += '<button class="btn link" onclick="view=\'sleepWatch\'; render();">まだ寝ている（見守り画面に戻る）</button>';
+  return h;
+}
+function sleepEnd(ans){
   sleepTickStop();
   var totalSec = sleepElapsed();
+  if(WAKE_ATE[ans]){
+    var tA = Date.now(); if(tA === (DB.sleepStartAt||0)) tA++;
+    DB.times.push({ t:tA, sid:"wake", step:WAKE_ATE[ans], plan:0, act:0 });
+  }
   DB.times.push({ t:DB.sleepStartAt||Date.now(), sid:"sleep", step:"就寝", plan:0, act:totalSec });
   if(DB.times.length > TIMEMAX) DB.times = DB.times.slice(DB.times.length-TIMEMAX);
   DB.sleepActive = false; DB.sleepStartAt = 0;
@@ -3004,6 +3057,9 @@ function sleepEnd(){
   /* v61 (2026-10-14 ご選択「朝『起きた』で送る」): 起きたら記録ハブを開き、
      前日の分と睡眠をまとめて1回で送る（log.html v9 の #auto）。
      ハブが同じ場所に無いときは、従来どおりホームへ。 */
+  /* v64: 朝のベッドストレッチ（5分）を自動で始め、終わったら記録ハブへ（morningOut）。
+     セットを消していれば、従来どおりすぐハブへ。 */
+  if(setOf("mornbed")){ fromMorning = true; start("mornbed"); return; }
   try{ location.href = "log.html#auto"; return; }catch(e){}
   go("home");
 }
@@ -3811,6 +3867,7 @@ function enterDone(){
      「自動終了のときだけ就寝画面に戻らない」不具合が再発する。 */
   if(fromPreSleep){ fromPreSleep=false; stop(); sleepEnterWatch(); view="sleepWatch"; render(); return; }
   if(fromWake){ fromWake=false; stop(); sleepBackToWatch(); view="sleepWatch"; render(); return; }
+  if(fromMorning){ morningOut(); return; }   /* v64 */
   /* v25: 🧸 を終えたら、元のセットの続きへ戻る（完了画面は挟まない。
      「戻れた」ことが分かればよく、達成の画面を挟むと寄り道が儀式になるため） */
   if(autoBack()){ angerReturn(); return; }   /* v58: 🌊・🍵 も同じ */
@@ -3930,6 +3987,7 @@ function leaveRun(){
      （画面を開いただけ・押し間違いを増やさないため） */
   if(runIdx===null && doneCount()>0) logRun();
   var wasWake = fromWake;
+  if(fromMorning){ fromPreSleep = false; fromWake = false; morningOut(); return; }   /* v64: とばした朝も記録ハブへ */
   fromPreSleep = false; fromWake = false;
   stop();
   /* v16: 中途覚醒の3択・呼吸法を「やめて最初に戻る」で切り上げた場合は、
@@ -3978,6 +4036,7 @@ function render(){
   else if(view==="sleepWatch") h = viewSleepWatch();
   else if(view==="wakeChoice") h = viewWakeChoice();
   else if(view==="wakeRun") h = viewWakeRun();
+  else if(view==="wakeAte") h = viewWakeAte();   /* v63 */
   else if(view==="focusStart") h = viewFocusStart();
   else if(view==="focus"){
     focusTick();                       /* 完了すると内部で view="focusDone" に変わることがある */
@@ -4058,7 +4117,7 @@ function viewSleepWatch(){
   var h = '<h1>🛌 就寝</h1><p class="sub">ストレッチとプレイリストの切り替えが終わった時点からの経過時間です。<br>このまま眠ってください。目が覚めたときだけ、下のボタンを押します。</p>';
   h += '<div class="card"><div class="big">'+durLabel(sleepElapsed())+'</div><div class="bigsub">経過時間</div></div>';
   h += '<button class="btn big" onclick="sleepWake()">🌃 途中で起きてしまった</button>';
-  h += '<button class="btn ghost" style="margin-top:14px" onclick="sleepEnd()">🌅 起きた（ここで終える）</button>';
+  h += '<button class="btn ghost" style="margin-top:14px" onclick="sleepAteAsk()">🌅 起きた（ここで終える）</button>';   /* v63: 先に1問だけ聞く */
   h += '<p class="note">合図の音（上がる3音・2回）と画面のフラッシュで気づけるか、実際に試してみてください。気づきにくければ音の高さ・回数を調整します。<br>バイブレーションはiOS Safariでは技術的に使えません。</p>';
   /* v20 (2026-09-03 ご依頼): 就寝の見守り画面からプレイリストを開く */
   if(DB.sleepSpotify){
