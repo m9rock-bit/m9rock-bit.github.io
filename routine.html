@@ -35,6 +35,23 @@ h1{font-size:19px;margin:4px 0 2px;letter-spacing:.02em}
 .btn.danger{background:#3a2427;color:#e8b3b8}
 .btn.danger.armed{background:#7d2c35;color:#fff}
 .row{display:flex;gap:9px}
+/* ===== v70（2026-10-21 ご依頼）: 実行画面の上を固定する =====
+   「上の現在の画面を固定し、画面の下の部分でセットのそれぞれの流れが見えるように。
+     終わったものは閉じる形に。食べたい、一息、記録するは上部の画面に固定」
+   ★position:sticky は .wrap の中で効く（body 側に overflow を付けていないため）。
+   ★固定するぶん背景を body と同じ色で塗る（下の行が透けると読めなくなる）。 */
+.runtop{position:sticky;top:0;z-index:30;background:#12151c;
+  padding:6px 0 8px;margin:0 0 4px;border-bottom:1px solid #222a36}
+.runtop .card{margin-bottom:8px;padding:11px 13px}
+.runtop .big{font-size:40px;margin:2px 0 0}          /* 固定するので小さくする */
+.runtop .bar{margin:7px 0 0}
+.runtop .btn{margin-top:7px}
+.runtop .emrow .btn,.runtop .emrow a{margin-top:0;padding:9px 5px;font-size:13px}
+.runttl{color:#8a94a6;font-size:12px;margin:0 0 5px;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.donefold{display:flex;align-items:center;gap:8px;width:100%;
+  background:#171c25;border:1px dashed #2b3444;color:#8ea3b8;
+  border-radius:11px;padding:9px 12px;font-size:13px;margin-bottom:8px;text-align:left}
 .row>*{flex:1}
 
 .big{font-size:64px;font-weight:200;text-align:center;font-variant-numeric:tabular-nums;margin:6px 0 2px;letter-spacing:-.03em;line-height:1.1}
@@ -1588,7 +1605,7 @@ function parkBtn(){
 
 /* --- 状態 --- */
 /* v27: 版の表示（ホーム最下部）。中身を変えたら、ここも必ず上げる。 */
-var APPVER = "切り替えルーティン v68 ・ 2026-10-21";
+var APPVER = "切り替えルーティン v70 ・ 2026-10-21";
 var view = "home";
 var curId = null;
 var startAt = 0;
@@ -4313,6 +4330,13 @@ function viewHome(){
        + '<small>何か口に入れたい・キッチンへ行きたい</small></button>' : '')
        + (_bz ? '<button class="setb" style="margin-bottom:0;border-color:#8fa86a;background:#181d14" onclick="breatherGo()">🍵 ひと息'
        + '<small>脳がつかれた・2回目が来た・再開する前に</small></button>' : '')
+       /* v69（2026-10-21 ご指定「食事記録と予約の機能は、ひと息と同じ画面に出してください。
+          中断した時にしかでないは使いづらい」）: 🍰 と 🍽️ を 🌊・🍵 と同じ並びに置く。
+          ★ここは「いま来たとき」＝疲れて何か食べたくなった瞬間に最初に目に入る場所で、
+            🍰 ごほうび枠を押す場面とまったく同じ。スクロールを挟ませない。
+          ★v67 は ⏸ の2か所だけ、v68 はセット一覧の下に置いていた。どちらも
+            「ふだん目に入るか」を確かめていなかった（2度の配置ミス）。 */
+       + mealCards()
        + '</div>';
     if(_bz) h += '<p style="color:#8ea3b8;font-size:12px;line-height:1.75;margin:0 0 4px">'
        + '🍵 は約7分。合図の音と声で進むので、イヤホンで。</p>';
@@ -4385,16 +4409,6 @@ function viewHome(){
     h += '<p class="note">このタブに入れたセットがまだありません。「セットを編集」で、出したいセットに同じタグを入れてください。'
        + '<br><b>「すべて」を押せば、いつでも全部に戻れます。</b></p>';
   }
-  /* ===== v68（2026-10-21・同日の修正）: 食事の動線をホームへ常設 =====
-     v67では mealLinks() を ⏸ 呼ばれた中の帯と、ホームの「⏸ 中断中」カードの
-     直下にだけ置いた。**どちらも先に ⏸ を押していないと出ない場所**で、
-     ふだんは1つも見えなかった（ご指摘「食事を記録する動線が見当たりません」）。
-     → ホームに常設する。ホームは curId が無いときは時計が止まっているので、
-       「時計が止まっているところにだけ置く」という元の方針とも矛盾しない。
-       実行中にホームを開いた場合だけ、離れ方の案内を1行添える。 */
-  h += '<div class="sec">🍽️ 食事</div>';
-  h += mealLinks();
-  if(curId) h += '<p class="note">いまセットを実行中です。<b>⏸ 中断してホームへ</b>を押してから開くと、離れていた時間は項目に数えません。</p>';
   h += '<div class="sec">時間を区切って進める</div>';
   h += '<button class="setb" onclick="focusGo()">🎯 集中ブロック'
      + '<small>いまは '+SLOTN[slotAt(Date.now())]+' ・ 休憩まで '+durLabel(DB.focus.len[slotAt(Date.now())]*60)
@@ -4732,6 +4746,8 @@ function clearLog(){
   DB.log = []; DB.count = 0; clearArmed = false; save(); render();
 }
 
+var runShowDone = false;   /* v70: 実行画面で「終わったもの」を開いているか（この回だけ・保存しない） */
+function runDoneFold(){ runShowDone = !runShowDone; render(); }
 function viewRun(){
   var s = setOf(curId);
   if(s && s.auto) return viewRunAuto(s);
@@ -4742,7 +4758,18 @@ function viewRun(){
   var sl = (curStep < st.length) ? stepLeft() : 0;
   var sSec = (curStep < st.length) ? stepSec(curStep) : 1;
   var spct = Math.max(0, Math.min(100, (stepUsed()/Math.max(1,sSec))*100));
-  var h = '<h1>'+esc(s.icon)+' '+esc(s.name)+modeMark()+'</h1>'+(s.note ? '<p class="sub">'+esc(s.note)+'</p>' : '');   /* v38 */
+  /* ===== v70（2026-10-21 ご依頼）: 画面の組み直し =====
+     「上の現在の画面を固定し、画面の下の部分でセットのそれぞれの流れが見えるように。
+       終わったものは閉じる形に。食べたい、一息、記録するは上部の画面に固定」
+     ★3つのバッファに分ける：
+       hTop  … 画面の上に固定するもの（タイトル1行／いまの項目／✓できた／−1+1+5／🌊🍵🍰🍽️）
+       hList … セットの流れ（済んだものは既定で畳む）
+       h     … それ以外（離席中・⏸・スキップ・メモ・終わり方 など）
+     ★組み立ては最後の return で hTop → hList → h の順。 */
+  var hTop = '<div class="runtop"><div class="runttl">'+esc(s.icon)+' '+esc(s.name)+modeMark()
+           + (curStep<st.length ? '　・　'+etaLabel()+'に終わる' : '')+'</div>';
+  var hList = '';
+  var h = (s.note ? '<p class="sub">'+esc(s.note)+'</p>' : '');   /* v38 */
   /* v34: 畳んでいる回は、いちばん上でそう言い切る。基準が変わっていることを
      画面のどこかに常に出しておかないと、あとで記録を読み違える。 */
   if(foldOn && foldMode==="joy"){
@@ -4760,9 +4787,9 @@ function viewRun(){
   }
   h += snBox(st);            /* v37: 後回しにしている項目があるときだけ出る */
   h += awayBackBox(s, st);   /* v35: 1分以上離れて戻ってきたときだけ出る */
-  h += '<div class="card">';
-  h += '<div class="bigsub" style="margin-bottom:2px">'+(curStep<st.length ? (curStep+1)+' / '+st.length+'　'+esc(cur?cur.text:"") : 'ぜんぶ終わりました')+'</div>';
-  h += '<div class="big'+(sl<0?' over':'')+'">'+mmss(sl)+'</div>';
+  hTop += '<div class="card">';
+  hTop += '<div class="bigsub" style="margin-bottom:2px">'+(curStep<st.length ? (curStep+1)+' / '+st.length+'　'+esc(cur?cur.text:"") : 'ぜんぶ終わりました')+'</div>';
+  hTop += '<div class="big'+(sl<0?' over':'')+'">'+mmss(sl)+'</div>';
   /* ★v49（2026-09-23 ご記入A「終了時刻目安が閉じられている」）: 終了時刻は
      v19からここに出していたが、**v40の .note たたみ込みに巻き込まれて
      「くわしく」の中に隠れていた**（.note を連続でまとめて <details> に入れる
@@ -4772,31 +4799,34 @@ function viewRun(){
        諦めたもの: この行から「予定を過ぎています。続けて大丈夫です」の
        後半の言い回しを短くした（意味は残している）。
      ★.note の中の同じ一文は消した。2か所に出すと、どちらかが古くなる。 */
-  h += '<div class="bigsub">'+(sl<0 ? 'この項目は予定を過ぎています' : 'この項目の残り時間')
+  hTop += '<div class="bigsub">'+(sl<0 ? 'この項目は予定を過ぎています' : 'この項目の残り時間')
      + (curStep<st.length ? '　・　全体は <b style="color:#e0a86a">'+etaLabel()+'</b> ごろ終わり' : '')
      + '</div>';
-  h += '<div class="bar"><i style="width:'+spct+'%"></i></div>';
-  h += '<p class="note" style="text-align:center;margin-top:9px">この項目に使った時間 <b>'+mmss(stepUsed())+'</b>'
+  hTop += '<div class="bar"><i style="width:'+spct+'%"></i></div>';
+  hTop += '</div>';
+  /* v70: 使った時間の注記は固定ブロックの外へ（固定する分だけ上を低くする）。
+     消していない＝一覧のすぐ上に出る。 */
+  h += '<p class="note" style="text-align:center;margin-top:0">この項目に使った時間 <b>'+mmss(stepUsed())+'</b>'
      + (accOf(curStep) ? '（中断前の '+mmss(accOf(curStep))+' を含む）' : '')
      + (stepExtra[curStep] ? '（延長 +'+durLabel(stepExtra[curStep])+'）' : '')
      + '<br>ルーティン全体： 経過 '+mmss(elapsed())+' ／ 目安 '+durLabel(lim)+'</p>';
-  h += '</div>';
   /* いまの項目を、大きく押せる形で進める */
   if(curStep < st.length){
     /* v20: いま見ている項目が済みなら、主ボタンは取り消しに変わる
        （行のタップで済みの項目へ移れるようになったため） */
     if(doneSet[curStep]){
-      h += '<button class="btn big" onclick="undoStep('+curStep+')">↩ この項目の「'
+      hTop += '<button class="btn big" onclick="undoStep('+curStep+')">↩ この項目の「'
          + (doneSet[curStep]==="skip" ? 'スキップ' : 'できた') + '」を取り消す</button>';
     }else{
-      h += '<button class="btn big" onclick="toggleStep('+curStep+')">✓ '+(foldOn?'手をつけた':'できた')+' — 次へ</button>';
+      hTop += '<button class="btn big" onclick="toggleStep('+curStep+')">✓ '+(foldOn?'手をつけた':'できた')+' — 次へ</button>';
     }
-    h += '<div class="row" style="margin-top:9px">'
+    hTop += '<div class="row" style="margin-top:9px">'
        /* v51（2026-10-01）: 短くする側。延長しかなかったので足した。 */
        + '<button class="btn ghost" style="margin-top:0" onclick="extendStep(-60)">−1分 短く</button>'
        + '<button class="btn ghost" style="margin-top:0" onclick="extendStep(60)">＋1分 延長</button>'
        + '<button class="btn ghost" style="margin-top:0" onclick="extendStep(300)">＋5分 延長</button>'
        + '</div>';
+    hTop += emUI();   /* v70: 🌊 見たい・🌊 食べたい・🍵 ひと息・🍰 予約・🍽️ 記録 を上に固定 */
     /* v35（2026-09-10 ご依頼 ＝ 指示_2026-09-10 R4）: 離席中に鳴るものを
        ここに1か所へまとめた。v32の「残り30秒で鳴るタイマー」もこの中に畳んである。 */
     h += awayBlock(s);
@@ -4876,7 +4906,6 @@ function viewRun(){
     /* v58（2026-10-07 ご依頼）: 🛟 崩れた・🧸 イライラした・🌗 今日の自分に は「ほとんど使っていない」ので外し、
        🌊 いま来た・🍵 ひと息 を置いた。押すと寄り道して、終わる・やめると自動でこの続きへ戻る。
        ★🌗 で畳んでいる最中の回（v57以前の控えから開き直した場合）だけ「🌗 やめる」を残す（戻せなくなるため）。 */
-    h += emUI();
     if(foldOn) h += '<button class="btn ghost" style="border-color:#7a9ec4;color:#bcd6ee" onclick="foldUndo()">🌗 やめる</button>';
     /* v45（2026-09-21 ご指摘「実行中に📋が見当たらない」）: v44では画面の
        いちばん下に置いていた。**手が空いた瞬間に押すもの**なので、v26で
@@ -4892,11 +4921,20 @@ function viewRun(){
     h += '<p class="note">下の一覧の <b>🕐</b> は「その項目が何時ごろか」の目安です（<b>15分単位</b>のため、数分のずれは丸めています）。'
        + '🌾 差し込みや ⏸ あとで戻るで時計が止まっているあいだは、<b>いま戻った前提</b>の時刻が出ます。</p>';
   }
+  /* v70: 済んだ項目は既定で畳む（ご指定「終わったものは閉じる形にする」）。
+     消していない＝「✓ 終わったもの n件」を押せばその場で開く。
+     いまの項目は、済みでも必ず出す（取り消しの導線が消えるため）。 */
+  var _doneN = 0;
+  st.forEach(function(x,i){ if(doneSet[i] && i!==curStep) _doneN++; });
+  if(_doneN) hList += '<button class="donefold" onclick="runDoneFold()">'
+     + (runShowDone ? '▾' : '▸') + '　✓ 終わったもの '+_doneN+'件'
+     + (runShowDone ? '（タップで閉じる）' : '（タップで開く）') + '</button>';
   st.forEach(function(x,i){
+    if(doneSet[i] && i!==curStep && !runShowDone) return;   /* v70 */
     var cls = doneSet[i] ? "step done" : (i===curStep ? "step cur" : "step");
     var mark = doneSet[i]==="done" ? "✓" : (doneSet[i]==="skip" ? "–" : (i===snStep ? "⏸" : (i+1)));   /* v37 */
     var ap0 = appOf(x);
-    h += '<div class="'+cls+'" onclick="gotoStep('+i+')"><div class="n">'+mark+'</div>'
+    hList += '<div class="'+cls+'" onclick="gotoStep('+i+')"><div class="n">'+mark+'</div>'
        + '<div class="t">'+(doneSet[i]==="skip"?'<s>'+esc(x.text)+'</s>':esc(x.text))
        + (ap0 ? ' <span class="tag">'+ap0.icon+' '+esc(ap0.name)+'</span>' : '')
        + '<em>目安 '+durLabel(foldOn?foldSecOf(x.sec):x.sec)+(foldOn?'（畳み中）':'')+(stepExtra[i]?'（延長 +'+durLabel(stepExtra[i])+'）':'')
@@ -4914,7 +4952,7 @@ function viewRun(){
     if(i===curStep && !doneSet[i]){
       var prev = notesFor(s.id, x.text);
       if(inputOpen === "name:"+i){
-        h += '<div class="iobox">'
+        hList += '<div class="iobox">'
            + '<label style="margin-top:0">この項目の名前を直す</label>'
            + '<input class="inp" type="text" id="io_text" value="'+esc(x.text)+'">'
            + '<p class="note" style="margin-top:5px">直した内容は<b>このセットにそのまま残ります</b>。'
@@ -4926,7 +4964,7 @@ function viewRun(){
       }else if(inputOpen === "del:"+i){
         /* v53（2026-10-01）: 恒久的に消す前の確認。**ここで止められる唯一の場所**
            なので、「次回以降も出てこない」ことを必ず文字で見せる。 */
-        h += '<div class="iobox">'
+        hList += '<div class="iobox">'
            + '<label style="margin-top:0">この項目を消します</label>'
            + '<p class="note" style="margin-top:5px"><b>'+esc(x.text)+'</b> を<b>このセットから消します。</b>'
            + '<b>次回以降も出てきません</b>（その回だけ飛ばす「↷ この項目は今日やらない」とは別です）。'
@@ -4937,7 +4975,7 @@ function viewRun(){
            + '<button class="btn danger" style="margin-top:0" onclick="removeStep('+i+')">消す</button>'
            + '</div></div>';
       }else if(inputOpen === "note:"+i){
-        h += '<div class="iobox">'
+        hList += '<div class="iobox">'
            + '<label style="margin-top:0">やってみて、どう感じましたか</label>'
            + '<input class="inp" type="text" id="io_text" placeholder="例）これは要らない気がする／もっと短くていい">'
            + '<div class="row" style="margin-top:8px">'
@@ -4945,7 +4983,7 @@ function viewRun(){
            + '<button class="btn save" style="margin-top:0" onclick="runNote('+i+')">残す</button>'
            + '</div></div>';
       }else if(inputOpen === "add:"+(i+1)){
-        h += '<div class="iobox">'
+        hList += '<div class="iobox">'
            + '<label style="margin-top:0">ここに1つ足す（この項目の次）</label>'
            + '<div class="stline">' + msInputs("io_min","io_sec2",60)
            + '<input class="inp" type="text" id="io_text" placeholder="やること"></div>'
@@ -4954,7 +4992,7 @@ function viewRun(){
            + '<button class="btn save" style="margin-top:0" onclick="runAdd('+(i+1)+')">足す</button>'
            + '</div></div>';
       }else{
-        h += '<div class="stbtns" style="margin:-4px 0 10px">'
+        hList += '<div class="stbtns" style="margin:-4px 0 10px">'
            /* v21 (2026-09-03 ご依頼): 実行中に順番を入れ替える。
               入れ替えた順番はセットにそのまま残る。 */
            + '<button onclick="moveStep('+i+',-1)"'+(i===0?' disabled':'')+'>↑ 上へ</button>'
@@ -4971,7 +5009,7 @@ function viewRun(){
            + '</div>';
       }
       if(prev.length){
-        h += '<p class="note" style="margin:-4px 0 10px">前に書いたもの： '+esc(prev[0].r.v)
+        hList += '<p class="note" style="margin:-4px 0 10px">前に書いたもの： '+esc(prev[0].r.v)
            + ' <span style="opacity:.7">（'+dayLabel(prev[0].r.t)+'）</span>'
            + (prev.length>1 ? ' ほか'+(prev.length-1)+'件' : '')+'</p>';
       }
@@ -5014,7 +5052,7 @@ function viewRun(){
   if(curStep >= st.length) h += blUI();   /* v45: 全項目を終えたあとは上のブロックが出ないので、ここに出す */
   h += parkBtn();   /* v43 */
   h += '<button class="btn link" onclick="leaveRun()">'+(autoBack() ? 'やめて、さっきの続きに戻る' : 'やめて最初に戻る')+'</button>';
-  return h;
+  return hTop + '</div>' + hList + h;
 }
 /* v25: 実行中に出る「🧸 イライラした」。押すと寄り道して、終わったらここへ戻る。
    ★🧸 自身の実行中には出さない（二重に飛ばない）
@@ -5028,8 +5066,20 @@ function emUI(){
     b.push('<button class="btn ghost" style="margin-top:0;padding:10px 6px;border-color:#5f93a8;color:#bfdbe8" onclick="urgeGo(\'eat\')">🌊 食べたい</button>');
   }
   if(breatherSet()) b.push('<button class="btn ghost" style="margin-top:0;padding:10px 6px;border-color:#8fa86a;color:#d3e4bd" onclick="breatherGo()">🍵 ひと息</button>');
+  /* v70: 🍰 予約・🍽️ 食事を記録 も同じ行に（ご指定「食べたい、一息、記録するは上部の画面に固定」）。
+     ボタンではなく <a href> なのは、250msごとの render() で作り直されると
+     開こうとしているリンクが消えるため（FB送信と同じ作法）。 */
+  /* ★ここだけ <a href> ではなく button + openUrl にしている理由
+     実行中は render() が250msごとに #app を作り直すため、<a href> だと
+     タップの途中で要素が入れ替わることがある（FB送信が #app の外に
+     置かれているのと同じ理由）。**すぐ隣の 🌊・🍵 は button + onclick で
+     実際に動いている**ので、同じ作りに揃えた。openUrl は 🎵 プレイリストでも
+     使っている既存の関数。 */
+  var _ma = mealUri(MEAL.cmdBook), _mb = mealUri(MEAL.cmdLog);
+  if(_ma) b.push('<button class="btn ghost" style="margin-top:0;padding:10px 6px;border-color:#c4a06a;color:#e8c99a" onclick="openUrl(\''+_ma+'\')">🍰 予約</button>');
+  if(_mb) b.push('<button class="btn ghost" style="margin-top:0;padding:10px 6px;border-color:#a08fb9;color:#d8cbe8" onclick="openUrl(\''+_mb+'\')">🍽️ 記録</button>');
   if(!b.length) return '';
-  return '<div class="row" style="margin-top:9px;gap:6px">'+b.join("")+'</div>'
+  return '<div class="row emrow" style="margin-top:9px;gap:6px;flex-wrap:wrap">'+b.join("")+'</div>'
        + '<p style="color:#8ea3b8;font-size:12px;line-height:1.7;margin:4px 0 0">押すと、いまのセットを控えてそちらを始めます。<b>終わる・やめると、自動でこの続きに戻ります。</b></p>';
 }
 /* ===== v58: 呼吸の行に来たときの一覧 ===== */
@@ -7357,6 +7407,16 @@ function mealUri(cmd){
 /* 時計が止まっている場所にだけ出す2リンク。
    予約用のコマンドIDが未設定のときは、食事記録の1本だけ出す
    （Obsidian運用管理が 🍰 予約の入口を作ったら、設定に入れて2本になる）。 */
+/* v69: 🌊・🍵 と同じ行に並べるカード版。見た目を揃えるため setb を使う。
+   中身は mealLinks() と同じ行き先で、出し分けの条件も同じ。 */
+function mealCards(){
+  var a = mealUri(MEAL.cmdBook), b = mealUri(MEAL.cmdLog), h = "";
+  if(a) h += '<a class="setb" style="margin-bottom:0;border-color:#c4a06a;background:#211e18;display:block;text-decoration:none" href="'+a+'">🍰 ごほうびを予約する'
+          +  '<small>食べる前に1つ選ぶ。器に出して、袋はしまう。種類は1つ。</small></a>';
+  if(b) h += '<a class="setb" style="margin-bottom:0;border-color:#a08fb9;background:#1d1a21;display:block;text-decoration:none" href="'+b+'">🍽️ 食事を記録する'
+          +  '<small>Meal Log を開きます（まとめて翌朝でも大丈夫です）</small></a>';
+  return h;
+}
 function mealLinks(){
   var a = mealUri(MEAL.cmdBook), b = mealUri(MEAL.cmdLog);
   if(!a && !b) return "";
