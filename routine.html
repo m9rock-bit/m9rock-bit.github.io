@@ -40,6 +40,13 @@ h1{font-size:19px;margin:4px 0 2px;letter-spacing:.02em}
      終わったものは閉じる形に。食べたい、一息、記録するは上部の画面に固定」
    ★position:sticky は .wrap の中で効く（body 側に overflow を付けていないため）。
    ★固定するぶん背景を body と同じ色で塗る（下の行が透けると読めなくなる）。 */
+/* v71（2026-10-21 ご指定「上の四つが縦長すぎるので修正して」）
+   4枚を横一列に並べたため1枚が細くなり、文字が縦に折り返して縦長になっていた。
+   → **2列のグリッド**にして、説明の <small> を外す（説明はすぐ下の注記にある）。 */
+.emgrid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px}
+.emgrid .setb{margin-bottom:0;padding:13px 10px;font-size:15px;text-align:center;
+  display:flex;align-items:center;justify-content:center;min-height:50px;line-height:1.35}
+.emgrid a.setb{text-decoration:none}
 .runtop{position:sticky;top:0;z-index:30;background:#12151c;
   padding:6px 0 8px;margin:0 0 4px;border-bottom:1px solid #222a36}
 .runtop .card{margin-bottom:8px;padding:11px 13px}
@@ -1605,7 +1612,7 @@ function parkBtn(){
 
 /* --- 状態 --- */
 /* v27: 版の表示（ホーム最下部）。中身を変えたら、ここも必ず上げる。 */
-var APPVER = "切り替えルーティン v70 ・ 2026-10-21";
+var APPVER = "切り替えルーティン v71 ・ 2026-10-21";
 var view = "home";
 var curId = null;
 var startAt = 0;
@@ -4323,13 +4330,10 @@ function viewHome(){
   var _ug = urgeSet() && curId!=="urge", _bz = breatherSet() && curId!=="breather";
   if(_ug || _bz){
     h += '<div class="sec">いま来たとき</div>';
-    h += '<div class="row" style="gap:6px;margin-bottom:6px">'
-       + (_ug ? '<button class="setb" style="margin-bottom:0;border-color:#5f93a8;background:#141d21" onclick="urgeGo(\'watch\')">🌊 見たい'
-       + '<small>YouTube・スマホをこのまま見続けたい</small></button>'
-       + '<button class="setb" style="margin-bottom:0;border-color:#5f93a8;background:#141d21" onclick="urgeGo(\'eat\')">🌊 食べたい'
-       + '<small>何か口に入れたい・キッチンへ行きたい</small></button>' : '')
-       + (_bz ? '<button class="setb" style="margin-bottom:0;border-color:#8fa86a;background:#181d14" onclick="breatherGo()">🍵 ひと息'
-       + '<small>脳がつかれた・2回目が来た・再開する前に</small></button>' : '')
+    h += '<div class="emgrid">'
+       + (_ug ? '<button class="setb" style="border-color:#5f93a8;background:#141d21" onclick="urgeGo(\'watch\')">🌊 見たい</button>'
+       + '<button class="setb" style="border-color:#5f93a8;background:#141d21" onclick="urgeGo(\'eat\')">🌊 食べたい</button>' : '')
+       + (_bz ? '<button class="setb" style="border-color:#8fa86a;background:#181d14" onclick="breatherGo()">🍵 ひと息</button>' : '')
        /* v69（2026-10-21 ご指定「食事記録と予約の機能は、ひと息と同じ画面に出してください。
           中断した時にしかでないは使いづらい」）: 🍰 と 🍽️ を 🌊・🍵 と同じ並びに置く。
           ★ここは「いま来たとき」＝疲れて何か食べたくなった瞬間に最初に目に入る場所で、
@@ -4338,8 +4342,13 @@ function viewHome(){
             「ふだん目に入るか」を確かめていなかった（2度の配置ミス）。 */
        + mealCards()
        + '</div>';
-    if(_bz) h += '<p style="color:#8ea3b8;font-size:12px;line-height:1.75;margin:0 0 4px">'
-       + '🍵 は約7分。合図の音と声で進むので、イヤホンで。</p>';
+    /* v71: カードから外した説明は、ここに1行ずつまとめる（消していない）。 */
+    h += '<p style="color:#8ea3b8;font-size:12px;line-height:1.75;margin:0 0 4px">'
+       + (_ug ? '🌊 見たい＝YouTube・スマホをこのまま見続けたい／🌊 食べたい＝何か口に入れたい・キッチンへ行きたい。<br>' : '')
+       + (_bz ? '🍵 ひと息＝脳がつかれた・2回目が来た・再開する前に。<b>約7分</b>、合図の音と声で進むのでイヤホンで。<br>' : '')
+       + (mealUri(MEAL.cmdLog) ? '🍽️ 食事を記録＝Meal Log を開きます（まとめて翌朝でも大丈夫です）。' : '')
+       + (mealUri(MEAL.cmdBook) ? '<br>🍰 予約する＝食べる前に1つ選ぶ。器に出して、袋はしまう。種類は1つ。' : '')
+       + '</p>';
   }
   if(_ug){
     /* ★v49 と同じ轍を踏まないための1点：この2行は **class="note" を使っていない**。
@@ -7411,10 +7420,9 @@ function mealUri(cmd){
    中身は mealLinks() と同じ行き先で、出し分けの条件も同じ。 */
 function mealCards(){
   var a = mealUri(MEAL.cmdBook), b = mealUri(MEAL.cmdLog), h = "";
-  if(a) h += '<a class="setb" style="margin-bottom:0;border-color:#c4a06a;background:#211e18;display:block;text-decoration:none" href="'+a+'">🍰 ごほうびを予約する'
-          +  '<small>食べる前に1つ選ぶ。器に出して、袋はしまう。種類は1つ。</small></a>';
-  if(b) h += '<a class="setb" style="margin-bottom:0;border-color:#a08fb9;background:#1d1a21;display:block;text-decoration:none" href="'+b+'">🍽️ 食事を記録する'
-          +  '<small>Meal Log を開きます（まとめて翌朝でも大丈夫です）</small></a>';
+  /* v71: .emgrid の中に入るので1行だけ。説明はこの下の注記にまとめてある。 */
+  if(a) h += '<a class="setb" style="border-color:#c4a06a;background:#211e18" href="'+a+'">🍰 予約する</a>';
+  if(b) h += '<a class="setb" style="border-color:#a08fb9;background:#1d1a21" href="'+b+'">🍽️ 食事を記録</a>';
   return h;
 }
 function mealLinks(){
