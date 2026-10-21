@@ -842,6 +842,7 @@ var DB = { v:19, sets:null, chime:true, voice:true, third:true, noteOpen:false, 
   guide:false, guideSc:"ルーティンガイド",
   /* v44: 🌾 よはく／やることの差し込みリスト（Obsidianから取り込む） */
   blist:null, blAt:0, blScName:"よはくリスト",
+  musicOn:false, mig_reward67:false,   /* v67 */
   /* v50: 🌊 で最後に選んだ種別（"watch" | "eat"）。記録の内訳にだけ使う */
   urgeKind:"",
   /* ===== v56 (2026-10-05 ご依頼): ホームの「今週」を出さない =====
@@ -879,7 +880,10 @@ try{
     if(p.mig_br58===true) DB.mig_br58 = true;            /* v58 */   /* v57: 🍵（★無いと削除しても復活する） */
     if(p.mig_med60===true) DB.mig_med60 = true;
     if(p.mig_br62===true) DB.mig_br62 = true;
-    if(p.mig_mornbed64===true) DB.mig_mornbed64 = true;   /* v64（★無いと、消しても毎回戻る） */            /* v62: 🌬️ に「消音中でも鳴らす」を1回だけ入れた印（★無いと、オフにしても毎回オンに戻る） */          /* v60: 💊 を一度だけ差し込んだ印（★無いと、消しても毎回戻る） */
+    if(p.mig_mornbed64===true) DB.mig_mornbed64 = true;   /* v64（★無いと、消しても毎回戻る） */
+    /* v67: 🎵 いま音楽を聞いている（離席中の音を仕掛けない）。★無いと開き直すたびオフに戻る */
+    if(typeof p.musicOn==="boolean") DB.musicOn = p.musicOn;
+    if(p.mig_reward67===true) DB.mig_reward67 = true;   /* v67: 🍰 の1行を一度だけ差し込んだ印 */            /* v62: 🌬️ に「消音中でも鳴らす」を1回だけ入れた印（★無いと、オフにしても毎回オンに戻る） */          /* v60: 💊 を一度だけ差し込んだ印（★無いと、消しても毎回戻る） */
     /* v16: 就寝の見守り状態。アプリを閉じても経過時間が消えないよう、
        開始時刻そのものを保存し、毎回いまの時刻から計算し直す。 */
     if(typeof p.sleepActive==="boolean") DB.sleepActive = p.sleepActive;
@@ -1039,6 +1043,27 @@ if(!DB.mig_urge){
 }
 /* v57（2026-10-07）：🍵 ひと息。urge と同じ原則＝一度だけ差し込み、
    以後は編集済みの内容（削除・書き換え）を正として扱う。 */
+/* v67（2026-10-21 ご依頼 #9）: 🍰 ごほうび枠の1行を、ワンオペのセットへ一度だけ差し込む。
+   ★ご本人のセットは端末の保存領域にあり、コード側の既定（id:"oneope"）とは別物なので、
+     **名前に「ワンオペ」を含むセット**を探して入れる。
+   ★入れる位置は「髪乾かし」を含む項目の直後（見つからなければ末尾）。
+   ★実行中は触らない（添字で紐づく doneSet / stepAcc / stepExtra / runTimes / snStep が
+     そろってずれるため。v34・v38 で繰り返し書いた、いちばん壊れやすい箇所）。
+   ★一度だけ（mig_reward67）。消したものが開き直すたびに復活しないようにする（v50の教訓）。 */
+if(!DB.mig_reward67 && !curId){
+  DB.mig_reward67 = true;
+  var RW67 = "選んだごほうびを皿に出す（袋はしまう）";
+  (DB.sets||[]).forEach(function(s){
+    if(!s || !s.name || s.name.indexOf("ワンオペ") < 0) return;
+    if(!Array.isArray(s.steps)) return;
+    if(s.steps.some(function(x){ return String(x).indexOf(RW67) >= 0; })) return;   /* 既にあれば足さない */
+    var at = -1;
+    for(var i=0;i<s.steps.length;i++){ if(String(s.steps[i]).indexOf("髪乾かし") >= 0){ at = i; break; } }
+    var line = "60|" + RW67;
+    if(at >= 0) s.steps.splice(at+1, 0, line); else s.steps.push(line);
+  });
+  save();
+}
 if(!DB.mig_breather){
   DB.mig_breather = true;
   if(!DB.sets.some(function(s){return s.id==="breather";})){
@@ -1563,7 +1588,7 @@ function parkBtn(){
 
 /* --- 状態 --- */
 /* v27: 版の表示（ホーム最下部）。中身を変えたら、ここも必ず上げる。 */
-var APPVER = "切り替えルーティン v64 ・ 2026-10-16";
+var APPVER = "切り替えルーティン v67 ・ 2026-10-21";
 var view = "home";
 var curId = null;
 var startAt = 0;
@@ -1948,6 +1973,13 @@ function mediaAudio(on){
     if(navigator.audioSession) navigator.audioSession.type = on ? "playback" : "auto";
   }catch(e){}
 }
+function musicToggle(){
+  DB.musicOn = !DB.musicOn; save();
+  /* オンにした瞬間に、いま仕掛かっている離席中の音も止める
+     （止めないと、オンにしても鳴っている1本がSpotifyを押さえ続ける） */
+  if(DB.musicOn) awayClear(); else awayArm();
+  render();
+}
 function speak(text){
   if(!DB.voice) return;
   if(quietNow()) return;   /* v36: 音を出さないセットでは読み上げない */
@@ -2129,6 +2161,16 @@ function awayWav(sec){
    （鳴らしているあいだ Spotify の音が止まってしまうため）。 */
 function awaySoundOK(s){
   if(!DB.awaySound) return false;
+  /* v67（2026-10-21 ご依頼「アプリ画面に戻るとspotifyの再生が止まる件も対応して」）
+     ------------------------------------------------------------------
+     原因：離席中の音は `new Audio()` を実際に再生して仕掛ける。iOSはこれを
+     「このページが音を出し始めた」と見るため、**Spotifyが止まる**。
+     `loadRun()`（続きに戻った回）と項目が進むたびに `awayArm()` が走るので、
+     **アプリに戻った瞬間に止まる**という見え方になる。
+     既存の除外 `s.spotify` は**セットごとの指定**なので、音楽セットとして
+     登録していないセット（ワンオペ等）で音楽を聞いていると効かない。
+     → セットに依らない1つのスイッチを足した。オンのあいだは仕掛けない。 */
+  if(DB.musicOn) return false;
   if(!s || s.auto) return false;
   if(s.spotify) return false;
   return true;
@@ -3844,7 +3886,9 @@ function snBox(st){
          + '<b>⏸ 「'+esc(nm)+'」は あと '+mmss(snLeft())+' で戻ります。</b>'
          + 'いまはこの項目に集中してください。'
          + '<br><span class="note">⏰ 時間になったらiPhoneのタイマーが鳴ります。'
-         + '<a href="javascript:void(0)" onclick="snDrop()">後回しをやめる</a></span></div>';
+         + '<a href="javascript:void(0)" onclick="snDrop()">後回しをやめる</a></span>'
+         + mealLinks()   /* v66: 時計が止まっているここだけに出す */
+         + '</div>';
   }
   return '<div class="hint" style="border-color:#e0a86a;color:#f0d0a8">'
        + '<b>⏰ 「'+esc(nm)+'」に戻る時間です。</b>'
@@ -4020,6 +4064,7 @@ function render(){
   else if(view==="sxattach") h = viewSxAttach();
   else if(view==="scenes") h = viewScenes();
   else if(view==="words") h = viewWords();
+  else if(view==="misc") h = viewMisc();
   else if(view==="home") h = viewHome();
   else if(view==="run"){
     var _s = setOf(curId);
@@ -4162,6 +4207,43 @@ function countLabel(s){
   var p = cyclePeriod(st);
   return (p ? (st.length/p)+'サイクル' : st.length+'ステップ') + '・自動進行';
 }
+
+/* ===== v67（2026-10-21 ご依頼）: ⚙ そのほか =====
+   「いろんな機能が表示されて使いにくさを感じている」「固定で画面表示されている
+   ものを中心にピックアップして」。**セットは対象外**（アーカイブで畳めるため、
+   ご本人のご指示で触っていない）。ここへ移したのは**ホームに常に出ていた
+   10個のボタンだけ**で、**1つも消していない・機能も1行も変えていない。**
+   ホームに残したもの（ご選択）＝セット一覧／🌊×2／🍵／🎯 集中ブロック／🛌 就寝／
+   📤 記録を送る／セットを編集・追加・削除／🧘 ストレッチのプログラム。 */
+function viewMisc(){
+  var h = '<h1>⚙ そのほか</h1>';
+  h += '<p class="note">ホームに常に出していたものを、ここへまとめました。消していません。</p>';
+  h += '<div class="sec">受け皿・リスト</div>';
+  h += '<button class="setb" onclick="kidsGo()">🧸 子供と一緒のあいだに'
+     + '<small>自分のことに '+DB.focus.len.kids+'分 ・ 区切り： '+segLabel("kids")
+     + '<br>長くて15分・5分刻み。区切りが来たら、子供のほうへ戻る合図です。</small></button>';
+  h += '<button class="btn ghost" onclick="go(\'words\')">🗣 声かけの言い換え（見るだけ・5つ）</button>';
+  h += '<button class="btn ghost" onclick="go(\'joylib\')">🎉 楽しみリスト（'+(joyUsingBl()?'いまは 🌾 よはく を使っています':'🌗 で選ぶ候補')+'）</button>';   /* v40 / v45 */
+  h += '<button class="btn ghost" onclick="blGoView()">🌾 よはく／やることリスト（📋 で選ぶ候補）</button>';   /* v44 */
+  h += '<button class="btn ghost" onclick="go(\'scale\')">📏 満腹度のものさし（食後に見る）</button>';
+  h += '<div class="sec">夜</div>';
+  if(!DB.sleepActive){
+    var psl = setOf("presleep");
+    if(psl){
+      h += '<button class="btn ghost" onclick="sxAttachGo(\'presleep\')">🧘 寝る前のストレッチを入れ替える'
+         + (psl.sx?'（いま: '+esc(psl.sx.name)+'）':'')+'</button>';
+    }
+  }
+  h += '<div class="sec">記録・振り返り</div>';
+  h += '<button class="btn ghost" onclick="go(\'log\')">📖 これまでの記録</button>';
+  h += '<button class="btn ghost" onclick="revGo(null)">📊 ルーティンの振り返り（実績とメモ）</button>';
+  h += '<div class="sec">そのほか</div>';
+  h += '<button class="btn ghost" onclick="bkGo()">💾 バックアップ（書き出し・読み込み）</button>';
+  h += '<button class="btn link" onclick="go(\'about\')">このアプリが持たないもの</button>';
+  h += '<button class="btn ghost" onclick="go(\'home\')">ホームへ</button>';
+  return h;
+}
+
 function viewHome(){
   var h = '<h1>切り替えルーティン</h1>'
     + '<p class="sub">押した瞬間が合図です。タイマーの中でやり切れたら完了。<br>途中から始めても、飛ばしても構いません。</p>';
@@ -4189,6 +4271,7 @@ function viewHome(){
            + '<small>'+pd+' / '+pn+' 項目まで済み ・ そこまでの実施 '+durLabel(Math.max(0, r.elapsed||0))+'（'+hhmm(r.at)+' に中断）'
            + '<br>タップすると<b>続きから</b>再開します。離れていた時間は数えません。</small></button>';
         h += '<button class="btn link" style="padding:7px" onclick="parkFinish('+i+')">ここまでを記録して閉じる</button>';
+        h += mealLinks();   /* v66: 中断中＝時計が止まっているので、ここから離れても実績は汚れない */
       }
     });
   }
@@ -4309,11 +4392,7 @@ function viewHome(){
      + '<br>時間を区切って進めるためのタイマーです。仕事の日にも、休日にも。</small></button>';
   /* v23（問9のH）: 子供と一緒の枠。仕事の集中ブロックとは別の入口にしている。
      同じボタンの中に混ぜると、休日にも仕事の長さ（90〜120分）が最初に目に入るため。 */
-  h += '<button class="setb" onclick="kidsGo()">🧸 子供と一緒のあいだに'
-     + '<small>自分のことに '+DB.focus.len.kids+'分 ・ 区切り： '+segLabel("kids")
-     + '<br>長くて15分・5分刻み。区切りが来たら、子供のほうへ戻る合図です。</small></button>';
   /* v24: 声かけの言い換え（見るだけ）。イライラしたときのセットはホームの一覧側に出ている。 */
-  h += '<button class="btn ghost" onclick="go(\'words\')">🗣 声かけの言い換え（見るだけ・5つ）</button>';
   /* v25: 🧸 はホームの一覧から外した（実行中に押すもの）。
      ただし「どんな中身か1度見ておきたい」ときのために、小さな入口だけ残す。 */
   /* v58: 🧸 の試し通しはご依頼でホームから外した。 */
@@ -4325,14 +4404,17 @@ function viewHome(){
        + '<br>途中で起きたときは、見守り画面の「🌃 途中で起きてしまった」から。</small></button>';
     /* v27: 寝る前のストレッチを入れ替える入口を、就寝のすぐ下に置く。
        編集画面の奥まで探しに行かせない（9/5のタグの件と同じ轍を踏まない）。 */
-    var psl = setOf("presleep");
-    if(psl){
-      h += '<button class="btn ghost" onclick="sxAttachGo(\'presleep\')">🧘 寝る前のストレッチを入れ替える'
-         + (psl.sx?'（いま: '+esc(psl.sx.name)+'）':'')+'</button>';
-    }
   }
   /* v58: 「崩れてしまったとき」（🛟）はご依頼でホームから外した。セットは編集画面に残してある。 */
   h += '<div class="sec">設定</div>';
+  /* v67: 🎵 音楽を聞いている。離席中の音（new Audio）がSpotifyを止めるため、
+     セットに依らず1つのスイッチで止められるようにした。設定のいちばん上に置く。 */
+  h += '<div class="card"><div class="toggle"><b>🎵 いま音楽を聞いている</b>'
+     + '<button class="sw'+(DB.musicOn?' on':'')+'" onclick="musicToggle()"><i></i></button></div>'
+     + '<p class="note">オンのあいだは<b>離席中の音を仕掛けません</b>。'
+     + 'これを入れないと、続きに戻った回や項目が進むたびにアプリが音を出し始めるため、'
+     + '<b>Spotifyなどの再生が止まります</b>（iPhoneの仕様）。'
+     + '音楽を聞き終えたらオフに戻すと、離席中の音がまた鳴るようになります。</p></div>';
   /* v40: 説明文をたたむのをやめる口。いちばん上に置く（探させないため）。 */
   h += '<div class="card"><div class="toggle"><b>説明文をいつも開いておく</b>'
      + '<button class="sw'+(DB.noteOpen?' on':'')+'" onclick="DB.noteOpen=!DB.noteOpen;save();render()"><i></i></button></div>'
@@ -4396,21 +4478,15 @@ function viewHome(){
   h += '<div class="card"><label>ショートカットの名前（iPhone標準タイマーを起動するもの）</label>'
      + '<input class="inp" type="text" id="scn" value="'+esc(DB.scName)+'" onchange="DB.scName=this.value;save()">'
      + '<p class="note">作り方は <b>行動計画_2026-08-14 §10</b> にあります。未作成でも、このアプリ自体は使えます。</p></div>';
-  h += '<button class="btn ghost" onclick="go(\'joylib\')">🎉 楽しみリスト（'+(joyUsingBl()?'いまは 🌾 よはく を使っています':'🌗 で選ぶ候補')+'）</button>';   /* v40 / v45 */
-  h += '<button class="btn ghost" onclick="blGoView()">🌾 よはく／やることリスト（📋 で選ぶ候補）</button>';   /* v44 */
-  h += '<button class="btn ghost" onclick="go(\'scale\')">📏 満腹度のものさし（食後に見る）</button>';
-  h += '<button class="btn ghost" onclick="go(\'log\')">📖 これまでの記録</button>';
   /* v33（2026-09-07）: 実施記録をObsidianへ送る「記録ハブ」への導線。
      送る仕組み自体はこのファイルには入れていない（log.html にある）。
      理由: ①このファイルは既に310KBあり、同じ処理をgym側にも複製すると
      直す場所が2か所に割れる ②ハブは routine と gym の両方の記録を
      同じドメインの保存領域から読めるので、送り口は1つで足りる。 */
   h += '<button class="btn ghost" onclick="location.href=\'log.html\'">📤 記録を送る（記録ハブ）</button>';
-  h += '<button class="btn ghost" onclick="revGo(null)">📊 ルーティンの振り返り（実績とメモ）</button>';
   h += '<button class="btn ghost" onclick="go(\'edit\')">セットを編集・追加・削除</button>';
   h += '<button class="btn ghost" onclick="sxLibGo()">🧘 ストレッチのプログラム（登録・AIに渡す書式）</button>';
-  h += '<button class="btn ghost" onclick="bkGo()">💾 バックアップ（書き出し・読み込み）</button>';
-  h += '<button class="btn link" onclick="go(\'about\')">このアプリが持たないもの</button>';
+  h += '<button class="btn ghost" onclick="go(\'misc\')">⚙ そのほか（楽しみリスト・記録・振り返り・バックアップ ほか）</button>';   /* v67 */
   /* v27（2026-09-05）: 版の表示。
      「直したはずなのに変わって見えない」を、開いて1秒で確かめられるようにする。
      このファイルは自動では更新されないので、**いま開いているのが新しいものかどうか**を
@@ -7237,10 +7313,74 @@ if(DB.sleepActive){ view = "sleepWatch"; sleepTickStart(); }
          （見出しに絵文字が入っているため、照合に失敗する可能性がある）
        どれが効いたかを切り分けられるよう、設定の中に「テスト送信」を置いた。 */
 
+/* ===== v66（2026-10-21 ご依頼）: 🍰 ごほうび枠の記録への行き先 =====
+   Manamiさん：「予約を押すことになりそうな時間帯は routine.html を起動している
+   夕方から夜が多い」「予約するの他に、meal log の実行自体にも流れる動線を」。
+
+   ★置き場所を「実行中の画面」にしていない理由（既存のルールを守る）
+     FB送信の注意書き3「実行中（タイマーが動いている画面）は送信の導線を出さない
+     ——Obsidianを開くと前面のアプリが切り替わるため」と同じ理由。
+     代わりに **時計が止まっている2か所** にだけ出す：
+       (a) ⏸ 呼ばれた（あずけ中）の帯の中  (b) ホームの「⏸ 中断中」カードの直下
+     どちらも離れていた時間を項目に数えない状態なので、離れても実績が汚れない。
+
+   ★コマンドIDは設定で変えられるようにしてある
+     `.obsidian` がこちら（Cowork）の接続範囲外で、Templater のホットキーに
+     Template_Meal_log.md が登録されているかを確認できなかったため。
+     既定で無反応なら、設定から正しいコマンドIDに直せる。 */
+var MEALKEY = "bmc_meal_links_v1";
+var MEAL = { cmdLog:"templater-obsidian:00_System/Templates/Template_Meal_log.md", cmdBook:"" };
+try{
+  var _mo = JSON.parse(localStorage.getItem(MEALKEY));
+  if(_mo && typeof _mo==="object"){
+    if(typeof _mo.cmdLog==="string") MEAL.cmdLog = _mo.cmdLog;
+    if(typeof _mo.cmdBook==="string") MEAL.cmdBook = _mo.cmdBook;
+  }
+}catch(e){}
+function mealSave(){ try{ localStorage.setItem(MEALKEY, JSON.stringify(MEAL)); }catch(e){} }
+function mealUri(cmd){
+  if(!cmd) return "";
+  var u = "obsidian://advanced-uri?";
+  if(FB.vault) u += "vault="+encodeURIComponent(FB.vault)+"&";
+  return u + "commandid="+encodeURIComponent(cmd);
+}
+/* 時計が止まっている場所にだけ出す2リンク。
+   予約用のコマンドIDが未設定のときは、食事記録の1本だけ出す
+   （Obsidian運用管理が 🍰 予約の入口を作ったら、設定に入れて2本になる）。 */
+function mealLinks(){
+  var a = mealUri(MEAL.cmdBook), b = mealUri(MEAL.cmdLog);
+  if(!a && !b) return "";
+  var h = '<div class="row" style="margin-top:8px">';
+  if(a) h += '<a class="btn ghost" style="margin-top:0;text-align:center;text-decoration:none" href="'+a+'">🍰 予約する</a>';
+  if(b) h += '<a class="btn ghost" style="margin-top:0;text-align:center;text-decoration:none" href="'+b+'">🍽️ 食事を記録する</a>';
+  h += '</div>';
+  if(!a) h += '<div class="note">🍰 予約の入口はまだ用意されていません（Obsidian運用管理が作り次第、設定でコマンドIDを入れると出ます）。</div>';
+  return h;
+}
+
 var FBKEY = "bmc_fb_routine_v1";
 var FBAPP = "routineアプリ";
 var FBCATS = ["押しにくい","文字が読みにくい","表示が分かりにくい","音・振動","動きがおかしい","こうしたい"];
-var FB = { items:[], vault:"My Valut", file:"10_Action/Quick Memo.md", heading:"🗂️ プロジェクトメモ", useHead:true, mode:"prepend" };
+/* ★2026-10-20: 届け先を「その日の日次ノートの ## 🤖 AIへ」に変えた。
+   きっかけ: 指示_2026-10-19_アプリの改善メモの届け先を日次ノートの🤖AIへに変える
+   （提案_2026-10-15 Q2 へのご回答「ア」、2026-10-19）。
+
+   ★設計の要点（変えるときは理由も一緒に残してください）
+   1. FB.file は既定で空＝自動。送るそのとき FBDIR/<YY-MM-DD(曜)>.md を組み立てる。
+      設定の欄に手で入れたときだけ、その値を使う（逃げ道を消さない）。
+   2. 0時〜3時台に押したものは、前日のノートへ入れる。
+      日次ノートは毎日3:52の巡回が5つの節つきで作る。それより前に送ると
+      advanced-uri が「節のないノート」を先に作ってしまい、朝の Daily Start は
+      冕等（すでにあれば本文を触らない）なので、そのまま1日残る。その窓をふさぐ線引き。
+   3. mode は append（節の末尾に追記＝時刻の順に並ぶ）。
+      見出しは1件ごとに ##### YY-MM-DD HH:MM（見回り・日次巡回が1件として数える形）。
+   4. 1回の送信で届けられるファイルは1つなので、入れる先のノートごとにボタンを分けている。
+      夜中に押したものと昼に押したものが混ざっても、別のノートへ入る。
+   5. 書き出す行の形（時刻／画面／種類／一言）は変えていない。記録ハブ（Timer_log・
+      Points Tracker）へ送る行には1バイトも触っていない（claude.md §1-1）。 */
+var FBDIR = "20_Projects/Private/B.M.C";
+var FBWD  = ["日","月","火","水","木","金","土"];
+var FB = { items:[], vault:"My Valut", file:"", heading:"🤖 AIへ", useHead:true, mode:"append", fbv:2 };
 var fbMemo = "", fbCfg = false, fbStep = 1, fbLast = -1, fbNote = "";
 
 function fbLoad(){
@@ -7249,10 +7389,19 @@ function fbLoad(){
     if(o && typeof o==="object"){
       if(Array.isArray(o.items)) FB.items = o.items;
       if(typeof o.vault==="string") FB.vault = o.vault;
-      if(typeof o.file==="string" && o.file) FB.file = o.file;
-      if(typeof o.heading==="string") FB.heading = o.heading;
+      /* 2026-10-20: 旧版の送信先（Quick Memo の 🗂️ プロジェクトメモ）が
+         この端末に保存されている。そのまま読み戻すと、変えた届け先が元に戻るので、
+         旧版の値だと分かるときだけ 1回限りで既定へ寄せ直す（fbv で繰り返さない）。
+         ご自分で別の送信先を入れていた場合は、そのまま残す。 */
+      var fbOld = !(o.fbv >= 2);
+      if(typeof o.file==="string" && o.file){
+        if(!(fbOld && o.file.indexOf("Quick Memo") >= 0)) FB.file = o.file;
+      }
+      if(typeof o.heading==="string" && o.heading){
+        if(!(fbOld && o.heading.indexOf("プロジェクトメモ") >= 0)) FB.heading = o.heading;
+      }
       if(typeof o.useHead==="boolean") FB.useHead = o.useHead;
-      if(o.mode==="prepend"||o.mode==="append") FB.mode = o.mode;
+      if(o.mode==="prepend"||o.mode==="append"){ if(!fbOld) FB.mode = o.mode; }
     }
   }catch(e){}
 }
@@ -7302,6 +7451,10 @@ function fbGrabCfg(){
   var v = document.getElementById("fb_vault"); if(v) FB.vault = v.value.trim();
   var f = document.getElementById("fb_file");  if(f) FB.file  = f.value.trim();
   var g = document.getElementById("fb_head");  if(g) FB.heading = g.value.trim();
+  /* v66: 🍰 の行き先も同じタイミングで写して保存する */
+  var a = document.getElementById("ml_log");  if(a) MEAL.cmdLog  = a.value.trim();
+  var b = document.getElementById("ml_book"); if(b) MEAL.cmdBook = b.value.trim();
+  if(a || b) mealSave();
 }
 function fbToast(msg){
   var t = document.getElementById("fbToast"); if(!t) return;
@@ -7328,19 +7481,48 @@ function fbDropLast(){
   if(fbLast>=0 && FB.items[fbLast]){ FB.items.splice(fbLast,1); fbLast=-1; fbSave(); }
   fbStep = 3; fbNote = "取り消しました。"; fbRender();
 }
+/* 0時〜3時台に押したものは、前日のノートへ入れる（上の★ 2 参照）。 */
+function fbNoteDate(t){
+  var d = new Date(t);
+  if(d.getHours() < 4) d.setDate(d.getDate()-1);
+  return d;
+}
+function fbNoteName(t){ var d = fbNoteDate(t); return fbYmd(d)+"("+FBWD[d.getDay()]+")"; }
+/* 手で送信先を入れてあればそれを使う。空なら日次ノートを自動で決める。 */
+function fbNotePath(t){ return FB.file ? FB.file : FBDIR+"/"+fbNoteName(t)+".md"; }
+
+/* 入れる先のノートごとに分ける（上の★ 4 参照）。 */
+function fbGroups(list){
+  var map = {}, order = [];
+  list.forEach(function(x){
+    var k = FB.file ? FB.file : fbNoteName(x.t);
+    if(!map[k]){ map[k] = []; order.push(k); }
+    map[k].push(x);
+  });
+  return order.map(function(k){
+    return { key:k, path:(FB.file ? FB.file : FBDIR+"/"+k+".md"), items:map[k] };
+  });
+}
+/* 負けたときの貼る先を、画面とトーストの両方で同じ言い方にするための1つの出所。 */
+function fbCopyWhere(){
+  var g = fbGroups(fbUnsent());
+  if(!g.length) return "その日の日次ノート";
+  return g.map(function(z){ return z.key; }).join("・");
+}
+
 function fbText(list){
-  var d = new Date();
-  var s = "##### "+fbYmd(d)+" - "+FBAPP+"で気になったこと\n";
+  var s = "";
   list.forEach(function(x){
     var dt = new Date(x.t);
-    s += "- "+fbHm(dt)+" ／ "+x.ctx+" ／ "+x.cat+(x.memo?" ／ "+x.memo:"")+"\n";
+    s += "##### "+fbYmd(dt)+" "+fbHm(dt)+"\n"
+      +  "- "+FBAPP+" ／ "+fbHm(dt)+" ／ "+x.ctx+" ／ "+x.cat+(x.memo?" ／ "+x.memo:"")+"\n";
   });
   return s;
 }
-function fbUri(text){
+function fbUri(text, path){
   var u = "obsidian://advanced-uri?";
   if(FB.vault) u += "vault="+encodeURIComponent(FB.vault)+"&";
-  u += "filepath="+encodeURIComponent(FB.file);
+  u += "filepath="+encodeURIComponent(path || fbNotePath(Date.now()));
   if(FB.useHead && FB.heading) u += "&heading="+encodeURIComponent(FB.heading);
   u += "&mode="+FB.mode+"&data="+encodeURIComponent(text);
   return u;
@@ -7349,6 +7531,13 @@ function fbUri(text){
    画面は作り直さない（作り直すと、開こうとしているリンクが消えてしまう）。 */
 function fbMarkSent(){
   FB.items.forEach(function(x){ x.sent = true; });
+  fbSave();
+  return true;
+}
+/* 送ったかたまりの分だけ印を付ける（別のノート宛てのものを消さないため）。 */
+function fbMarkSentG(i){
+  var g = fbGroups(fbUnsent());
+  if(g[i]) g[i].items.forEach(function(x){ x.sent = true; });
   fbSave();
   return true;
 }
@@ -7362,7 +7551,7 @@ function fbCopy(){
   var t = document.getElementById("fb_out"); if(!t) return;
   var ok = false;
   try{ t.focus(); t.select(); t.setSelectionRange(0,999999); ok = document.execCommand("copy"); }catch(e){}
-  var yes = "コピーしました。Quick Memoの「🗂️ プロジェクトメモ」に貼ってください。";
+  var yes = "コピーしました。"+fbCopyWhere()+"の「"+FB.heading+"」に貼ってください。";
   var no  = "コピーできませんでした。上の枠を長押し →「すべてを選択」→「コピー」でも同じことができます。";
   if(!ok && navigator.clipboard && navigator.clipboard.writeText){
     navigator.clipboard.writeText(t.value).then(
@@ -7385,10 +7574,17 @@ function fbSendBlock(){
     return '<p class="note">いまは実行中なので送りません。前面のアプリが切り替わって、'
          + 'タイマーが止まってしまうためです。<b>終わってから、またはホームに戻ってから</b>送ってください。</p>';
   }
-  return '<a class="fbsend" href="'+fbEsc(fbUri(fbText(un)))+'" onclick="return fbMarkSent()">'
-       + 'Obsidianへ送る（'+un.length+'件）</a>'
-       + '<p class="note">Obsidianが開いて、Quick Memoの「'+fbEsc(FB.heading)+'」に入ります。'
-       + '<b>開かない・入らないときは、下の「コピーする」で貼ってください。</b></p>';
+  var g = fbGroups(un), s = '';
+  g.forEach(function(z,i){
+    s += '<a class="fbsend" href="'+fbEsc(fbUri(fbText(z.items), z.path))+'" '
+      +  'onclick="return fbMarkSentG('+i+')">'
+      +  'Obsidianへ送る（'+fbEsc(z.key)+'・'+z.items.length+'件）</a>';
+  });
+  s += '<p class="note">Obsidianが開いて、<b>'+fbEsc(fbCopyWhere())+'</b>の「'
+    +  fbEsc(FB.heading)+'」に入ります。'
+    +  (g.length>1?'<br>入れる先のノートが分かれているので、<b>上から順に押してください。</b>':'')
+    +  '<br><b>開かない・入らないときは、下の「コピーする」で貼ってください。</b></p>';
+  return s;
 }
 
 function fbRender(){
@@ -7439,15 +7635,26 @@ function fbRender(){
     h += fbSendBlock();
     h += '<div class="sec">手で貼る（送信がうまくいかないとき）</div>'
        + '<div class="card"><textarea id="fb_out" class="fbta" readonly onclick="this.select()">'
-       + fbEsc(fbText(un.length?un:FB.items.slice(-10)))+'</textarea></div>'
+       + fbEsc(fbText(un.length?un:FB.items.slice(-10)))+'</textarea>'
+       + '<p class="note" style="margin-top:9px">貼る先：<b>'+fbEsc(fbCopyWhere())
+       + '</b>の「'+fbEsc(FB.heading)+'」</p></div>'
        + '<button class="btn ghost" onclick="fbCopy()">コピーする</button>';
     h += '<button class="btn link" onclick="fbCfgGo()">送信先の設定'+(fbCfg?'を閉じる':'')+'</button>';
     if(fbCfg){
       h += '<div class="card">'
          + '<label>Vault名</label>'
          + '<input class="fbinp" id="fb_vault" type="text" value="'+fbEsc(FB.vault)+'">'
+         + '<label style="display:block;margin-top:10px">🍽️ 食事記録のコマンドID</label>'
+         + '<input class="fbinp" id="ml_log" type="text" placeholder="templater-obsidian:00_System/Templates/Template_Meal_log.md" value="'+fbEsc(MEAL.cmdLog)+'">'
+         + '<label style="display:block;margin-top:10px">🍰 予約のコマンドID</label>'
+         + '<input class="fbinp" id="ml_book" type="text" placeholder="空のまま＝🍰のリンクを出さない" value="'+fbEsc(MEAL.cmdBook)+'">'
+         + '<p class="note">⏸ 呼ばれた中・⏸ 中断中（＝時計が止まっているところ）だけに出るリンクの行き先です。'
+         + '空にするとそのリンクは出ません。押しても何も起きないときは、ObsidianのTemplaterで'
+         + 'そのテンプレートがホットキーに登録されているか確かめてください。</p>'
          + '<label style="display:block;margin-top:10px">書き込むファイル</label>'
-         + '<input class="fbinp" id="fb_file" type="text" value="'+fbEsc(FB.file)+'">'
+         + '<input class="fbinp" id="fb_file" type="text" placeholder="空のまま＝その日の日次ノート" value="'+fbEsc(FB.file)+'">'
+         + '<p class="note">空のままにしておくと、送るそのときの日次ノート（いまなら '
+         + fbEsc(fbNotePath(Date.now()))+'）を自動で決めます。</p>'
          + '<label style="display:block;margin-top:10px">見出し</label>'
          + '<input class="fbinp" id="fb_head" type="text" value="'+fbEsc(FB.heading)+'">'
          + '<button class="btn ghost" onclick="fbHeadGo()">'
