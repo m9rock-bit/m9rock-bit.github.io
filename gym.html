@@ -354,7 +354,7 @@ const CARDIO_DEF={
 const RATES=["かるすぎる","ちょうどよい","きつすぎる"];
 /* v9（2026-09-05）: 版の表示（ホーム最下部）。開いて1秒で新旧を見分けるため。
    中身を変えたら、ここも必ず上げる。 */
-const APPVER="B.M.C. ジム v22 ・ 2026-10-08";
+const APPVER="B.M.C. ジム v24 ・ 2026-10-20";
 const NORM=30;                    /* グラフの換算基準（30分あたり） */
 const HARDS=["余裕","ちょうどよい","きつい"];
 
@@ -448,6 +448,19 @@ if(!ENVS.some(function(x){return x.id===DB.settings.env})) DB.settings.env="gym"
 if(!DB.settings.alt || typeof DB.settings.alt!=="object") DB.settings.alt={};
 /* v5: バンドの言葉。**並び順が弱い→強い**を表す（この配列そのものが強さの順序）。 */
 if(!Array.isArray(DB.settings.bands) || !DB.settings.bands.length) DB.settings.bands=BANDS_DEF.slice();
+/* ---------- v23（2026-10-12・指示_2026-10-11_4 段階2）----------
+   A・B・C 以外の、ご本人が取り込んだプログラムの入れ物。有酸素の progs と同じ考え方。
+   形: [{id:"u_…", name, note, items:[{id:"u_…", name, load, band, w, reps, cap, step, unit, memo}]}]
+   ★A/B/C（PROGRAM・ALT・DB.settings.alt）と過去の記録には1バイトも触らない。
+   ★種目を u_… という**種目idで持つ**ので、前回値（lastOf）・重さアップの案内
+     （progressReady）・セット数（DB.settings.sets）は、どれも id で引いている既存の
+     仕組みがそのまま効く。新しい判定ロジックを作っていない。
+   無いときだけ空配列を置く＝冪等。古い控えを貼り戻しても壊れない。 */
+if(!Array.isArray(DB.settings.gymProgs)) DB.settings.gymProgs=[];
+/* v23: 一覧から外したプログラム・種目の**名前だけ**の控え（id→名前）。
+   記録（DB.sessions）は外しても消さないので、外したあとも記録の一覧に
+   「u_xxx」ではなく当時の名前が出るようにするためのもの。重さ・回数は持たない。 */
+if(!DB.settings.gymGone || typeof DB.settings.gymGone!=="object") DB.settings.gymGone={};
 /* v7: 有酸素。既存データには無いので、無いときだけ既定を置く（冪等・過去は触らない） */
 if(!Array.isArray(DB.cardio)) DB.cardio=[];
 if(!DB.settings.cardio || typeof DB.settings.cardio!=="object") DB.settings.cardio={};
@@ -501,7 +514,37 @@ function save(){
 }
 
 /* ---------- ユーティリティ ---------- */
-function ex(id){ return PROGRAM.filter(function(e){return e.id===id})[0]; }
+/* v23: 取り込んだプログラム（u_…）の種目も引けるようにした。
+   **PROGRAM に入っている9種目の戻り値は一切変えていない**（先に PROGRAM を見て、
+   見つからなかったときだけ gymProgs を探す）。 */
+function uProgs(){ return Array.isArray(DB.settings.gymProgs) ? DB.settings.gymProgs : []; }
+function uProg(pid){ return uProgs().filter(function(g){return g.id===pid})[0] || null; }
+function isUP(r){ return /^u_/.test(String(r==null?"":r)); }
+function uNewId(){ return "u_"+Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
+function uEx(id){
+  var hit=null;
+  uProgs().forEach(function(g){
+    (g.items||[]).forEach(function(it){ if(it && it.id===id && !hit) hit=Object.assign({}, it, {r:g.id}); });
+  });
+  if(hit) return hit;
+  /* 一覧から外したあとの種目。名前だけ控えから返す（記録の一覧を読めるようにするため）。
+     目安の数字は持たないので、過去の記録の表示（fmtSet）にしか使われない。 */
+  var nm=DB.settings.gymGone && DB.settings.gymGone[id];
+  if(nm) return {id:id, name:nm, r:"", w:0, reps:0, cap:0, step:0, unit:"kg", gone:true};
+  return null;
+}
+function ex(id){
+  var hit=PROGRAM.filter(function(p){return p.id===id})[0];
+  return hit ? hit : uEx(id);
+}
+/* 画面に出す名前。A/B/C はそのまま「A」。取り込んだプログラムはその名前。 */
+function routineLabel(r){
+  if(!isUP(r)) return String(r==null?"":r);
+  var g=uProg(r);
+  if(g) return g.name||"（名前なし）";
+  var nm=DB.settings.gymGone && DB.settings.gymGone[r];
+  return nm ? nm+"（一覧から外した分）" : "（消えたプログラム）";
+}
 /* v3: この種目の目標セット数。設定が無ければ既定の3。 */
 function setsOf(id){
   const n=DB.settings.sets[id];
@@ -512,7 +555,11 @@ function bumpSets(id,d){
   if(v===SETS_DEF) delete DB.settings.sets[id]; else DB.settings.sets[id]=v;
   save(); render();
 }
-function exOf(r){ return PROGRAM.filter(function(e){return e.r===r}); }
+function exOf(r){
+  /* v23: A/B/C は従来どおり PROGRAM から引く。取り込んだプログラム（u_…）はその中身を返す。 */
+  if(isUP(r)){ var g=uProg(r); return (g && Array.isArray(g.items)) ? g.items.slice() : []; }
+  return PROGRAM.filter(function(e){return e.r===r});
+}
 function ymd(ms){ const d=new Date(ms); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
 function mdw(ms){ const d=new Date(ms),w="日月火水木金土"[d.getDay()]; return (d.getMonth()+1)+"/"+d.getDate()+"("+w+")"; }
 /* v5: 負荷の表示。kg / 自重 / バンド の3種に対応。
@@ -541,10 +588,14 @@ function done(){ return DB.sessions.filter(function(s){return s.sets && s.sets.l
    ※「◯日空いた」といった催促は出さない。 */
 function suggestRoutine(){
   const d=done();
-  if(!d.length) return "A";
-  const last=d[d.length-1].routine;
-  const i=ROUTINES.indexOf(last);
-  return ROUTINES[(i+1)%ROUTINES.length];
+  /* v23: 取り込んだプログラム（u_…）の回は、A→B→C の順番の勘定に入れない。
+     別メニューを1回挟んだだけで A/B/C の回り方が崩れると、
+     「今日おすすめ」が毎回Aに戻ってしまうため（改訂前は indexOf が −1 になってAへ落ちていた）。 */
+  for(let i=d.length-1;i>=0;i--){
+    const k=ROUTINES.indexOf(d[i].routine);
+    if(k>=0) return ROUTINES[(k+1)%ROUTINES.length];
+  }
+  return "A";
 }
 
 /* --- 機能3: 前回の重量・回数 ---
@@ -2361,7 +2412,8 @@ function isTyping(){ return !!cPad || view==="backup" || view==="edlist" || view
     || view==="cin" || view==="cplan" || view==="cimp" || view==="ctext" || view==="cspec"
     /* v22（2026-10-08）: ★入力欄・貼り付け欄を置く画面を足したら、必ずこの一覧にも足すこと。
        routine.html では同じ踏み方を4回していて、貼った文字が250msの描き直しで消える。 */
-    || view==="gimp" || view==="gimpc" || view==="gtext" || view==="gspec" || view==="impmenu"; }
+    || view==="gimp" || view==="gimpc" || view==="gtext" || view==="gspec" || view==="impmenu"
+    || view==="uprog"; }   /* v23: 名前の入力欄があるため */
 
 /* ===== バックアップ（書き出し・読み込み）　2026-08-15追加 =====================
    記録はこの端末のブラウザの中だけにあります。ここのテキストを控えておけば、
@@ -2535,6 +2587,17 @@ const GFMT_SAMPLE=[
 "rdl | ダンベルルーマニアンデッドリフト | 8kg | 12 | 15 | 1 | 股関節を折りたたむように下ろす",
 "bic | バイシクルクランチ | 自重 | 15 | 20 | 0 |"
 ].join("\n");
+/* v23: 新しいプログラムとして取り込むときの例（左端は枠ではなく種目名・6列） */
+const GFMT_SAMPLE2=[
+"#BMC-GYM v1",
+"ルーティン名: 背中と肩（ジム・木曜）",
+"---",
+"シーテッドロウ | 30kg | 12 | 15 | 2.5 | 肩を下げたまま、肘を後ろへ",
+"ショルダープレス（マシン） | 15kg | 10 | 14 | 2.5 | 腰を反らさない",
+"リアデルトフライ | 12kg | 12 | 16 | 2.5 |",
+"フェイスプル | バンド Medium | 15 | 20 | 0 | 肘を顔の高さで引く",
+"プランク | 自重 | 30 | 60 | 0 | 回数は秒で入れてください"
+].join("\n");
 function gFmtSpec(){
   return [
 "【B.M.C. 筋トレ 取り込みフォーマット v1】",
@@ -2561,7 +2624,29 @@ PROGRAM.map(function(e){ return "    "+e.id+"  … ルーティン"+e.r+" ／ "+
 "  ・書かなかった枠は、いまの内容がそのまま残ります（消えません）。",
 "  ・**過去の記録は何をしても変わりません。**",
 "",
-"■ 例",
+"",
+"─────────────────────────────",
+"【A・B・C 以外のプログラムとして取り込むとき（v23・2026-10-12）】",
+"",
+"いちばん上に次の1行を入れてください。これがあると**新しいプログラムが1本増えます**",
+"（A・B・Cの9つの枠・セット数・過去の記録は、まったく変わりません）。",
+"",
+"  ルーティン名: 背中と肩（ジム・木曜）",
+"",
+"■ このときの行の形（| で区切る。6列。メモは省略できます）",
+"  種目名 | 負荷 | 目安回数 | 上限回数 | 刻み | メモ",
+"",
+"  ・**枠の記号（tri・bul…）は書きません。**種目は何種目でも、好きな名前で構いません。",
+"  ・負荷の書き方は上と同じ（12kg / 自重 / バンドの呼び名）。",
+"  ・刻みを空にすると、重さのある種目は 2.5 として扱います（あとから直せます）。",
+"  ・**同じ「ルーティン名:」で貼り直すと、そのプログラムの中身が入れ替わります**",
+"    （本数は増えません）。同じ種目名は前回の重さ・回数を引き継ぎます。",
+"",
+"■ 例（新しいプログラム）",
+GFMT_SAMPLE2,
+"",
+"─────────────────────────────",
+"■ 例（A・B・Cの9つの枠の中身を入れ替えるとき）",
 GFMT_SAMPLE
   ].join("\n");
 }
@@ -2612,14 +2697,51 @@ function gSlot(tok){
 function parseGImport(text){
   var lines=String(text||"").replace(/\r/g,"").split("\n");
   var env="", items={}, errs=[], started=false;
+  /* v23（段階2）: 「ルーティン名:」があれば**新しいプログラムとして取り込む**。
+     無ければ従来どおり（A/B/Cの9枠の中身の入れ替え）＝**今までの貼り付けの動きは変わらない。**
+     行の順番に関係なく拾えるよう、ここで1度だけ全体を見ている。 */
+  var pname="", plist=[];
+  lines.forEach(function(raw){
+    var m=/^[ \u3000\t]*(?:ルーティン名|プログラム名|メニュー名)[ \u3000\t]*[:：](.*)$/.exec(raw);
+    if(m && !pname) pname=m[1].replace(/^[ \u3000\t]+|[ \u3000\t]+$/g,"");
+  });
+  function gLoadTxt(loadTxt){
+    var ld="kg", band="", w=0;
+    if(/^自重|^bw$|^体重のみ/.test(loadTxt)){ ld="bw"; w=0; }
+    else if(bands().some(function(b){ return b && loadTxt && b.toLowerCase()===loadTxt.toLowerCase(); })){
+      ld="band"; band=bands().filter(function(b){ return b.toLowerCase()===loadTxt.toLowerCase(); })[0]; w=0;
+    }
+    else if(/^バンド/.test(loadTxt)){ ld="band"; band=loadTxt.replace(/^バンド\s*/,"")||bands()[0]||""; w=0; }
+    else { var v=gNum(loadTxt); if(v===null){ ld="bw"; w=0; } else { ld="kg"; w=v; } }
+    return {load:ld, band:band, w:w};
+  }
   lines.forEach(function(raw){
     var line=raw.replace(/^[ 　\t]+|[ 　\t]+$/g,"");
     if(!line) return;
     if(/^```/.test(line) || /^#BMC-GYM/i.test(line)) return;
     if(/^(場所|環境)\s*[:：]/.test(line)){ env=gEnvFromLabel(line.split(/[:：]/).slice(1).join(":")); return; }
+    if(/^(ルーティン名|プログラム名|メニュー名)\s*[:：]/.test(line)) return;   /* v23: 上の先読みで拾い済み */
     if(/^-{3,}$/.test(line)){ started=true; return; }
     if(!/\|/.test(line)){ if(started) errs.push(line); return; }
     var c=line.split("|").map(function(x){return x.replace(/^[ 　\t]+|[ 　\t]+$/g,"");});
+    if(pname){
+      /* v23: 新しいプログラムの行。左端は**枠ではなく種目名**（枠は増やすのではなく、
+         このプログラムの中に自前の種目を持つ）。AIが9枠の形（7列・左端が枠の記号）で
+         書いてきたときだけ、左端を1つ落として読む。 */
+      var cc=c.slice();
+      if(cc.length>=7 && gSlot(cc[0]) && cc[1]) cc=cc.slice(1);
+      var nm2=cc[0]||"";
+      if(!nm2){ errs.push(line); return; }
+      var L2=gLoadTxt(cc[1]||"");
+      var r2=gNum(cc[2]), p2=gNum(cc[3]), s2=gNum(cc[4]);
+      plist.push({ id:uNewId(), name:nm2, load:L2.load, band:L2.band, w:L2.w,
+        reps:(r2===null?10:Math.max(1,Math.round(r2))),
+        cap:(p2===null?15:Math.max(1,Math.round(p2))),
+        step:(s2===null?(L2.load==="kg"?2.5:0):Math.max(0,s2)),
+        unit:unitOf(L2.load),
+        memo:(cc.length>=6 ? cc.slice(5).join(" | ") : "") });
+      return;
+    }
     var id=gSlot(c[0]);
     if(!id){ errs.push(line); return; }
     var nm=c[1]||"", loadTxt=c[2]||"", band="", ld="kg", w=0;
@@ -2639,7 +2761,7 @@ function parseGImport(text){
   });
   var list=[];
   ROUTINES.forEach(function(r){ exOf(r).forEach(function(e0){ if(items[e0.id]) list.push(items[e0.id]); }); });
-  return { env:env, items:list, errs:errs };
+  return { env:env, pname:pname, items:list, prog:plist, errs:errs };
 }
 function gImpCheck(){
   var e=document.getElementById("gimp_t");
@@ -2676,8 +2798,12 @@ function viewGImp(){
   return `
   <h1>テキストから取り込む（筋トレ）</h1>
   <p class="sub">AIに書いてもらった種目を、テキストのまま貼り付けて取り込みます。
-  はじめに下の「AIに渡すフォーマット」をコピーしてAIに見せてください。<br>
-  <strong>いまある9つの枠（ルーティンA・B・C）の中身が入れ替わるだけです。</strong>枠の数・過去の記録・セット数は変わりません。</p>
+  はじめに下の「AIに渡すフォーマット」をコピーしてAIに見せてください。</p>
+  <div class="card">
+    <div class="sec" style="margin:0 0 6px">貼り付けたテキストで、取り込み方が決まります</div>
+    <p class="note"><strong>① <code>ルーティン名: ○○</code> の行がある</strong> → <strong>A・B・C 以外のプログラムが1本増えます</strong>（v23から）。場所の選びは関係ありません。A・B・Cと過去の記録はそのままです。<br>
+    <strong>② その行が無い</strong> → 従来どおり、<strong>いまある9つの枠（A・B・C）の中身が入れ替わります</strong>（下で選んだ場所のぶんだけ）。枠の数・過去の記録・セット数は変わりません。</p>
+  </div>
   <div class="card">
     <div class="sec" style="margin:0 0 6px">どの場所の種目として取り込みますか</div>
     <div class="row">
@@ -2694,9 +2820,72 @@ function viewGImp(){
   <button class="btn" onclick="gImpCheck()">内容を確認する</button>
   <button class="btn link" onclick="go('home')">戻る</button>`;
 }
+/* v23（段階2）: 取り込んだプログラム1本を `#BMC-GYM v1` のテキストにする
+   （AIに渡して直してもらう元。読むだけなので何も書き換えない）。 */
+function gToTextProg(g){
+  var L=["#BMC-GYM v1","ルーティン名: "+(g.name||"")];
+  L.push("---");
+  (g.items||[]).forEach(function(it){
+    var ld=loadOf(it);
+    var load=(ld==="bw")?"自重":(ld==="band"?(it.band||bands()[0]||"Light"):((Math.round((+it.w||0)*100)/100)+"kg"));
+    L.push([String(it.name||""), load, String(it.reps||""), String(it.cap||""),
+            String(it.step==null?"":it.step), String(it.memo||"")].join(" | "));
+  });
+  return L.join("\n");
+}
+/* v23（段階2）: 新しいプログラムとして保存する。
+   ★書き込むのは DB.settings.gymProgs だけ。**PROGRAM・ALT・DB.settings.alt・
+     DB.settings.sets・DB.sessions（過去の記録）には一切書かない。** */
+function gImpSaveProg(){
+  if(!gImpBuf || !gImpBuf.pname || !gImpBuf.prog || !gImpBuf.prog.length) return;
+  var nm=gImpBuf.pname, items=gImpBuf.prog.slice(), msg="";
+  var old=uProgs().filter(function(x){ return (x.name||"")===nm; })[0];
+  if(old){
+    /* 同じ名前で貼り直したときは**中身を入れ替える**（本数を増やし続けない）。
+       ★同じ種目名の行は、**前の種目idをそのまま引き継ぐ**。
+         こうしないと貼り直すたびに id が変わり、前回値と重さアップの判定が
+         毎回「はじめての記録」に戻ってしまう（どちらも id で引いているため）。 */
+    var byName={};
+    (old.items||[]).forEach(function(it){ if(it && it.name && !byName[it.name]) byName[it.name]=it.id; });
+    items.forEach(function(it){ if(byName[it.name]) it.id=byName[it.name]; });
+    old.items=items;
+    msg="「"+nm+"」の中身を入れ替えました（"+items.length+"種目）。同じ種目名の前回値は続いています。";
+  }else{
+    DB.settings.gymProgs.push({ id:uNewId(), name:nm, note:"", items:items });
+    msg="「"+nm+"」を取り込みました（"+items.length+"種目）。A・B・Cと過去の記録は何も変わっていません。";
+  }
+  save();
+  var tgt = old ? old.id : DB.settings.gymProgs[DB.settings.gymProgs.length-1].id;
+  gImpBuf=null; gImpText="";
+  upId=tgt; upMsg=msg; upArmed=false; go("uprog");
+}
+function viewGImpCProg(b){
+  var dup=uProgs().some(function(x){ return (x.name||"")===b.pname; });
+  return `
+  <h1>この内容で取り込みます</h1>
+  <p class="sub"><strong>新しいプログラム「${esc(b.pname)}」</strong>として取り込みます（${b.prog.length}種目）。<br>
+  <strong>A・B・C の9つの枠・セット数・過去の記録は何も変わりません。</strong></p>
+  <div class="card">
+    ${b.prog.map(function(it){
+      var load=(it.load==="bw")?"自重":(it.load==="band"?("バンド "+(it.band||bands()[0]||"")):((Math.round((+it.w||0)*100)/100)+"kg"));
+      return `<div class="ex">
+        <div class="t"><h2>${esc(it.name||"")}</h2><span class="pill">${esc(load)}</span></div>
+        <div class="prev">目安 <b>${it.reps}回</b>（上限 ${it.cap}回）／ 刻み ${it.step}
+        ${it.memo?`<br><span style="color:#6f7a8c">${esc(it.memo)}</span>`:""}</div>
+      </div>`;
+    }).join("")}
+  </div>
+  ${b.errs.length?`<div class="warn"><b>読み取れなかった行があります。</b>取り込みは進められますが、下の行は無視されます。<br>${b.errs.map(function(x){return esc(x)}).join("<br>")}</div>`:``}
+  ${dup?`<div class="warn">同じ名前のプログラムがすでにあります。<b>中身を入れ替えます</b>（本数は増えません）。同じ種目名の行は、前回の重さ・回数を引き継ぎます。</div>`:``}
+  <div class="card"><p class="note">取り込んだあとは、ホームの「<strong>A・B・C 以外のプログラム</strong>」から始められます。記録・前回値・重さを上げる案内は、<strong>A・B・Cと同じ仕組みがそのまま効きます</strong>（種目ごとに別で数えます）。</p></div>
+  <button class="btn" onclick="gImpSaveProg()">この内容で取り込む</button>
+  <button class="btn ghost" onclick="go('gimp')">テキストを直す</button>
+  <button class="btn link" onclick="gImpBuf=null;go('home')">やめる</button>`;
+}
 function viewGImpC(){
   if(!gImpBuf) return viewGImp();
   var b=gImpBuf;
+  if(b.pname) return viewGImpCProg(b);   /* v23: 新しいプログラムとして取り込む道 */
   return `
   <h1>この内容で取り込みます</h1>
   <p class="sub">${envLabel(gImpEnv)} ／ ${b.items.length}種目</p>
@@ -2744,8 +2933,8 @@ function viewImpMenu(){
   <h1>テキストから取り込む</h1>
   <p class="sub">AIに書いてもらったメニューを貼り付けて取り込みます。どちらを取り込みますか。</p>
   <div class="card">
-    <button class="btn" onclick="gImpOpen()">🏋️ 筋トレ（ルーティンA・B・Cの中身）</button>
-    <p class="note">いまある9つの枠の中身が入れ替わります。<strong>自宅（ダンベルあり／器具なし）だけ</strong>。枠の数・セット数・過去の記録は変わりません。</p>
+    <button class="btn" onclick="gImpOpen()">🏋️ 筋トレ（新しいプログラム／A・B・Cの中身）</button>
+    <p class="note"><code>ルーティン名:</code> の行を入れると<strong>A・B・C 以外のプログラムが1本増えます</strong>（v23から。場所は関係ありません）。その行が無ければ従来どおり<strong>9つの枠の中身の入れ替え</strong>（自宅のみ）。<strong>どちらでも枠の数・セット数・過去の記録は変わりません。</strong></p>
     <button class="btn ghost" onclick="cImpOpen()">🏃 有酸素（トレッドミルのプログラム）</button>
     <p class="note">プログラムが1本増えます（いままでのものは消えません）。有酸素カードの中の入口も、そのまま残っています。</p>
   </div>
@@ -2898,6 +3087,7 @@ function render(){
   if(view==="bands")  return void(A.innerHTML=viewBands());
   if(view==="edex" && edId && edBuf) return void(A.innerHTML=viewEdEx());
   if(view==="edlist") return void(A.innerHTML=viewEdList());
+  if(view==="uprog")  return void(A.innerHTML=viewUProg());   /* v23 */
   if(view==="log")  return void(A.innerHTML=viewLog());
   if(view==="crun")   return void(A.innerHTML=viewCRun());
   if(view==="cin")    return void(A.innerHTML=viewCIn());
@@ -2916,6 +3106,91 @@ function render(){
 }
 
 /* --- ホーム --- */
+/* ===== v23（2026-10-12・指示_2026-10-11_4 段階2）: A・B・C 以外のプログラム ==========
+   ★A/B/C のカード・内容の一覧には手を付けていない（下のカードを**足しただけ**）。
+   ★1本も無いときは入口の説明だけで、ボタンを増やさない。 */
+var upId=null, upMsg="", upArmed=false;
+function upGo(pid){ upId=pid; upMsg=""; upArmed=false; go("uprog"); }
+function upText(){ var g=uProg(upId); if(!g) return; gTextBuf=gToTextProg(g); go("gtext"); }
+function upRename(){
+  var g=uProg(upId); if(!g) return;
+  var e=document.getElementById("up_nm");
+  var v=e ? String(e.value||"").replace(/^[ 　\t]+|[ 　\t]+$/g,"") : "";
+  if(!v){ upMsg="名前が空です。"; return render(); }
+  g.name=v; save();
+  upMsg="名前を「"+v+"」に変えました。過去の記録はそのまま残ります。"; render();
+}
+/* 外すのは2回押し。**過去の記録（DB.sessions）は消さない。**
+   外したあと、その回は記録の一覧で「（消えたプログラム）」と出る＝やった事実は残る。 */
+function upDel(){
+  var g=uProg(upId); if(!g) return;
+  if(!upArmed){ upArmed=true; upMsg="もう一度押すと、このプログラムを一覧から外します（過去の記録は消えません）。"; return render(); }
+  /* 名前だけ控えに移す。こうしないと、外したあとに記録の一覧が「u_xxx」になる
+     （記録は事実なので、読めなくしてはいけない）。 */
+  if(!DB.settings.gymGone || typeof DB.settings.gymGone!=="object") DB.settings.gymGone={};
+  DB.settings.gymGone[g.id]=g.name||"（名前なし）";
+  (g.items||[]).forEach(function(it){ if(it && it.id) DB.settings.gymGone[it.id]=it.name||it.id; });
+  DB.settings.gymProgs=uProgs().filter(function(x){ return x.id!==g.id; });
+  save(); upId=null; upArmed=false; go("home");
+}
+function uProgsCard(env){
+  var gs=uProgs();
+  if(!gs.length) return `
+  <div class="card">
+    <div class="sec" style="margin:0 0 6px">A・B・C 以外のプログラム</div>
+    <p class="note">まだありません。<strong>📥 テキストから取り込む</strong>で、いちばん上に <code>ルーティン名: ○○</code> の1行を入れたメニューを貼ると、ここに1本増えます。<strong>A・B・Cと過去の記録はそのままです。</strong></p>
+    <button class="btn ghost" onclick="gImpOpen()">📥 プログラムを取り込む</button>
+  </div>`;
+  var d=done();
+  return `
+  <div class="sec">A・B・C 以外のプログラム（${gs.length}本）</div>
+  <div class="card">
+    ${gs.map(function(g){
+      var n=(g.items||[]).length, last=null;
+      d.forEach(function(s){ if(s.routine===g.id) last=s; });
+      return `<div class="ex">
+        <div class="t"><h2>${esc(g.name||"（名前なし）")}</h2><span class="pill">${n}種目</span></div>
+        <div class="prev">${last?`前回 <b>${mdw(last.date)}</b>（${last.sets.length}セット）`:`まだ記録はありません`}</div>
+        <button class="btn" onclick="startSession('${g.id}')">これを始める</button>
+        <button class="btn ghost" onclick="upGo('${g.id}')">中身を見る・名前を変える</button>
+      </div>`;
+    }).join("")}
+    <p class="note">このプログラムの記録は<strong>A・B・Cとは別の種目として</strong>残ります。前回の重さ・回数と「重さを上げる案内」は<strong>同じ種目どうしでだけ</strong>比べるので、<strong>A・B・Cの数字は混ざりません。</strong></p>
+    <button class="btn ghost" onclick="gImpOpen()">📥 もう1本取り込む</button>
+  </div>`;
+}
+function viewUProg(){
+  var g=uProg(upId); if(!g) return viewHome();
+  var env=curEnv();
+  return `
+  <h1>${esc(g.name||"（名前なし）")}</h1>
+  <p class="sub">${(g.items||[]).length}種目 ／ A・B・C とは別のプログラムです。<strong>セット数は種目ごとに変えられます</strong>（始めてから種目の画面の下で）。</p>
+  ${upMsg?`<div class="card"><p class="note">${esc(upMsg)}</p></div>`:""}
+  <div class="card">
+    ${(g.items||[]).map(function(it){
+      var e=def(it.id,env)||it, l=lastOf(it.id,env);
+      return `<div class="ex">
+        <div class="t"><h2>${esc(e.name||"")}</h2><span class="pill">${l?fmtSet(e,l):fmtW(e,e.w)}</span></div>
+        <div class="prev">${l?`前回 <b>${prevSetsTxt(e,l)}</b>（${l.n}セット・${mdw(l.date)}）`
+                             :`記録なし。まずは <b>${fmtW(e,e.w)} × ${e.reps}回 × ${setsOf(it.id)}セット</b> から`}
+        ${e.memo?`<br><span style="color:#6f7a8c">${esc(e.memo)}</span>`:""}</div>
+      </div>`;
+    }).join("")}
+  </div>
+  <button class="btn" onclick="startSession('${g.id}')">これを始める</button>
+  <div class="card">
+    <label>プログラムの名前<small>記録の一覧にもこの名前で出ます</small></label>
+    <input id="up_nm" type="text" value="${esc(g.name||"")}">
+    <button class="btn ghost" onclick="upRename()">名前を変える</button>
+  </div>
+  <button class="btn ghost" onclick="upText()">いまの内容をテキストで見る（AIに渡す元）</button>
+  <p class="note">同じ「ルーティン名:」で貼り直すと<strong>このプログラムの中身が入れ替わります</strong>（本数は増えません）。同じ種目名はそのまま引き継ぐので、前回の重さも続きます。</p>
+  <div class="hr"></div>
+  <button class="btn link" onclick="upDel()">${upArmed?"もう一度押すと一覧から外します":"このプログラムを一覧から外す"}</button>
+  <p class="note">外しても<strong>過去の記録は消えません</strong>（記録は事実なので、あとから書き換えません）。</p>
+  <button class="btn ghost" onclick="go('home')">戻る</button>`;
+}
+
 function viewHome(){
   const r=suggestRoutine();
   const env=curEnv();
@@ -2962,6 +3237,8 @@ function viewHome(){
     </div>
   </div>
 
+  ${uProgsCard(env)}
+
   <div class="sec">${r} の内容（${envLabel(env)}）</div>
   <div class="card">${list}</div>
 
@@ -2993,7 +3270,7 @@ function viewWork(){
     </div>`;
   }).join("");
   return `
-  <h1>${s.routine} を実施中</h1>
+  <h1>${esc(routineLabel(s.routine))} を実施中</h1>
   <p class="sub">${mdw(s.date)} ／ <b>${envLabel(env)}</b> ／ 記録済み ${s.sets.length} セット</p>
   ${/* v17（2026-09-19 ご依頼 G-b）: 実施中に場所を直せるようにした。
        ご記入は「自宅でやった回数がジムに出てしまっている」。現物を読むと、
@@ -3152,7 +3429,9 @@ function viewLog(){
       const by={};
       s.sets.forEach(function(x){ (by[x.id]=by[x.id]||[]).push(x); });
       const inner=Object.keys(by).map(function(id){
-        const e=def(id,senv), a=by[id];
+        /* v23: 控えにも無い種目id（古い端末の記録・貼り戻した控え等）でも落ちないようにする。
+           記録そのものは消さない、という線を守るため、名前が分からなければ id を出す。 */
+        const e=def(id,senv) || {id:id, name:id, unit:"kg"}, a=by[id];
         /* v5: 負荷はセットごとに記録した内容（ld/bd）から出す。
            セット間でバンドを変えた回は、そのまま「Medium/Heavy」のように並べる。 */
         const w0=fmtSet(e,a[0]);
@@ -3163,7 +3442,8 @@ function viewLog(){
       /* v2: 所要時間は事実として並べるだけ。速い順に並べ替えない・最短を出さない・
          15分を超えた回に印を付けない。すべて同じ字面。
          v4: 環境（ジム／自宅）も事実として添えるだけ。強調・並べ替えはしない。 */
-      const head=mdw(s.date)+" ルーティン"+s.routine
+      /* v23: 取り込んだプログラムの回は、その名前をそのまま出す（「ルーティンu_…」と出さない）。 */
+      const head=mdw(s.date)+" "+(isUP(s.routine) ? routineLabel(s.routine) : "ルーティン"+s.routine)
         +(senv!=="gym" ? "・"+envLabel(senv) : "")
         +(typeof s.sec==="number" ? " ／ "+mmss(s.sec) : "")
         +(typeof s.rest==="number" ? "（休憩"+s.rest+"秒）" : "");
@@ -3311,7 +3591,26 @@ if(DB.crun && DB.crun.start){
 var FBKEY = "bmc_fb_gym_v1";
 var FBAPP = "gymアプリ";
 var FBCATS = ["押しにくい","文字が読みにくい","表示が分かりにくい","音・振動","動きがおかしい","こうしたい"];
-var FB = { items:[], vault:"My Valut", file:"10_Action/Quick Memo.md", heading:"🗂️ プロジェクトメモ", useHead:true, mode:"prepend" };
+/* ★2026-10-20: 届け先を「その日の日次ノートの ## 🤖 AIへ」に変えた。
+   きっかけ: 指示_2026-10-19_アプリの改善メモの届け先を日次ノートの🤖AIへに変える
+   （提案_2026-10-15 Q2 へのご回答「ア」、2026-10-19）。
+
+   ★設計の要点（変えるときは理由も一緒に残してください）
+   1. FB.file は既定で空＝自動。送るそのとき FBDIR/<YY-MM-DD(曜)>.md を組み立てる。
+      設定の欄に手で入れたときだけ、その値を使う（逃げ道を消さない）。
+   2. 0時〜3時台に押したものは、前日のノートへ入れる。
+      日次ノートは毎日3:52の巡回が5つの節つきで作る。それより前に送ると
+      advanced-uri が「節のないノート」を先に作ってしまい、朝の Daily Start は
+      冕等（すでにあれば本文を触らない）なので、そのまま1日残る。その窓をふさぐ線引き。
+   3. mode は append（節の末尾に追記＝時刻の順に並ぶ）。
+      見出しは1件ごとに ##### YY-MM-DD HH:MM（見回り・日次巡回が1件として数える形）。
+   4. 1回の送信で届けられるファイルは1つなので、入れる先のノートごとにボタンを分けている。
+      夜中に押したものと昼に押したものが混ざっても、別のノートへ入る。
+   5. 書き出す行の形（時刻／画面／種類／一言）は変えていない。記録ハブ（Timer_log・
+      Points Tracker）へ送る行には1バイトも触っていない（claude.md §1-1）。 */
+var FBDIR = "20_Projects/Private/B.M.C";
+var FBWD  = ["日","月","火","水","木","金","土"];
+var FB = { items:[], vault:"My Valut", file:"", heading:"🤖 AIへ", useHead:true, mode:"append", fbv:2 };
 var fbMemo = "", fbCfg = false, fbStep = 1, fbLast = -1, fbNote = "";
 
 function fbLoad(){
@@ -3320,10 +3619,19 @@ function fbLoad(){
     if(o && typeof o==="object"){
       if(Array.isArray(o.items)) FB.items = o.items;
       if(typeof o.vault==="string") FB.vault = o.vault;
-      if(typeof o.file==="string" && o.file) FB.file = o.file;
-      if(typeof o.heading==="string") FB.heading = o.heading;
+      /* 2026-10-20: 旧版の送信先（Quick Memo の 🗂️ プロジェクトメモ）が
+         この端末に保存されている。そのまま読み戻すと、変えた届け先が元に戻るので、
+         旧版の値だと分かるときだけ 1回限りで既定へ寄せ直す（fbv で繰り返さない）。
+         ご自分で別の送信先を入れていた場合は、そのまま残す。 */
+      var fbOld = !(o.fbv >= 2);
+      if(typeof o.file==="string" && o.file){
+        if(!(fbOld && o.file.indexOf("Quick Memo") >= 0)) FB.file = o.file;
+      }
+      if(typeof o.heading==="string" && o.heading){
+        if(!(fbOld && o.heading.indexOf("プロジェクトメモ") >= 0)) FB.heading = o.heading;
+      }
       if(typeof o.useHead==="boolean") FB.useHead = o.useHead;
-      if(o.mode==="prepend"||o.mode==="append") FB.mode = o.mode;
+      if(o.mode==="prepend"||o.mode==="append"){ if(!fbOld) FB.mode = o.mode; }
     }
   }catch(e){}
 }
@@ -3398,19 +3706,48 @@ function fbDropLast(){
   if(fbLast>=0 && FB.items[fbLast]){ FB.items.splice(fbLast,1); fbLast=-1; fbSave(); }
   fbStep = 3; fbNote = "取り消しました。"; fbRender();
 }
+/* 0時〜3時台に押したものは、前日のノートへ入れる（上の★ 2 参照）。 */
+function fbNoteDate(t){
+  var d = new Date(t);
+  if(d.getHours() < 4) d.setDate(d.getDate()-1);
+  return d;
+}
+function fbNoteName(t){ var d = fbNoteDate(t); return fbYmd(d)+"("+FBWD[d.getDay()]+")"; }
+/* 手で送信先を入れてあればそれを使う。空なら日次ノートを自動で決める。 */
+function fbNotePath(t){ return FB.file ? FB.file : FBDIR+"/"+fbNoteName(t)+".md"; }
+
+/* 入れる先のノートごとに分ける（上の★ 4 参照）。 */
+function fbGroups(list){
+  var map = {}, order = [];
+  list.forEach(function(x){
+    var k = FB.file ? FB.file : fbNoteName(x.t);
+    if(!map[k]){ map[k] = []; order.push(k); }
+    map[k].push(x);
+  });
+  return order.map(function(k){
+    return { key:k, path:(FB.file ? FB.file : FBDIR+"/"+k+".md"), items:map[k] };
+  });
+}
+/* 負けたときの貼る先を、画面とトーストの両方で同じ言い方にするための1つの出所。 */
+function fbCopyWhere(){
+  var g = fbGroups(fbUnsent());
+  if(!g.length) return "その日の日次ノート";
+  return g.map(function(z){ return z.key; }).join("・");
+}
+
 function fbText(list){
-  var d = new Date();
-  var s = "##### "+fbYmd(d)+" - "+FBAPP+"で気になったこと\n";
+  var s = "";
   list.forEach(function(x){
     var dt = new Date(x.t);
-    s += "- "+fbHm(dt)+" ／ "+x.ctx+" ／ "+x.cat+(x.memo?" ／ "+x.memo:"")+"\n";
+    s += "##### "+fbYmd(dt)+" "+fbHm(dt)+"\n"
+      +  "- "+FBAPP+" ／ "+fbHm(dt)+" ／ "+x.ctx+" ／ "+x.cat+(x.memo?" ／ "+x.memo:"")+"\n";
   });
   return s;
 }
-function fbUri(text){
+function fbUri(text, path){
   var u = "obsidian://advanced-uri?";
   if(FB.vault) u += "vault="+encodeURIComponent(FB.vault)+"&";
-  u += "filepath="+encodeURIComponent(FB.file);
+  u += "filepath="+encodeURIComponent(path || fbNotePath(Date.now()));
   if(FB.useHead && FB.heading) u += "&heading="+encodeURIComponent(FB.heading);
   u += "&mode="+FB.mode+"&data="+encodeURIComponent(text);
   return u;
@@ -3419,6 +3756,13 @@ function fbUri(text){
    画面は作り直さない（作り直すと、開こうとしているリンクが消えてしまう）。 */
 function fbMarkSent(){
   FB.items.forEach(function(x){ x.sent = true; });
+  fbSave();
+  return true;
+}
+/* 送ったかたまりの分だけ印を付ける（別のノート宛てのものを消さないため）。 */
+function fbMarkSentG(i){
+  var g = fbGroups(fbUnsent());
+  if(g[i]) g[i].items.forEach(function(x){ x.sent = true; });
   fbSave();
   return true;
 }
@@ -3432,7 +3776,7 @@ function fbCopy(){
   var t = document.getElementById("fb_out"); if(!t) return;
   var ok = false;
   try{ t.focus(); t.select(); t.setSelectionRange(0,999999); ok = document.execCommand("copy"); }catch(e){}
-  var yes = "コピーしました。Quick Memoの「🗂️ プロジェクトメモ」に貼ってください。";
+  var yes = "コピーしました。"+fbCopyWhere()+"の「"+FB.heading+"」に貼ってください。";
   var no  = "コピーできませんでした。上の枠を長押し →「すべてを選択」→「コピー」でも同じことができます。";
   if(!ok && navigator.clipboard && navigator.clipboard.writeText){
     navigator.clipboard.writeText(t.value).then(
@@ -3455,10 +3799,17 @@ function fbSendBlock(){
     return '<p class="note">いまは実行中なので送りません。前面のアプリが切り替わって、'
          + 'タイマーが止まってしまうためです。<b>終わってから、またはホームに戻ってから</b>送ってください。</p>';
   }
-  return '<a class="fbsend" href="'+fbEsc(fbUri(fbText(un)))+'" onclick="return fbMarkSent()">'
-       + 'Obsidianへ送る（'+un.length+'件）</a>'
-       + '<p class="note">Obsidianが開いて、Quick Memoの「'+fbEsc(FB.heading)+'」に入ります。'
-       + '<b>開かない・入らないときは、下の「コピーする」で貼ってください。</b></p>';
+  var g = fbGroups(un), s = '';
+  g.forEach(function(z,i){
+    s += '<a class="fbsend" href="'+fbEsc(fbUri(fbText(z.items), z.path))+'" '
+      +  'onclick="return fbMarkSentG('+i+')">'
+      +  'Obsidianへ送る（'+fbEsc(z.key)+'・'+z.items.length+'件）</a>';
+  });
+  s += '<p class="note">Obsidianが開いて、<b>'+fbEsc(fbCopyWhere())+'</b>の「'
+    +  fbEsc(FB.heading)+'」に入ります。'
+    +  (g.length>1?'<br>入れる先のノートが分かれているので、<b>上から順に押してください。</b>':'')
+    +  '<br><b>開かない・入らないときは、下の「コピーする」で貼ってください。</b></p>';
+  return s;
 }
 
 function fbRender(){
@@ -3509,7 +3860,9 @@ function fbRender(){
     h += fbSendBlock();
     h += '<div class="sec">手で貼る（送信がうまくいかないとき）</div>'
        + '<div class="card"><textarea id="fb_out" class="fbta" readonly onclick="this.select()">'
-       + fbEsc(fbText(un.length?un:FB.items.slice(-10)))+'</textarea></div>'
+       + fbEsc(fbText(un.length?un:FB.items.slice(-10)))+'</textarea>'
+       + '<p class="note" style="margin-top:9px">貼る先：<b>'+fbEsc(fbCopyWhere())
+       + '</b>の「'+fbEsc(FB.heading)+'」</p></div>'
        + '<button class="btn ghost" onclick="fbCopy()">コピーする</button>';
     h += '<button class="btn link" onclick="fbCfgGo()">送信先の設定'+(fbCfg?'を閉じる':'')+'</button>';
     if(fbCfg){
@@ -3517,7 +3870,9 @@ function fbRender(){
          + '<label>Vault名</label>'
          + '<input class="fbinp" id="fb_vault" type="text" value="'+fbEsc(FB.vault)+'">'
          + '<label style="display:block;margin-top:10px">書き込むファイル</label>'
-         + '<input class="fbinp" id="fb_file" type="text" value="'+fbEsc(FB.file)+'">'
+         + '<input class="fbinp" id="fb_file" type="text" placeholder="空のまま＝その日の日次ノート" value="'+fbEsc(FB.file)+'">'
+         + '<p class="note">空のままにしておくと、送るそのときの日次ノート（いまなら '
+         + fbEsc(fbNotePath(Date.now()))+'）を自動で決めます。</p>'
          + '<label style="display:block;margin-top:10px">見出し</label>'
          + '<input class="fbinp" id="fb_head" type="text" value="'+fbEsc(FB.heading)+'">'
          + '<button class="btn ghost" onclick="fbHeadGo()">'
