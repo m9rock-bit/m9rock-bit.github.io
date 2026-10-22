@@ -867,6 +867,8 @@ var DB = { v:19, sets:null, chime:true, voice:true, third:true, noteOpen:false, 
   /* v44: 🌾 よはく／やることの差し込みリスト（Obsidianから取り込む） */
   blist:null, blAt:0, blScName:"よはくリスト",
   musicOn:false, mig_reward67:false,   /* v67 */
+  /* v72: 🌬️ 呼吸中の静かな持続音（パッド音）。既定はオン。オフにすれば v71 と同じ鳴り方に戻る */
+  breathPad:true,
   /* v50: 🌊 で最後に選んだ種別（"watch" | "eat"）。記録の内訳にだけ使う */
   urgeKind:"",
   /* ===== v56 (2026-10-05 ご依頼): ホームの「今週」を出さない =====
@@ -907,7 +909,10 @@ try{
     if(p.mig_mornbed64===true) DB.mig_mornbed64 = true;   /* v64（★無いと、消しても毎回戻る） */
     /* v67: 🎵 いま音楽を聞いている（離席中の音を仕掛けない）。★無いと開き直すたびオフに戻る */
     if(typeof p.musicOn==="boolean") DB.musicOn = p.musicOn;
-    if(p.mig_reward67===true) DB.mig_reward67 = true;   /* v67: 🍰 の1行を一度だけ差し込んだ印 */            /* v62: 🌬️ に「消音中でも鳴らす」を1回だけ入れた印（★無いと、オフにしても毎回オンに戻る） */          /* v60: 💊 を一度だけ差し込んだ印（★無いと、消しても毎回戻る） */
+    if(p.mig_reward67===true) DB.mig_reward67 = true;   /* v67: 🍰 の1行を一度だけ差し込んだ印 */
+    /* v72: 🌬️ の持続音。★無いと、オフにしても開き直すたびにオンへ戻る（v30 の教訓） */
+    if(typeof p.breathPad==="boolean") DB.breathPad = p.breathPad;
+            /* v62: 🌬️ に「消音中でも鳴らす」を1回だけ入れた印（★無いと、オフにしても毎回オンに戻る） */          /* v60: 💊 を一度だけ差し込んだ印（★無いと、消しても毎回戻る） */
     /* v16: 就寝の見守り状態。アプリを閉じても経過時間が消えないよう、
        開始時刻そのものを保存し、毎回いまの時刻から計算し直す。 */
     if(typeof p.sleepActive==="boolean") DB.sleepActive = p.sleepActive;
@@ -1612,7 +1617,7 @@ function parkBtn(){
 
 /* --- 状態 --- */
 /* v27: 版の表示（ホーム最下部）。中身を変えたら、ここも必ず上げる。 */
-var APPVER = "切り替えルーティン v71 ・ 2026-10-21";
+var APPVER = "切り替えルーティン v74 ・ 2026-10-22";
 var view = "home";
 var curId = null;
 var startAt = 0;
@@ -2003,6 +2008,82 @@ function musicToggle(){
      （止めないと、オンにしても鳴っている1本がSpotifyを押さえ続ける） */
   if(DB.musicOn) awayClear(); else awayArm();
   render();
+}
+
+/* ===== v72: 🌬️ 呼吸中の静かな持続音（パッド音） ======================
+   出所: [[提案_2026-10-20_中途覚醒後の呼吸に音楽をかける形（段階2）]] 問1 → ご回答「ア」。
+   ★なぜ「本物の音楽」ではないのか（正直に書く）
+     ⑴ プレイリストを開くと前面が切り替わり、v62 の声の合図と3分の時計が止まる
+        （openSpotify は window.open）。⑵ アプリが音を出すと音楽アプリの音は止まる
+        （awaySoundOK の v67 の注と同じ理由）。本物の音楽と合図は原理的に同時に成立しない。
+     → アプリの中で作る持続音にし、合図の前後だけ音量を落とす形にした。
+   ★鳴らす条件は狭い（🌬️＝breath478 のセットで、呼吸の行を実行しているあいだだけ）
+     ① 一時停止・中断・終了・ホームへ戻るで必ず止める（padTick を render から毎回通す）
+     ② 🎵「いま音楽を聞いている」がオンなら鳴らさない（v67 の約束を破らない）
+     ③ セット側の「音を出さない」（quietOf）が入っていれば鳴らさない
+     ④ ホームの「終了音」がオフでも鳴らす（v62 と同じ扱い。夜中は設定を確かめられない）
+   ★記録ハブへ送る行の形・タイマー・集計は1バイトも変えていない（claude.md §1-1 の1に当たらない）。
+   ★オフにする口は 設定 の 🎵 のすぐ下（DB.breathPad）。新しいノート・入力欄は増やしていない。 */
+var padNodes = null;
+var PAD_VOL = .055;        /* ふだんの大きさ（合図は .9。十分に下。耳の邪魔をしない） */
+var PAD_DUCK = .012;       /* 合図の前後で落とす先 */
+var PAD_DUCK_SEC = 1.8;    /* 落としている長さ */
+function padWant(){
+  try{
+    if(DB.breathPad === false) return false;
+    if(DB.musicOn) return false;                 /* ② */
+    if(view !== "run" || curId !== "breath478") return false;
+    if(autoPaused || autoFinished) return false; /* ① */
+    var s = setOf(curId); if(!s || !s.auto) return false;
+    if(quietOf(s)) return false;                 /* ③ */
+    var st = stepsOf(s), cum = 0, idx = -1, e = curElapsed();
+    for(var i=0;i<st.length;i++){ cum += st[i].sec; if(e < cum){ idx = i; break; } }
+    if(idx < 0) return false;
+    return isBreath(st[idx]) && !!brPick[idx];   /* 呼吸を選ぶ前（時計が止まっている）は鳴らさない */
+  }catch(e){ return false; }
+}
+function padStart(){
+  if(padNodes) return;
+  try{
+    if(!ac) ac = new (window.AudioContext||window.webkitAudioContext)();
+    if(ac.state === "suspended" && ac.resume) ac.resume();
+    var g = ac.createGain(), lp = ac.createBiquadFilter();
+    lp.type = "lowpass"; lp.frequency.value = 520;        /* 高いところを削って、やわらかくする */
+    var o1 = ac.createOscillator(), o2 = ac.createOscillator();
+    o1.type = "sine"; o2.type = "sine";
+    o1.frequency.value = 110; o2.frequency.value = 110.6; /* わずかにずらして、ゆらぎを作る */
+    o1.connect(lp); o2.connect(lp); lp.connect(g); g.connect(ac.destination);
+    g.gain.setValueAtTime(.0001, ac.currentTime);
+    g.gain.exponentialRampToValueAtTime(PAD_VOL, ac.currentTime + 2.5);   /* ゆっくり立ち上げる */
+    o1.start(); o2.start();
+    padNodes = { o1:o1, o2:o2, g:g };
+  }catch(e){ padNodes = null; }
+}
+function padStop(){
+  var pn = padNodes; padNodes = null;
+  if(!pn) return;
+  try{
+    var t = ac.currentTime;
+    pn.g.gain.cancelScheduledValues(t);
+    pn.g.gain.setValueAtTime(Math.max(.0001, pn.g.gain.value), t);
+    pn.g.gain.exponentialRampToValueAtTime(.0001, t + 1.2);   /* ふっと切らない */
+    pn.o1.stop(t + 1.4); pn.o2.stop(t + 1.4);
+  }catch(e){}
+}
+/* render() から毎回通る。止める条件を1か所に集めたいので、autoTick ではなくここで見る
+   （autoTick は autoPaused のとき早期に返るため、一時停止で止められない）。 */
+function padTick(){ if(padWant()) padStart(); else padStop(); }
+/* 合図（音・声）の前後だけ音量を落とす。brChime／brSay の直前に呼ぶ。 */
+function padDuck(){
+  if(!padNodes) return;
+  try{
+    var t = ac.currentTime, g = padNodes.g;
+    g.gain.cancelScheduledValues(t);
+    g.gain.setValueAtTime(Math.max(.0001, g.gain.value), t);
+    g.gain.exponentialRampToValueAtTime(PAD_DUCK, t + .25);
+    g.gain.setValueAtTime(PAD_DUCK, t + PAD_DUCK_SEC);
+    g.gain.exponentialRampToValueAtTime(PAD_VOL, t + PAD_DUCK_SEC + .8);
+  }catch(e){}
 }
 function speak(text){
   if(!DB.voice) return;
@@ -2480,6 +2561,7 @@ function autoTick(s){
       /* v62: 🌬️（睡眠後に入る呼吸法）だけ、声の合図を足し、ホームの「終了音」「読み上げ」がオフでも出す
          （夜中は目を閉じたまま設定を確かめられないため。ご了承済み）。🍵・🧸 は従来どおり音だけ・設定に従う。 */
       var brSleep = (curId==="breath478");
+      if(brSleep) padDuck();   /* v72: 合図の前後1〜2秒だけ持続音を下げる（声と合図音を邪魔しない） */
       brChime(bi.ph.k, brSleep);
       if(brSleep) brSay(bi.ph.k);
     }
@@ -2525,9 +2607,63 @@ function brSay(k){
   var t = BR_SAY[k]; if(!t) return;
   try{
     if(!window.speechSynthesis) return;
-    window.speechSynthesis.cancel();
+    /* v74: 話していないときに cancel() してすぐ speak() すると、iOS は次の発話を落とすことがある */
+    if(window.speechSynthesis.speaking || window.speechSynthesis.pending) window.speechSynthesis.cancel();
     var u = new SpeechSynthesisUtterance(t);
     u.lang = "ja-JP"; u.rate = 0.95;
+    window.speechSynthesis.speak(u);
+  }catch(e){}
+}
+/* ===== v74（指示_2026-10-22_4 ①・ご記入「呼吸のプログラムでやはり吸う・吐くなどの合図の音が全く聞こえない」＝3度目）=====
+   ★見立て（3度目なので、ご本人に聞き直さずコード側で決めた）
+     1度目（10/07）＝未配布、2度目（10/10）＝音が小さく短い → v60 で大きく・長く、v62 で声。
+     今回は「全く」。音量の問題ではなく、**音を出す仕組みそのものが止まっている**と読んだ。
+     ⑴ iPhone は画面が消える（自動ロック）と Safari のタイマーも音も止める。呼吸は目を閉じて
+        画面に触らないので、30秒〜1分で必ず画面が消える＝**最初の数回だけ鳴って、あとは全く鳴らない**。
+        これまでの直しは音の大きさだけで、画面が消えることには手を入れていなかった。
+     ⑵ 呼吸を「選ぶ」タップの中で音を開通させていなかった（開通は start() の1回だけ）。
+        一覧で迷っている間に画面が消える・裏に回ると、AudioContext が止まったまま戻らない。
+     ⑶ 声：iOS は「押した操作の中で1回話した」ページでないと、タイマーからの発話を落とすことがある。
+   → ①呼吸を選んだタップで音・声を開通 ②呼吸のあいだ（🌬️・🍵 など音で進むセットの実行中）
+     Screen Wake Lock で画面を消さない ③声は話していないときに cancel() しない。
+   ★Wake Lock が無い環境（古いiOS・アプリ内ブラウザ）では何もしない＝これまでと同じ。
+     そのときだけ選ぶ画面に「自動ロックを長くして」の1行を出す。
+   ★記録ハブへ送る行の形・タイマー・集計は1バイトも変えていない（claude.md §1-1 の1に当たらない）。 */
+var brWake = null, brWakeAsk = false;
+function brWakeOK(){ try{ return !!(navigator.wakeLock && navigator.wakeLock.request); }catch(e){ return false; } }
+function brWakeWant(){
+  try{
+    if(view !== "run" || !curId) return false;
+    if(autoPaused || autoFinished) return false;
+    var s = setOf(curId); if(!s || !s.auto) return false;
+    if(s.media) return true;   /* 🌬️・🍵・🧸 など、音と声で進む（目を閉じる）セット */
+    var st = stepsOf(s), cum = 0, e = curElapsed();
+    for(var i=0;i<st.length;i++){ cum += st[i].sec; if(e < cum) return isBreath(st[i]) && !!brPick[i]; }
+    return false;
+  }catch(e){ return false; }
+}
+function brWakeOn(){
+  if(brWake || brWakeAsk || !brWakeOK()) return;
+  try{
+    brWakeAsk = true;
+    navigator.wakeLock.request("screen").then(function(l){
+      brWakeAsk = false; brWake = l;
+      try{ l.addEventListener("release", function(){ if(brWake===l) brWake = null; }); }catch(e){}
+      if(!brWakeWant()) brWakeOff();
+    }, function(){ brWakeAsk = false; });
+  }catch(e){ brWakeAsk = false; }
+}
+function brWakeOff(){
+  var l = brWake; brWake = null;
+  if(l){ try{ l.release(); }catch(e){} }
+}
+/* render() から毎回通る（padTick と同じ置き方）。裏から戻ったときも render が走るので、そこで取り直す。 */
+function brWakeTick(){ if(brWakeWant()) brWakeOn(); else brWakeOff(); }
+/* 押した操作の中で1回だけ、聞こえない発話をしておく（iOS の発話の開通） */
+function speechPrime(){
+  try{
+    if(!window.speechSynthesis || window.speechSynthesis.speaking) return;
+    var u = new SpeechSynthesisUtterance("　"); u.lang = "ja-JP"; u.volume = 0;
     window.speechSynthesis.speak(u);
   }catch(e){}
 }
@@ -2535,6 +2671,9 @@ function brChoose(id){
   var s = setOf(curId); if(!s || brAsk<0 || !brGet(id)) return;
   var i = brAsk, st;
   brPick[i] = id; brAsk = -1; brLastPh = "";
+  /* v74: 呼吸を選ぶタップは「押した操作」。ここで音・声・画面を開通させる
+     （選ぶまでの間に画面が消えたり裏に回ると、start() で開通した音が止まっていることがある） */
+  unlockAudio(); speechPrime(); brWakeOn();
   st = stepsOf(s);
   var cb = 0; for(var k=0;k<i;k++) cb += st[k].sec;
   startAt = Date.now() - cb*1000; autoPaused = false; pauseAt = 0;
@@ -2556,11 +2695,43 @@ function autoBack(){ return (curId==="anger" || curId==="urge" || curId==="breat
 function autoSkip(){
   var s = setOf(curId); if(!s || !s.auto) return;
   guideDrift();   /* v55: 進み方が変わったので、渡した案内はずれる */
+  autoUndo = { id:curId, step:curStep, e:curElapsed() };   /* v73: ◀ 前へ で、押す前の位置へそのまま戻せるように */
   var st = stepsOf(s), cum = 0;
   for(var i=0;i<=curStep && i<st.length;i++){ cum += st[i].sec; }
   var base = autoPaused ? pauseAt : Date.now();
   startAt = base - (cum+0.05)*1000;
   if(autoPaused) pauseAt = base;
+  render();
+}
+/* v73（指示_2026-10-22_3 ②・ご依頼「自動で進むセットで、間違ってボタンを押したら前に戻れない」）:
+   ◀ 前へ。autoSkip と同じく開始時刻をずらして位置を変える（逆向き）。
+   ・直前に押した「次へ ▶」の取り消しなら、押す前の位置（残り時間）にそのまま戻す（autoUndo）。
+   ・それ以外は、1つ前の項目の頭へ戻す（いまが1つめなら、1つめの頭からやり直す）。
+   ・戻った先から後ろの「済み」の印は外す（autoTick は前へ進むときしか印を付け直さないため）。
+   ・🌬️ の「呼吸を選んで」で止まっている最中に押したときは、その一時停止も解く。 */
+var autoUndo = null;
+function autoPrev(){
+  var s = setOf(curId); if(!s || !s.auto || autoFinished) return;
+  guideDrift();   /* v55 と同じ扱い */
+  var st = stepsOf(s); if(!st.length) return;
+  /* いまの位置は経過秒から数え直す（一時停止中は autoTick が止まっていて curStep が古いことがあるため） */
+  var e0 = curElapsed(), cum0 = 0, cur = st.length-1;
+  for(var q=0;q<st.length;q++){ cum0 += st[q].sec; if(e0 < cum0){ cur = q; break; } }
+  var target = Math.max(0, cur-1), pos = 0;
+  if(autoUndo && autoUndo.id===curId && autoUndo.step===cur-1){
+    target = autoUndo.step; pos = autoUndo.e;
+  }else{
+    for(var i=0;i<target && i<st.length;i++){ pos += st[i].sec; }
+  }
+  autoUndo = null;
+  if(brAsk >= 0 && autoPaused){ autoPaused = false; }   /* 呼吸の一覧で止まっていた分 */
+  brAsk = -1; brLastPh = "";
+  var base = autoPaused ? pauseAt : Date.now();
+  startAt = base - pos*1000;
+  if(autoPaused) pauseAt = base;
+  for(var j=target;j<st.length;j++){ delete doneSet[j]; }
+  if(!autoPaused && target < curStep){ curStep = target + 1; }   /* autoTick に「位置が変わった」と気づかせ、合図を鳴らさせる */
+  if(autoPaused){ curStep = target; }   /* 止まっているあいだも画面の「いまの項目」を合わせる */
   render();
 }
 /* v4: 一時停止・再開 */
@@ -3007,7 +3178,7 @@ function start(id, fromIndex, mode){   /* v38: mode = "rest" | "joy"（省略時
      離席中に鳴るものを仕掛ける（外向きの動作は1つだけ、という v8 の線は維持）。 */
   else { awayArm(); }
 }
-function stop(){ mediaAudio(false);   /* v57 */ brPick = {}; brAsk = -1; brLastPh = "";   /* v58 */ awayClear();   /* v35 */ snClear(); snAsk=false;   /* v37 */ clearRun(); if(tick) clearInterval(tick); tick=null; startAt=0; curId=null; doneSet={}; curStep=0; runIdx=null; autoPaused=false; pauseAt=0; autoFinished=false; stepAt=0; stepExtra={}; runTimes={}; stepAcc={}; inputOpen=null; autoShift=0; foldOn=false; foldAsking=false; foldRest="";
+function stop(){ mediaAudio(false);   /* v57 */ brPick = {}; brAsk = -1; brLastPh = "";   /* v58 */ awayClear();   /* v35 */ snClear(); snAsk=false;   /* v37 */ clearRun(); if(tick) clearInterval(tick); tick=null; startAt=0; curId=null; doneSet={}; curStep=0; runIdx=null; autoPaused=false; pauseAt=0; autoFinished=false; stepAt=0; stepExtra={}; runTimes={}; stepAcc={}; inputOpen=null; autoShift=0; autoUndo=null;   /* v73 */ foldOn=false; foldAsking=false; foldRest="";
   foldMode=""; joyName=""; joyMin=JOY_MIN_DEF; joyFeel=""; joyNote=""; joyPend=""; joyPendMin=JOY_MIN_DEF; modePick="";
   joyAsk=false; joyAt=0; joyTaken=0;
   blAsk=""; blEndAt=0; blName=""; blTaken=0; blDone=[];
@@ -4080,6 +4251,8 @@ function nativeTimer(sec){
 /* ============================ 画面 ============================ */
 function render(){
   var h = "";
+  padTick();   /* v72: 🌬️ の持続音。鳴らす・止めるの判断をここ1か所に集めている */
+  brWakeTick();   /* v74: 呼吸のあいだ画面を消さない（消えると合図ごと止まる） */
   if(view==="sxlib") h = viewSxLib();
   else if(view==="sximp") h = viewSxImp();
   else if(view==="sximpc") h = viewSxImpC();
@@ -4448,6 +4621,13 @@ function viewHome(){
      + 'これを入れないと、続きに戻った回や項目が進むたびにアプリが音を出し始めるため、'
      + '<b>Spotifyなどの再生が止まります</b>（iPhoneの仕様）。'
      + '音楽を聞き終えたらオフに戻すと、離席中の音がまた鳴るようになります。</p></div>';
+  /* v72: 🌬️ の持続音。🎵 のすぐ下に置く（どちらも音楽まわりのスイッチなので、探す場所を1か所にする） */
+  h += '<div class="card"><div class="toggle"><b>🌬️ 呼吸のあいだ、静かな音を流す</b>'
+     + '<button class="sw'+(DB.breathPad!==false?' on':'')+'" onclick="DB.breathPad=(DB.breathPad===false);save();render()"><i></i></button></div>'
+     + '<p class="note">夜中に目が覚めたときの 🌬️ <b>呼吸法（一覧から選ぶ）のあいだだけ</b>、'
+     + 'やわらかい持続音を小さく流します。<b>吸って・止めて・吐いての合図の前後は、音量を落とします。</b>'
+     + '<br><b>これは音楽ではありません</b>（アプリが作る音です）。流しているあいだ、ご自分のプレイリストの音は止まります。'
+     + '上の 🎵 がオンのときは流しません。オフにすれば v71 までと同じ鳴り方に戻ります。</p></div>';
   /* v40: 説明文をたたむのをやめる口。いちばん上に置く（探させないため）。 */
   h += '<div class="card"><div class="toggle"><b>説明文をいつも開いておく</b>'
      + '<button class="sw'+(DB.noteOpen?' on':'')+'" onclick="DB.noteOpen=!DB.noteOpen;save();render()"><i></i></button></div>'
@@ -5111,6 +5291,10 @@ function viewBrPick(s){
        + (g.desc ? '<br>'+esc(g.desc) : '')+'</small></button>';
   });
   h += '</div>';
+  /* v74: 画面が消えると合図ごと止まることを、選ぶ前に1行だけ */
+  h += '<p class="note">'+(brWakeOK()
+       ? '🔆 呼吸のあいだは、<b>画面をつけたままにします</b>（消えると合図の音も止まるため）。'
+       : '⚠️ <b>画面が消えると、合図の音も止まります。</b>iPhoneの「設定 → 画面表示と明るさ → 自動ロック」を一時的に長くしてから選んでください。')+'</p>';
   h += '<button class="btn ghost" onclick="brSkipRow()">呼吸をしないで次へ</button>';
   h += '<button class="btn link" onclick="brLibGo(\'run\')">プログラムを直す・足す</button>';
   h += '<button class="btn" onclick="finishNow()">'+(autoBack() ? 'ここまでにして、さっきの続きに戻る' : 'ここまでで終える')+'</button>';
@@ -5328,7 +5512,11 @@ function viewRunAuto(s){
      ボタンに格上げし、押し間違えにくい一時停止/再開は下の小さめのボタンへ
      退けた。押す機能そのもの（autoSkip）は変えていない。 */
   h += '<button class="btn big" onclick="autoSkip()">次へ ▶</button>';
-  h += '<button class="btn ghost" style="margin-top:9px" onclick="autoPauseToggle()">'+(autoPaused?'▶ 再開する':'⏸ 一時停止する')+'</button>';
+  /* v73: 押し間違えたとき用の ◀ 前へ。主ボタン（次へ ▶）より小さく、一時停止と横に並べる */
+  h += '<div class="row" style="margin-top:9px">'
+     + '<button class="btn ghost" style="margin-top:0" onclick="autoPrev()">◀ 前へ'+((autoUndo && autoUndo.id===curId && autoUndo.step===curStep-1)?'（押す前に戻す）':'')+'</button>'
+     + '<button class="btn ghost" style="margin-top:0" onclick="autoPauseToggle()">'+(autoPaused?'▶ 再開する':'⏸ 一時停止する')+'</button>'
+     + '</div>';
   /* v20 (2026-09-03 ご依頼): 自動で進むセットにも延長を付けた
      （タップ式には v14 から入っていたが、こちらには無かった） */
   /* v26（2026-09-05 ご指摘）: 自動で進むセットでも、🧸 を下まで探しに行かせない。
@@ -6254,6 +6442,13 @@ function focusPause(){
    集中の時計は止める（呼吸は集中している時間ではないため）。
    終わりが3分うしろへずれることは画面に出す。iPhone標準タイマーは
    こちらからは止められないので、渡し直すボタンも出す。 */
+/* v74: 🍵 などを集中から寄り道で始める（focusBreath と同じ仕組み） */
+function focusDetour(id){
+  var b = setOf(id); if(!b) return;
+  if(!fPaused){ fPauseAt = Date.now(); fPaused = true; }
+  fromFocus = true;
+  start(b.id);
+}
 function focusBreath(){
   var b = breathSet(); if(!b) return;
   if(!fPaused){ fPauseAt = Date.now(); fPaused = true; }
@@ -6480,6 +6675,12 @@ function viewFocus(){
     h += '<button class="btn ghost" onclick="focusBreath()">'+esc(bs.icon)+' 集中が切れた — 呼吸を'+Math.max(1,Math.round(limitOf(bs)/60))+'分</button>';
     h += '<p class="note">押すと<b>集中の時計は止まります</b>。呼吸が終わったら、続きから再開できます（休憩の終わりは、その分うしろへずれます）。</p>';
   }
+  /* v74（指示_2026-10-22_4 ②・ご依頼「集中ブロック中やブロック終わった後に選択できるセットに一息や呼吸のセットなどを選べるように」）:
+     🍵 ひと息 を、🌬️ と同じ「集中の時計を止めて寄り道 → 終わったら ▶ 集中に戻る」で出す。 */
+  var bz = breatherSet();
+  if(bz && !(bs && bs.id===bz.id)){
+    h += '<button class="btn ghost" onclick="focusDetour(\'breather\')">'+esc(bz.icon)+' 脳がつかれた — ひと息'+Math.max(1,Math.round(limitOf(bz)/60))+'分</button>';
+  }
   /* v25: 子供と一緒モードのときだけ、🧸を集中の画面にも出す。
      仕事の集中ブロックには出さない（場面が違うものを毎回見せない）。 */
   if(angerSet() && fSlotNow()==="kids"){
@@ -6520,6 +6721,19 @@ function viewFocusDone(){
   /* v12: 休憩に移るルーティンを、このアプリの中のセットから選ぶ。
      🛟（崩れたとき用）は「崩れた」ボタンの飛び先なので、ここには並べない。 */
   var cands = normals();
+  /* v74（指示_2026-10-22_4 ②）: 🍵 ひと息・🌬️ 呼吸を、休憩に移る候補の先頭に出す。
+     🍵 はホームの一覧（normals）から外してあるため、これまでここに出ていなかった。
+     先頭に出したものは下の一覧から外す（同じボタンを2回並べない）。 */
+  var quick = [breatherSet(), breathSet()].filter(function(x, i, a){ return x && !x.archived && a.indexOf(x)===i; });
+  if(quick.length){
+    h += '<div class="sec">ひと息・呼吸で休む</div>';
+    quick.forEach(function(x){
+      h += '<button class="setb" onclick="breakStart(\''+x.id+'\')">'+esc(x.icon)+' '+esc(x.name)
+         + '<small>'+durLabel(limitOf(x))+' ・ 音と声で進みます</small></button>';
+    });
+    var qIds = quick.map(function(x){ return x.id; });
+    cands = cands.filter(function(x){ return qIds.indexOf(x.id) < 0; });
+  }
   if(cands.length){
     h += '<div class="sec">休憩に移る</div>';
     var lastId = DB.focus.lastBreak;
@@ -6983,6 +7197,79 @@ function toggleShowArchived(){ collect(); showArchived = !showArchived; armed = 
    editId が null なら一覧、入っていればそのセットの詳細。
    ============================================================ */
 var editId = null;
+/* ===== v73（指示_2026-10-22_3 ①）: 🤖 AIに直してもらう =====================
+   ご依頼「セットを選び、現時点のセット内容をコピーして、改善内容のメモ欄、AIへのプロンプトを
+   一括でコピーできる仕組みが欲しい」。
+   ・1つだけ開いた編集画面に置く（どのセットの話かを取り違えないため）。
+   ・コピーする直前に collect() で画面の入力を取り込む＝保存前に直した分も入る。
+   ・返ってきた行は既存の「まとめて編集する（テキストで貼り付け）」に貼る。取り込みの仕組みは足していない。
+   ・メモはこの画面を開いているあいだだけ持つ（DBにもVaultにも書かない＝読み戻しのホワイトリストも不要）。 */
+var aiMemo = {};
+function aiFixText(s){
+  var st = (s && s.steps) ? s.steps : [];
+  var L = [];
+  L.push("ルーティンアプリ（routine.html）の「セット」を直してください。");
+  L.push("");
+  L.push("【直したいこと】");
+  L.push(String(aiMemo[s.id]||"").trim() || "（まだ書いていません。下のセットを見て、続けやすくなる直し方を提案してください）");
+  L.push("");
+  L.push("【いまのセット】");
+  L.push("名前: "+String(s.icon||"")+" "+String(s.name||""));
+  L.push("進み方: "+(s.auto ? "自動で進む（秒数どおりに次の項目へ進む）" : "タップで進む（終わったら自分で「できた」を押す）"));
+  L.push("全体: "+durLabel(limitOf(s))+" ・ "+st.length+"項目");
+  if(s.note) L.push("説明: "+String(s.note));
+  L.push("ステップ（1行＝1項目）:");
+  st.forEach(function(x){ L.push(String(x)); });
+  L.push("");
+  L.push("【ステップの書式】");
+  L.push("秒数|画面の文言|読み上げ（省略可）|開くアプリ（省略可）");
+  L.push("・1行に1項目。秒数は整数（例: 60＝1分）。全体の時間は秒数の合計で決まります。");
+  L.push("・画面の文言の（　）の中は読み上げません。読み上げを別の言葉にしたいときだけ3列目に書きます。");
+  L.push("・4列目（開くアプリ）が入っている行は、その値をそのまま残してください（3列目が空でも「|」は残す）。");
+  L.push("");
+  L.push("【返してほしい形】");
+  L.push("1. 直したあとのステップを、上の書式で全行（直さない行も含めて）1つのコードブロックに入れてください。");
+  L.push("2. その下に、何をどう変えたかを3行以内で。");
+  L.push("返ってきた行は、アプリの「まとめて編集する（テキストで貼り付け）」にそのまま貼り付けます。");
+  return L.join("\n");
+}
+function aiMemoIn(id){
+  var m = document.getElementById("ai_memo_"+id); if(m) aiMemo[id] = m.value;
+  var s = setOf(id), o = document.getElementById("ai_out_"+id);
+  if(s && o) o.value = aiFixText(s);
+}
+function aiFixCopy(id){
+  aiMemoIn(id);
+  collect(); save();   /* 画面で直したところ（まだ保存していない分）も入れる */
+  var s = setOf(id), t = document.getElementById("ai_out_"+id); if(!s || !t) return;
+  t.value = aiFixText(s);
+  var ok = false;
+  t.removeAttribute("readonly");
+  try{ t.focus(); t.select(); t.setSelectionRange(0,999999); ok = document.execCommand("copy"); }catch(e){}
+  t.setAttribute("readonly","");
+  var yes = "コピーしました。AI（Claudeなど）に貼り付けて送ってください。返ってきた行は「まとめて編集する」に貼ります。";
+  var no  = "コピーできませんでした。下の枠を長押し →「すべてを選択」→「コピー」でも同じことができます。";
+  if(!ok && navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(t.value).then(function(){ alertLess(yes); }, function(){ alertLess(no); });
+    return;
+  }
+  alertLess(ok ? yes : no);
+}
+function aiFixUI(s){
+  var h = '<div class="sec">🤖 AIに直してもらう</div>';
+  h += '<div class="card">';
+  h += '<p class="note" style="margin:0 0 8px">直したいことを書いて、下のボタンを押すと<b>「AIへのお願い文」＋「いまのセットの中身」＋「このメモ」</b>をまとめてコピーします。'
+     + 'AIに貼って送り、返ってきた行は上の<b>「まとめて編集する（テキストで貼り付け）」</b>に貼り付けてください。</p>';
+  h += '<label>直したいこと（メモ）</label>';
+  h += '<textarea id="ai_memo_'+s.id+'" style="min-height:80px" placeholder="例：朝は時間がないので全体を10分以内に／2つめの項目が長すぎる" oninput="aiMemoIn(\''+s.id+'\')">'+esc(aiMemo[s.id]||"")+'</textarea>';
+  h += '<button class="btn" onclick="aiFixCopy(\''+s.id+'\')">📋 まとめてコピーする</button>';
+  /* 枠は畳まない（畳んだ中の枠は iPhone で選択・コピーできないことがあるため。📋 バックアップと同じ作り） */
+  h += '<label style="margin-top:8px">コピーされる中身（確認用・メモを書くとその場で変わります）</label>'
+     + '<textarea id="ai_out_'+s.id+'" style="min-height:140px;font-family:ui-monospace,monospace;font-size:12px" readonly>'+esc(aiFixText(s))+'</textarea>';
+  h += '<p class="note" style="margin:8px 0 0">メモはこの画面を開いているあいだだけ残ります（記録には入りません）。</p>';
+  h += '</div>';
+  return h;
+}
 function editGo(id){ collect(); editId = id; armed = null; save(); render(); }
 function editBack(){ collect(); editId = null; armed = null; save(); render(); }
 var EDIT_HINT = '<div class="hint"><b>ステップの書き方</b><br>'
@@ -7021,6 +7308,7 @@ function viewEdit(){
     else               h1 += setCardActive(s1, idxOf(s1.id));
     h1 += '<button class="btn save" onclick="collect();save();editBack()">保存して一覧へ戻る</button>';
     h1 += '<p class="note">空にした欄は、変更なしとして扱います（うっかり消えないようにするためです）。説明文とプレイリストURLだけは空にできます。<br>並べ替え・複製・削除・追加・トグルの切り替え・アーカイブ・復元は、押した時点でその場で保存されます。</p>';
+    h1 += aiFixUI(s1);   /* v73: 🤖 AIに直してもらう（メモ＋お願い文＋いまのセットを一括コピー） */
     h1 += EDIT_HINT;
     /* v27: このセットにストレッチのプログラムを組み込む／入れ替える */
     h1 += '<div class="sec">🧘 ストレッチのプログラム</div>';
