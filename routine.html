@@ -1617,7 +1617,7 @@ function parkBtn(){
 
 /* --- 状態 --- */
 /* v27: 版の表示（ホーム最下部）。中身を変えたら、ここも必ず上げる。 */
-var APPVER = "切り替えルーティン v74 ・ 2026-10-22";
+var APPVER = "切り替えルーティン v75 ・ 2026-10-23";
 var view = "home";
 var curId = null;
 var startAt = 0;
@@ -2563,7 +2563,7 @@ function autoTick(s){
       var brSleep = (curId==="breath478");
       if(brSleep) padDuck();   /* v72: 合図の前後1〜2秒だけ持続音を下げる（声と合図音を邪魔しない） */
       brChime(bi.ph.k, brSleep);
-      if(brSleep) brSay(bi.ph.k);
+      if(brSleep) brSay(bi.ph.k, bi.ph.sec);   /* v75: その動作の秒数に合わせて言葉と速さを選ぶ */
     }
   }
 }
@@ -2601,16 +2601,42 @@ function brChime(k, force){
   else if(k==="out"){ beep(700,.26,F,V,W); setTimeout(function(){beep(520,.36,F,V,W);},150); }
 }
 /* v62: 🌬️ の声の合図。speak() と違い、ホームの「読み上げ」に関係なく話す。
-   短い言葉にしてある（4-7-8 の4秒・ボックスの4秒でも言い切れるように）。 */
-var BR_SAY = { in:"吸って", top:"もう少し吸って", hold:"止めて", out:"吐いて", hold2:"止めて" };
-function brSay(k){
-  var t = BR_SAY[k]; if(!t) return;
+   v75（2026-10-23・ご記入「吸う、吸い足すなどの動作の音声案内について時間が短いと途中できれてしまうのが、わずらわしい」）
+   ★原因は音量でも途切れでもなく、**言葉がその動作の秒数より長かった**こと。
+     動作が変わるたびに brSay() を呼び、前の発話が残っていれば cancel() している（同期のために必要）。
+     「もう少し吸って」は 8拍＝約1.3秒。ところが 吸い足す は 1秒の形がふつう（例: 吸う3 吸い足す1 吐く6）。
+     **言い終わる前に次の動作が来て、毎回ここで切られていた。**「わずらわしい」のは、
+     切れる場所が毎サイクル同じ＝1回の呼吸に必ず1度、途中で切れる音が入っていたため。
+   → **言葉のほうを動作の秒数に合わせる。**①長い言い方が入らなければ短い言い方にする
+     ②それでも入らなければ話す速さを上げる（上限 1.35）③1秒未満の動作は声を出さず音だけにする。
+   ★「切れたら困る」を「切れない長さしか言わない」に変えた。cancel() は保険として残す
+     （入る長さを選んでいるので、ふつうは発話中に次が来ない）。 */
+var BR_SAY  = { in:"吸って", top:"もう少し吸って", hold:"止めて", out:"吐いて", hold2:"止めて" };
+var BR_SAY_S= { in:"吸って", top:"もう少し",       hold:"止めて", out:"吐いて", hold2:"止めて" };
+/* 拍数（モーラ）。日本語の読み上げは rate 1.0 でおよそ 7拍/秒、話し始めまでに約0.15秒かかる。 */
+var BR_MORA = { "吸って":3, "もう少し吸って":8, "もう少し":5, "止めて":3, "吐いて":3 };
+var BR_MORA_PS = 7, BR_SAY_LEAD = .15, BR_SAY_MARGIN = .15, BR_SAY_MIN = .8;
+function brSayFit(t, rate){ return BR_SAY_LEAD + (BR_MORA[t] || 6) / (BR_MORA_PS * rate); }
+/* その動作（sec 秒）のあいだに言い切れる「言葉と速さ」を選ぶ。入らなければ null＝声は出さない。 */
+function brSayPick(k, sec){
+  if(!(sec > 0)) sec = 99;                 /* 秒数が分からないときは従来どおり長い言い方 */
+  if(sec < BR_SAY_MIN) return null;        /* 1秒未満は音だけ（どう言っても切れるため） */
+  var room = sec - BR_SAY_MARGIN;
+  var cand = [[BR_SAY[k], .95], [BR_SAY_S[k], .95], [BR_SAY_S[k], 1.15], [BR_SAY_S[k], 1.35]];
+  for(var i=0;i<cand.length;i++){
+    if(!cand[i][0]) return null;
+    if(brSayFit(cand[i][0], cand[i][1]) <= room) return { t:cand[i][0], rate:cand[i][1] };
+  }
+  return null;                             /* いちばん短く速くしても入らない＝音だけ */
+}
+function brSay(k, sec){
+  var pick = brSayPick(k, sec); if(!pick) return;
   try{
     if(!window.speechSynthesis) return;
     /* v74: 話していないときに cancel() してすぐ speak() すると、iOS は次の発話を落とすことがある */
     if(window.speechSynthesis.speaking || window.speechSynthesis.pending) window.speechSynthesis.cancel();
-    var u = new SpeechSynthesisUtterance(t);
-    u.lang = "ja-JP"; u.rate = 0.95;
+    var u = new SpeechSynthesisUtterance(pick.t);
+    u.lang = "ja-JP"; u.rate = pick.rate;
     window.speechSynthesis.speak(u);
   }catch(e){}
 }
