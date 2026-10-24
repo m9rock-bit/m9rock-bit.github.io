@@ -354,7 +354,7 @@ const CARDIO_DEF={
 const RATES=["かるすぎる","ちょうどよい","きつすぎる"];
 /* v9（2026-09-05）: 版の表示（ホーム最下部）。開いて1秒で新旧を見分けるため。
    中身を変えたら、ここも必ず上げる。 */
-const APPVER="B.M.C. ジム v24 ・ 2026-10-20";
+const APPVER="B.M.C. ジム v25 ・ 2026-10-24";
 const NORM=30;                    /* グラフの換算基準（30分あたり） */
 const HARDS=["余裕","ちょうどよい","きつい"];
 
@@ -438,6 +438,8 @@ if(!DB.sessions) DB.sessions=[];
 if(DB.active===undefined) DB.active=null;
 if(!DB.settings) DB.settings={};
 if(typeof DB.settings.rest!=="number") DB.settings.rest=REST_DEF;
+/* v25 (2026-10-24 ご依頼「朝の運動がおわったら、自動で記録を配信」): 既定はオン。 */
+if(typeof DB.settings.autoSend!=="boolean") DB.settings.autoSend=true;
 /* v3: 種目ごとのセット数。既定（3）の種目はキーを持たない＝古い控えを貼り戻しても壊れない。
    この初期化は何度走らせても同じ結果になる（冪等）。 */
 if(!DB.settings.sets || typeof DB.settings.sets!=="object") DB.settings.sets={};
@@ -1817,8 +1819,23 @@ function cinSave(){
                   segW:(cBuf.segW?cClone(cBuf.segW):null),
                   dist:Math.round(d*100)/100, kcal:(isNaN(k)?0:Math.round(k)),
                   hard:mid, memo:String(cBuf.memo||"").slice(0,120)});
-  save(); cBuf=null; cHold={}; go("cardio");
+  save(); cBuf=null; cHold={};
+  if(autoHub()) return;   /* v25: 有酸素を保存したら、そのまま記録ハブで自動送信 */
+  go("cardio");
 }
+/* v25: 運動の終わりに記録ハブ（log.html#auto）を開く。ハブが未送信分（gymが先）を1回で送る。
+   routine v61 の「🌅 起きた」と同じ入口。同じドメイン内の移動なので location.href でよい（log.html の約束2）。
+   有酸素を保存したとき／筋トレを終えたときに今日の有酸素がもうある（＝有酸素が先だった）ときに呼ぶ。
+   筋トレだけの日は従来どおり「📤 記録を送る」で送る（筋トレのあとに有酸素へ行く途中で Obsidian へ飛ばないため）。 */
+function autoHub(){
+  if(DB.settings.autoSend===false) return false;
+  try{ location.href = "log.html#auto"; return true; }catch(e){ return false; }
+}
+function cardioToday(){
+  var d=new Date(); d.setHours(0,0,0,0); var t=d.getTime();
+  return (DB.cardio||[]).some(function(c){ return c && c.date>=t; });
+}
+function autoSendGo(){ DB.settings.autoSend = !(DB.settings.autoSend!==false); save(); render(); }
 function viewCIn(){
   if(!cBuf) return viewCardio();
   var p=cBuf.plan;
@@ -3251,6 +3268,7 @@ function viewHome(){
 
   <button class="btn ghost" onclick="go('log')">これまでの記録（${d.length}回）</button>
   <a class="btn ghost" href="log.html" style="display:block;text-decoration:none">📤 記録を送る（記録ハブ）</a>
+  <button class="btn ghost" onclick="autoSendGo()">運動が終わったら自動で送る：${DB.settings.autoSend!==false?"オン":"オフ"}（押すと切り替え）</button>
   <button class="btn ghost" onclick="bkGo()">💾 バックアップ（書き出し・読み込み）</button>
   ${showProgress() ? "" : `<p class="note">重さを上げるルール（3セットとも上限回数を2回続けたら1段上げる）は、<strong>9/1から</strong>案内します。それまでは記録だけ残ります。</p>`}
   <p class="note" style="text-align:center;opacity:.45;margin-top:14px">${APPVER}</p>`;
@@ -3532,7 +3550,9 @@ function finishSession(){
   s.date=s.date||Date.now();
   s.sec=elapsedSec();          /* v2: 所要時間を事実として残す（順位づけはしない） */
   s.rest=restSec();            /* そのとき使っていた休憩の長さ。あとで見比べるため */
-  DB.sessions.push(s); DB.active=null; save(); stopRest(); stopSessionClock(); go("log");
+  DB.sessions.push(s); DB.active=null; save(); stopRest(); stopSessionClock();
+  if(cardioToday() && autoHub()) return;   /* v25: 有酸素のあとに筋トレをした日は、ここで自動送信 */
+  go("log");
 }
 function cancelSession(){
   if(!confirm("この回を残さずにやめますか？")) return;

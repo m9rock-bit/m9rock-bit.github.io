@@ -91,7 +91,7 @@ h1{font-size:21px;margin:2px 0 4px}
 var HKEY = "bmc_log_hub_v1";
 var RKEY = "bmc_routine_v1";
 var GKEY = "bmc_gym_v1";
-var APPVER = "B.M.C. 記録ハブ v9 ・ 2026-10-14";
+var APPVER = "B.M.C. 記録ハブ v10 ・ 2026-10-24";
 
 var H = {
   vault: "My Valut",
@@ -102,6 +102,7 @@ var H = {
   maxRows: 15,      /* 1回の送信に入れる行数の上限 */
   maxLen: 6000,     /* 組み上がったURIの長さの上限（これを超える前に切る） */
   sent: [],         /* 送信済みのID。古いものから捨てる */
+  mig10: false,     /* v10: 10/23までのgymの行（ご本人が手で貼った分）を1回だけ送信済みにしたか */
   items: false      /* v7: routineの「項目」行を送るか。既定は送らない（1日数十行出て、gymの記録が後ろで詰まっていた） */
 };
 var SENTMAX = 4000;
@@ -120,6 +121,7 @@ function hLoad(){
       if(typeof o.maxRows==="number" && o.maxRows>0) H.maxRows = o.maxRows;
       if(Array.isArray(o.sent)) H.sent = o.sent;
       if(typeof o.items==="boolean") H.items = o.items;
+      if(typeof o.mig10==="boolean") H.mig10 = o.mig10;
     }
   }catch(e){}
   /* 初回だけ、開始日を今日にする。過去の記録は対象外として数えない
@@ -476,12 +478,34 @@ function fileName(){
     .replace(/\{YYYY\}/g, String(d.getFullYear()))
     .replace(/\{MM\}/g, p2(d.getMonth()+1));
 }
+/* v10 (2026-10-24): ★gymの行が一度も届かなかった原因はここ。
+   有酸素区間・有酸素プログラムの行は必ず「傾斜4%」の「%」を含む。Obsidian が URI を
+   ほどいたあと Advanced URI がもう一度ほどくため、生の「%」が「壊れた%記号」になって
+   その回の送信が丸ごと捨てられていた（%を含まない routine の行と筋トレだけの回は届く）。
+   実測：9月〜10/23 の実施ログ・セット定義に、ハブから届いた「%」入りの行は1行も無い。
+   → 送る本文の「%」だけを先に「%25」にしてから包む（2回ほどかれて「%」に戻る）。
+   ファイルに入る文字は従来と1文字も変わらない。コピー欄（手で貼る用）は生のまま。 */
+function dataEnc(text){ return encodeURIComponent(String(text).replace(/%/g, "%25")); }
 function uriOf(text, path){
   var u = "obsidian://advanced-uri?";
   if(H.vault) u += "vault="+encodeURIComponent(H.vault)+"&";
   u += "filepath="+encodeURIComponent(path);
-  u += "&mode="+H.mode+"&data="+encodeURIComponent(text);
+  u += "&mode="+H.mode+"&data="+dataEnc(text);
   return u;
+}
+/* v10: 2026-10-24 05:16 にご本人が 10/06〜10/23 の gym の行を全部手で貼った
+   （ハブから届いていなかったため）。直したあと同じ行が二重に入らないよう、
+   10/24 0:00 より前の gym の行（筋トレ g・有酸素 c・区間 v）を1回だけ送信済みにする。
+   実施ログだけ。設計（有酸素プログラムの p 行）は一度も届いていないので触らない。 */
+function mig10(){
+  if(H.mig10) return;
+  var cut = new Date(2026, 9, 24, 0, 0, 0).getTime(), n = 0;
+  collect().forEach(function(x){
+    var m = /^[gcv](\d+)/.exec(x.id);
+    if(m && Number(m[1]) < cut && !isSent(x.id)){ H.sent.push(x.id); n++; }
+  });
+  H.mig10 = true; hSave();
+  return n;
 }
 /* 今回送る分を、行数と URI の長さの両方で切る。
    長すぎるURIは端末側で黙って落ちることがあるため、必ず分ける。 */
@@ -661,6 +685,7 @@ try{
 }catch(e){}
 
 hLoad();
+try{ mig10(); }catch(e){}
 /* v9 (2026-10-14): routine v61 の「🌅 起きた」から log.html#auto で開かれたら、
    未送信の実施ログを1回ぶん自動で送る（ご選択「朝『起きた』で送る」）。
    印は送る直前に付ける（手で押したときと同じ）。届かなければ設定の「未送信に戻す」で戻せる。

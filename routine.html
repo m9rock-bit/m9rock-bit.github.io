@@ -836,7 +836,7 @@ function defaults(){ return [
 var FOCUS_DEF = { len:{am:120,pm:90,ev:50,kids:15}, from:{pm:12,ev:16}, seg:[15,25,40], segKids:[5,5,5], sound:false, native:true, notify:true, lastBreak:"",
   /* v20 (2026-09-03): 集中ブロックのプレイリスト。spMode は "default"（既定URL）か "own"（専用URL）。 */
   spotify:false, spMode:"default", spotifyUrl:"" };
-var DB = { v:19, sets:null, chime:true, voice:true, third:true, noteOpen:false, spotifyUrl:"", scName:"ルーティンタイマー", log:[], count:0, focus:null, notes:[], times:[], sleepActive:false, sleepStartAt:0,
+var DB = { v:19, sets:null, chime:true, voice:true, third:true, noteOpen:false, spotifyUrl:"", scName:"ルーティンタイマー", notifySc:"ルーティン通知", log:[], count:0, focus:null, notes:[], times:[], sleepActive:false, sleepStartAt:0,
   /* v20 (2026-09-03): 就寝のプレイリスト。spMode は "default"（既定URL）か "own"（専用URL）。 */
   sleepSpotify:false, sleepSpMode:"default", sleepSpotifyUrl:"",
   /* v22 (2026-09-05): 実行中の途中経過の控え（詳細は save() の下のコメント） */
@@ -888,6 +888,7 @@ try{
     if(typeof p.voice==="boolean") DB.voice = p.voice;
     if(typeof p.spotifyUrl==="string") DB.spotifyUrl = p.spotifyUrl;
     if(p.scName) DB.scName = p.scName;
+    if(typeof p.notifySc==="string") DB.notifySc = p.notifySc;   /* v76 */
     if(Array.isArray(p.log)) DB.log = p.log;
     if(Array.isArray(p.notes)) DB.notes = p.notes;
     if(Array.isArray(p.times)) DB.times = p.times;
@@ -1498,7 +1499,7 @@ function blGo(i, min){
   saveRun();
   render();
   awayClear();                /* 離席中に鳴らせる本数は1本（v37・v41と同じ） */
-  nativeTimer(m*60);
+  handOff(m*60);              /* v76: セットの渡し方に従う */
 }
 function blEnd(){
   if(!blOn()) return;
@@ -1617,7 +1618,7 @@ function parkBtn(){
 
 /* --- 状態 --- */
 /* v27: 版の表示（ホーム最下部）。中身を変えたら、ここも必ず上げる。 */
-var APPVER = "切り替えルーティン v75 ・ 2026-10-23";
+var APPVER = "切り替えルーティン v76 ・ 2026-10-24";
 var view = "home";
 var curId = null;
 var startAt = 0;
@@ -2174,7 +2175,7 @@ function thirdLeft(){
 function thirdTimer(){
   var t3 = thirdLeft();
   if(t3 < 1) return;
-  nativeTimer(t3);
+  handOff(t3, true);   /* v76 */
 }
 
 /* ============================================================================
@@ -2323,6 +2324,18 @@ function awayArm(){
   var s = setOf(curId);
   awayClear();
   if(!s || s.auto) return;
+  /* v76: 「⏱ 項目ごと」を選んだセットは、項目の残りをiPhoneのタイマーへ渡す
+     （v55 で消した「進むたびの自動の渡し」を、セットごとに選べる形で戻した）。
+     本人が選んだものなので「音を出さない」より優先する。後回しの呼び戻しは上書きしない。 */
+  if(alarmOf(s)==="step"){
+    if(snOn()) return;
+    if(curStep==null || curStep<0) return;
+    var st0 = stepsOf(s); if(!st0[curStep]) return;
+    var l0 = stepLeft(); if(l0 < 1) return;
+    awayStep = curStep; awaySec = l0; awayAt = Date.now(); awayKind = "timer";
+    nativeTimer(l0);
+    return;
+  }
   /* v36: 音を出さないセットでは、離席中の音も自動の標準タイマーも仕掛けない
      （どちらも「離席中に鳴らす」ためのものなので、消音の対象に含める）。
      実行中の画面から手で押す「⏱ iPhoneのタイマーにも渡す」は残る。 */
@@ -2354,7 +2367,7 @@ function awayTimerNow(){
   if(l < 1) return;
   awayKind = (awayKind==="sound" || awayKind==="both") ? "both" : "timer";
   awaySec = l; awayAt = Date.now(); awayStep = curStep;
-  nativeTimer(l);
+  handOff(l, true);   /* v76: 🔔のセットでは通知へ */
 }
 /* ===== v55（2026-10-03 ご記入②）: 離席中の案内を、開始時に1度だけ渡す =========
    出どころ: 指示_2026-10-02_4 §3。「セットが次に移動するたびにショートカット画面に
@@ -2390,6 +2403,7 @@ function guideArm(s){
   guideOn = false; guideOff = false;
   if(!DB.guide) return false;
   if(!s || !s.auto) return false;
+  if(alarmOf(s)==="step") return false;         /* v76: 項目ごとに渡すセットでは案内列は渡さない（二重になるため） */
   if(quietOf(s)) return false;                  /* 音を出さないセットでは渡さない（v36の線） */
   var nm = String(DB.guideSc||"").trim(); if(!nm) return false;
   var txt = guideText(s); if(!txt) return false;
@@ -2427,7 +2441,7 @@ function awayBlock(s){
        + '<br><b>鳴らしているあいだ、Spotify・YouTubeの音は止まります。</b></div>';
   }else if(armed && awayKind==="timer"){
     h += '<div class="hint" style="border-color:#7a9ec4;color:#bcd6ee">'
-       + '<b>⏰ iPhoneの標準タイマーに '+durLabel(awaySec)+' を渡しました。</b>'
+       + (handWord()==="通知" ? '<b>🔔 '+durLabel(awaySec)+' 後の通知を渡しました。</b>' : '<b>⏰ iPhoneの標準タイマーに '+durLabel(awaySec)+' を渡しました。</b>')
        + 'ロック画面に残り時間が出て、他のアプリを使っていても鳴ります。</div>';
   }else if(l > 0){
     h += '<div class="hint">この項目には、離席中に鳴るものが<b>仕掛かっていません</b>。'
@@ -2436,10 +2450,10 @@ function awayBlock(s){
   if(awayFail){
     h += '<div class="warn">離席中の音を鳴らせませんでした（'+esc(awayFail)+'）。'
        + '下の「⏰ …タイマーへ渡す」を使ってください。設定で「離席中の音」を切ると、'
-       + '<b>項目を進めるたび自動で標準タイマーへ渡す</b>形に戻ります。</div>';
+       + '<b>このセットの「iPhoneへの渡し方」を「⏱ 項目ごと」にすると</b>、項目を進めるたび自動で標準タイマーへ渡します。</div>';
   }
   if(l > 0){
-    h += '<button class="btn ghost" onclick="awayTimerNow()">⏰ この項目の残り '+durLabel(l)+' を iPhoneのタイマーへ渡す</button>';
+    h += '<button class="btn ghost" onclick="awayTimerNow()">⏰ この項目の残り '+durLabel(l)+' を '+handWord()+'へ渡す</button>';
   }
   if(awayKind==="sound" || awayKind==="both"){
     h += '<button class="btn link" onclick="awaySoundOff()">🔕 離席中の音をやめる（以後オフ・設定で戻せます）</button>';
@@ -2538,6 +2552,11 @@ function autoTick(s){
     var wasBr = isBreath(st[curStep]) && !!brPick[curStep];
     for(var j=curStep; j<idx && j<st.length; j++){ if(!doneSet[j]) doneSet[j] = "done"; }
     curStep = idx;
+    /* v76: 「⏱ 項目ごと」のセットは、進んだ項目の残りを渡す（render の外＝次の一拍で）。 */
+    if(alarmOf(s)==="step"){
+      var _rem = Math.max(1, Math.round(cum - e)), _sid = s.id, _ix = idx;
+      setTimeout(function(){ if(view==="run" && curId===_sid && curStep===_ix && !autoPaused) nativeTimer(_rem); }, 0);
+    }
     if(!isBreath(st[idx])){
       phaseChime(st[idx].text);   /* v16: 呼吸法は吸う・止める・吐くで音を変える。それ以外は従来どおりの音 */
       if(s.voice) speak((wasBr ? "呼吸はここまでです。" : "") + sayOf(st[idx]));  /* 3列目があればそれを、無ければ（…）を外した文言を読む */
@@ -3198,7 +3217,12 @@ function start(id, fromIndex, mode){   /* v38: mode = "rest" | "joy"（省略時
      （最後の行が「おしまいです」なので、セット全体のタイマーは要らない）。 */
   guideOn = false; guideOff = false;
   if(s && guideArm(s)){ /* v55: 案内列を1度だけ渡した */ }
-  else if(s && s.timer && limitOf(s)>0){ nativeTimer(limitOf(s)); }
+  else if(s && alarmOf(s)==="set" && limitOf(s)>0){ nativeTimer(limitOf(s)); }
+  else if(s && alarmOf(s)==="notify" && limitOf(s)>0){ notifyRun(limitOf(s)); }   /* v76 */
+  else if(s && alarmOf(s)==="step"){   /* v76: 最初の項目の分だけ渡す */
+    if(s.auto){ var _st0 = stepsOf(s); if(_st0[0]) nativeTimer(Math.max(1, Math.round(_st0[0].sec))); }
+    else awayArm();
+  }
   else if(s && s.spotify){ openSpotify(s); }
   /* v35: プレイリストもセット全体のタイマーも無いセットでは、最初の項目にも
      離席中に鳴るものを仕掛ける（外向きの動作は1つだけ、という v8 の線は維持）。 */
@@ -3432,7 +3456,7 @@ function foldSum(s){
    触っているので残してある（常に false）。 */
 function foldUndo(){ foldOn = false; foldAsking = false; foldMode = ""; joyName = ""; joyFeel = ""; joyNote = ""; saveRun(); render(); }   /* v38: モードも片づける */
 function foldPickRest(i){ foldRest = (i<0) ? "" : (restList()[i] || ""); render(); }
-function foldRestTimer(){ nativeTimer(900); }
+function foldRestTimer(){ handOff(900, true); }   /* v76 */
 
 /* ===== v38（2026-09-12 仕様書_2026-09-12_今日の自分に合わせる）: 🌗 今日の自分に =====
    9/11（金）の振り返りが出どころ。「週1の仕事の終わりに、いつもの日と同じ
@@ -3480,7 +3504,7 @@ function joyNowGo(min){
   /* 標準タイマーは **render のあと**（ここで画面がショートカットAppへ飛ぶ）。
      v37 と同じく、離席中に鳴らせる本数は1本なので awayClear してから渡す。 */
   awayClear();
-  nativeTimer(min*60);
+  handOff(min*60);   /* v76: セットの渡し方に従う */
 }
 /* ルーティンに戻る。いまの項目の続きから数え直す。 */
 function joyNowEnd(){
@@ -3595,7 +3619,7 @@ function joySetNote(){
   joyStamp(); render();
 }
 function joyMinAdd(d){ joyMin = Math.max(5, Math.min(120, joyMin + d)); joyStamp(); render(); }
-function joyTimer(){ nativeTimer(joyMin*60); }
+function joyTimer(){ handOff(joyMin*60, true); }   /* v76 */
 
 function stepSec(i){
   var s = setOf(curId); if(!s) return 60;
@@ -4071,7 +4095,7 @@ function snGo(min){
   /* 呼び戻しを標準タイマーへ。**render のあとに置く**
      （ここでショートカットAppへ画面が飛ぶため）。 */
   awayClear();
-  nativeTimer(min*60);
+  handOff(min*60);   /* v76 */
 }
 /* 後回しにした項目へ戻る。 */
 function snBack(){
@@ -4089,7 +4113,7 @@ function snMore(min){
   snSaid = false;
   saveRun();
   render();
-  nativeTimer(min*60);
+  handOff(min*60);   /* v76 */
 }
 /* 後回しをやめる（戻らずに、いまの項目を続ける）。 */
 function snDrop(){
@@ -4272,6 +4296,77 @@ function nativeTimer(sec){
   sec = Math.max(1, Math.round(sec || left()));
   location.href = "shortcuts://run-shortcut?name=" + encodeURIComponent(DB.scName)
                 + "&input=text&text=" + sec;
+}
+/* ===== v76（2026-10-24・提案_2026-10-24 のご回答）: セットごとの「iPhoneへの渡し方」 =====
+   問1「セットの各項目が進む際にその項目のみのタイマーを自動で渡す機能も選択式に」＋
+   問2「推奨通り」により、セット全体のアラーム（オン／オフ）を4択にした。
+     set    ⏱ セット全体 … 開始時にセットの合計をiPhoneのタイマーへ（従来のオン）
+     step   ⏱ 項目ごと   … 項目が進むたびに、その項目の分だけタイマーへ（画面が毎回ショートカットAppへ飛ぶ）
+     notify 🔔 通知だけ   … 開始時にセットの合計を通知用ショートカット（DB.notifySc）へ。鳴らさずバナーだけ
+     off    なし         … 何も渡さない（従来のオフ）
+   ★s.alarm が無い古いセットは s.timer から読む（オン＝set／オフ＝off）。s.timer は set のときだけ true に揃えて残す。
+   ★自動で渡す経路（差し込み・🎉いま楽しむ・後回し）はこの選択に従う＝「なし」では渡さない（「切ったのに鳴る」の元を断つ）。
+     「⏰ …を渡す」と書いてあるボタンを自分で押したときは渡す（「なし」でもタイマーへ。🔔のセットでは通知へ）。
+   ★記録（実施ログ・セット定義）の形は1文字も変えていない。 */
+var ALARMS = ["set","step","notify","off"];
+var ALARM_UI = [["set","⏱ セット全体"],["step","⏱ 項目ごと"],["notify","🔔 通知だけ"],["off","なし"]];
+function alarmOf(s){
+  if(!s) return "set";
+  if(ALARMS.indexOf(s.alarm) >= 0) return s.alarm;
+  return s.timer ? "set" : "off";
+}
+function alarmLabel(a){ for(var i=0;i<ALARM_UI.length;i++){ if(ALARM_UI[i][0]===a) return ALARM_UI[i][1]; } return ""; }
+function setAlarm(id, a){
+  collect();
+  var s = setOf(id); if(!s || ALARMS.indexOf(a) < 0) return;
+  s.alarm = a; s.timer = (a === "set");
+  armed = null; save(); render();
+}
+/* 🔔 通知用のショートカットへ秒数を渡す（作り方: 待機〈ショートカットの入力〉→ 通知を表示）。 */
+function notifyRun(sec){
+  var nm = String(DB.notifySc||"").trim(); if(!nm) return;
+  sec = Math.max(1, Math.round(sec || left()));
+  location.href = "shortcuts://run-shortcut?name=" + encodeURIComponent(nm)
+                + "&input=text&text=" + sec;
+}
+/* 実行中のセットの選択に合わせて渡す。manual=true は「渡す」ボタンを自分で押したとき。 */
+function handOff(sec, manual){
+  var s = curId ? setOf(curId) : null;
+  var a = s ? alarmOf(s) : "set";
+  if(a === "notify"){ notifyRun(sec); return; }
+  if(a === "off" && !manual) return;
+  nativeTimer(sec);
+}
+function handWord(){
+  var s = curId ? setOf(curId) : null;
+  return (s && alarmOf(s)==="notify") ? "通知" : "iPhoneのタイマー";
+}
+function alarmNote(s){
+  var a = alarmOf(s);
+  if(a==="set") return '始めた瞬間に、このセットの<b>'+durLabel(limitOf(s))+'</b>をiPhone標準のタイマーへ渡します（ショートカット「'+esc(DB.scName)+'」）。<b>セットの終わりに1回だけ鳴ります。</b>一度渡したタイマーはこのアプリから止められません。';
+  if(a==="step") return '<b>項目が進むたびに、その項目の分だけ</b>iPhone標準のタイマーへ渡します（ショートカット「'+esc(DB.scName)+'」）。<b>進むたびに画面が一度ショートカットAppへ飛びます。</b>自動で進むセットでは、この画面を開いているあいだに進んだときだけ渡します。';
+  if(a==="notify") return '始めた瞬間に、このセットの<b>'+durLabel(limitOf(s))+'</b>を通知用のショートカット「'+esc(DB.notifySc||"")+'」へ渡します。<b>鳴らさず、終わりにバナーが出るだけ</b>です。ショートカットが未作成なら何も起きません（作り方はホーム画面の設定）。';
+  return 'このセットでは、iPhoneへは何も渡しません（終わりのアラームも通知も出ません）。差し込み・後回し・🎉 いま楽しむ のときも渡しません。「⏰ …を渡す」ボタンを自分で押したときだけ渡します。';
+}
+function alarmPicker(s){
+  var a = alarmOf(s), h = '<label style="margin-top:8px">iPhoneへの渡し方</label><div class="row" style="flex-wrap:wrap;gap:6px;margin-top:4px">';
+  ALARM_UI.forEach(function(o){
+    h += '<button class="btn '+(a===o[0]?'save':'ghost')+'" style="margin-top:0;flex:1 1 45%" onclick="setAlarm(\''+s.id+'\',\''+o[0]+'\')">'+o[1]+'</button>';
+  });
+  return h + '</div><p class="note" style="margin-top:4px">'+alarmNote(s)+'</p>';
+}
+/* 集中ブロックも同じ3択（項目が無いので「項目ごと」は無し）。 */
+function focusAlarm(){
+  var f = DB.focus || {};
+  if(f.alarm==="timer" || f.alarm==="notify" || f.alarm==="off") return f.alarm;
+  return f.native ? "timer" : "off";
+}
+function focusSetAlarm(a){ focusSave(); DB.focus.alarm = a; DB.focus.native = (a !== "off"); save(); render(); }
+function focusHand(sec, manual){
+  var a = focusAlarm();
+  if(a === "notify"){ notifyRun(sec); return; }
+  if(a === "off" && !manual) return;
+  nativeTimer(sec);
 }
 
 /* ============================ 画面 ============================ */
@@ -4702,7 +4797,8 @@ function viewHome(){
      + '<p class="note"><b>「項目を進めるたびに標準タイマーへ渡す」（v35〜v54）は v55 で廃止しました。</b>'
      + '2026-10-02のご記入「セットが次に移動するたびにショートカット画面に切り替わるのがうざい」のためです。'
      + '離席中に鳴るものは、①上の「離席中の音」②この案内 ③実行中の画面から手で押す'
-     + '「⏰ この項目の残りを渡す」の3つになりました。<b>自動で画面が飛ぶ経路はもうありません。</b></p></div>';
+     + '「⏰ この項目の残りを渡す」の3つになりました。'
+     + '<br><b>v76 から、セットの「iPhoneへの渡し方」で「⏱ 項目ごと」を選んだセットだけ、進むたびに渡す形を選べます</b>（2026-10-24のご回答）。</p></div>';
   h += '<div class="card"><label>Spotifyプレイリストの既定URL</label>'
      + '<input class="inp" type="text" id="spurl" placeholder="https://open.spotify.com/playlist/..." value="'+esc(DB.spotifyUrl)+'" onchange="DB.spotifyUrl=this.value.trim();save()">'
      + '<p class="note"><b>セットごとにURLを入れていないとき</b>に、ここのURLを使います。'
@@ -4717,6 +4813,11 @@ function viewHome(){
   h += '<div class="card"><label>ショートカットの名前（iPhone標準タイマーを起動するもの）</label>'
      + '<input class="inp" type="text" id="scn" value="'+esc(DB.scName)+'" onchange="DB.scName=this.value;save()">'
      + '<p class="note">作り方は <b>行動計画_2026-08-14 §10</b> にあります。未作成でも、このアプリ自体は使えます。</p></div>';
+  /* v76: 🔔 通知だけ のセット・集中ブロックで使うショートカット */
+  h += '<div class="card"><label>🔔 通知用ショートカットの名前（鳴らさずバナーだけ）</label>'
+     + '<input class="inp" type="text" id="nscn" value="'+esc(DB.notifySc||"")+'" onchange="DB.notifySc=this.value;save()">'
+     + '<p class="note">セットの「iPhoneへの渡し方」で<b>🔔 通知だけ</b>を選んだときに使います。作り方（1回だけ・約2分）：ショートカットAppで新規作成し、名前をこの欄と同じにする →'
+     + '①「待機」を追加し、秒数に「ショートカットの入力」を入れる ②「通知を表示」を追加し、本文「セットの時間です」。未作成なら🔔を選んでも何も起きません。</p></div>';
   /* v33（2026-09-07）: 実施記録をObsidianへ送る「記録ハブ」への導線。
      送る仕組み自体はこのファイルには入れていない（log.html にある）。
      理由: ①このファイルは既に310KBあり、同じ処理をgym側にも複製すると
@@ -5249,12 +5350,9 @@ function viewRun(){
      + '<b>移ると、それまでの項目は「中断中」になり、そこまでに使った時間はその項目に残ります。</b>戻ってくれば、その続きから数え直します。順番が前後しても、かかった時間は項目ごとに合計で記録されます。<br>'
      + '下の行から始めても構いません（上は「–」になるだけで、失敗にはなりません）。<br>'
      + '<b>足したもの・入れ替えた順番は、このセットにそのまま残ります。</b>やりながら形を作っていって構いません。</p>';
-  /* v35: こちらは**セット全体**の残り。項目ごとのタイマーは上の awayBlock にある。
-     どちらも同じ標準タイマーを使うので、押すと上の項目ごとの分は上書きされる。 */
-  h += '<button class="btn ghost" onclick="nativeTimer()">⏱ かわりに<b>セット全体</b>の残り'+Math.max(1,Math.round(left()/60))+'分をタイマーへ渡す</button>';
-  h += '<p class="note">この画面は他のアプリを開くと止まります（戻れば時刻から計算し直すのでズレません）。'
-     + '<br><b>ふだんは上の「この項目の残り」で足ります。</b>こちらは「終わりの時刻だけ知りたい」ときに使ってください。'
-     + '<b>標準タイマーは1つしか動かないので、押すと項目ごとの分は上書きされます。</b></p>';
+  /* v76: 「⏱ かわりにセット全体の残りをタイマーへ渡す」は外した（開始時の渡し方〈セットごとの選択〉と重なるため。
+     終わりの時刻は画面の上に出ている＝v49）。控えは _Backup_routine_v75_2026-10-24.html。 */
+  h += '<p class="note">この画面は他のアプリを開くと止まります（戻れば時刻から計算し直すのでズレません）。終わりの時刻は画面の上に出ています。</p>';
   if(s.spotify){
     h += '<button class="btn ghost" onclick="openSpotify()">🎵 プレイリストを開く'+(spUrl(s)?'':'（未設定）')+'</button>';
   }
@@ -5574,9 +5672,7 @@ function viewRunAuto(s){
   }else{
     h += '<button class="btn ghost" onclick="openInput(\'add:end\')">＋ いちばん下に1つ足す</button>';
   }
-  /* v8: 自動で進むセットにも、iPhone標準タイマーへの手渡しを付けた（従来はタップ式だけだった） */
-  var autoLeft = Math.max(1, limitOf(s) - e);
-  h += '<button class="btn ghost" onclick="nativeTimer('+autoLeft+')">⏱ iPhoneのタイマーにも残り'+Math.max(1,Math.round(autoLeft/60))+'分を渡す</button>';
+  /* v76: 「⏱ iPhoneのタイマーにも残り◯分を渡す」は外した（開始時の渡し方と重なるため）。 */
   if(s.spotify){
     h += '<button class="btn ghost" onclick="openSpotify()">🎵 プレイリストを開く'+(spUrl(s)?'':'（未設定）')+'</button>';
     if(!spUrl(s)) h += '<p class="note">このセットの編集画面か、ホーム画面の「設定」にプレイリストのURLを入れると、次回からここで開けます。</p>';
@@ -6375,7 +6471,7 @@ function focusBegin(mode){
   if(tick) clearInterval(tick);
   tick = setInterval(tickRender, 250);
   view = "focus"; render();
-  if(DB.focus.native) nativeTimer(fBlockSec());   /* 休憩までの1本だけ渡す（画面遷移を伴うので最後） */
+  if(focusAlarm()!=="off") focusHand(fBlockSec());   /* 休憩までの1本だけ渡す（画面遷移を伴うので最後）。v76: 3択 */
   /* v20 (2026-09-03): タイマーを渡さないときだけ、プレイリストを自動で開く。
      どちらも前面のアプリを切り替えるので、同時にはできない（セットと同じ扱い）。 */
   else openUrl(focusSpUrl());
@@ -6609,11 +6705,13 @@ function viewFocusStart(){
   }else if(notifyState()==="default" && DB.focus.notify){
     h += '<div class="hint">PCのブラウザなら、区切りごとに<b>デスクトップ通知</b>を出せます。始めるときに1度だけ許可を聞きます。</div>';
   }
-  if(DB.focus.native){
+  if(focusAlarm()==="notify"){
+    h += '<div class="hint">開始と同時に、通知用のショートカット「'+esc(DB.notifySc||"")+'」へ<b>休憩までの'+durLabel(DB.focus.len[sl]*60)+'</b>を渡します。<b>鳴らさず、バナーが出るだけ</b>です。</div>';
+  }else if(focusAlarm()==="timer"){
     h += '<div class="hint">開始と同時に、iPhone標準のタイマーへ<b>休憩までの'+durLabel(DB.focus.len[sl]*60)+'</b>を渡します（ショートカット「'+esc(DB.scName)+'」）。ロック画面に残り時間が出て、アプリを閉じていても鳴ります。<br>'
        + '<b>音を消してバイブだけにしたいときは、iPhoneの時計アプリ →「タイマー終了時」→ 一覧のいちばん下の「停止」</b>を選んでください。振動するかどうかは端末の設定によります（Webページ側からは振動を出せません）。</div>';
   }else{
-    h += '<div class="warn">iPhoneのタイマーへ渡す設定がオフです。<b>この画面を閉じると、休憩の合図は鳴りません</b>（Webページからは通知を出せません）。</div>';
+    h += '<div class="warn">iPhoneへの渡し方が「なし」です。<b>この画面を閉じると、休憩の合図は鳴りません</b>（Webページからは通知を出せません）。</div>';
   }
   h += '<button class="btn ghost" onclick="go(\'focusSet\')">⚙ 集中の設定（長さ・区切り・音）</button>';
   h += '<button class="btn link" onclick="go(\'home\')">戻る</button>';
@@ -6713,13 +6811,13 @@ function viewFocus(){
     h += '<button class="btn ghost" style="border-color:#c98b8b;color:#e8b4b4" onclick="focusAnger()">🧸 イライラした — 1分だけ離れる</button>';
     h += '<p class="note" style="margin-top:4px"><b>集中の時計は止まります。</b>終わると、ここに戻ります。</p>';
   }
-  h += '<button class="btn ghost" onclick="nativeTimer('+Math.max(1,segLeft)+')">⏱ この区切りの残り'+Math.max(1,Math.round(segLeft/60))+'分をiPhoneのタイマーに渡す</button>';
+  h += '<button class="btn ghost" onclick="focusHand('+Math.max(1,segLeft)+',true)">⏱ この区切りの残り'+Math.max(1,Math.round(segLeft/60))+'分を'+(focusAlarm()==="notify"?'通知':'iPhoneのタイマー')+'に渡す</button>';
   if(fShift > 0){
     h += '<div class="warn">止めていた分だけ、休憩の終わりが <b>'+mmss(fShift)+'</b> うしろへずれています。'
-       + (DB.focus.native ? '<br><b>iPhoneのタイマーはこちらからは止められないので、その分だけ早く鳴ります。</b>合わせ直すなら下のボタンです。' : '')
+       + (focusAlarm()!=="off" ? '<br><b>iPhoneのタイマーはこちらからは止められないので、その分だけ早く鳴ります。</b>合わせ直すなら下のボタンです。' : '')
        + '</div>';
-    if(DB.focus.native){
-      h += '<button class="btn ghost" onclick="nativeTimer('+Math.max(1,leftAll)+')">⏱ 休憩までの残り'+Math.max(1,Math.round(leftAll/60))+'分をタイマーに渡し直す</button>';
+    if(focusAlarm()!=="off"){
+      h += '<button class="btn ghost" onclick="focusHand('+Math.max(1,leftAll)+',true)">⏱ 休憩までの残り'+Math.max(1,Math.round(leftAll/60))+'分をタイマーに渡し直す</button>';
     }
   }
   h += '<p class="note">この画面は他のアプリを開くと止まりますが、戻れば時刻から計算し直すので、残り時間はズレません。<br><b>途中の区切りの合図は、この画面を開いているときだけ出ます。</b>iPhoneのタイマーは1本しか持てないので、渡してあるのは「休憩まで」の1本です。</p>';
@@ -6840,9 +6938,10 @@ function viewFocusSet(){
      + '<div class="toggle"><b>音を鳴らす</b>'
      + '<button class="sw'+(f.sound?' on':'')+'" onclick="focusSave();DB.focus.sound=!DB.focus.sound;save();render()"><i></i></button></div>'
      + '<p class="note">既定はオフです（アプリを前面で開いているときの音の話です）。オフでも、区切りのときは画面の色が変わります。</p>'
-     + '<div class="toggle" style="margin-top:8px"><b>開始時にiPhoneのタイマーへ渡す</b>'
-     + '<button class="sw'+(f.native?' on':'')+'" onclick="focusSave();DB.focus.native=!DB.focus.native;save();render()"><i></i></button></div>'
-     + '<p class="note">ショートカット「'+esc(DB.scName)+'」を使います（名前はホーム画面の設定で変えられます）。<br>'
+     + '<label style="margin-top:8px">開始時のiPhoneへの渡し方</label><div class="row" style="flex-wrap:wrap;gap:6px;margin-top:4px">'
+     + [["timer","⏱ タイマー"],["notify","🔔 通知だけ"],["off","なし"]].map(function(o){ return '<button class="btn '+(focusAlarm()===o[0]?'save':'ghost')+'" style="margin-top:0;flex:1 1 30%" onclick="focusSetAlarm(\''+o[0]+'\')">'+o[1]+'</button>'; }).join('')
+     + '</div>'
+     + '<p class="note">⏱はショートカット「'+esc(DB.scName)+'」、🔔は「'+esc(DB.notifySc||"")+'」を使います（名前はホーム画面の設定で変えられます）。<br>'
      + '<b>iPhoneを閉じていても鳴らせるのは、これだけです。</b></p>'
      /* v11: PCのデスクトップ通知 */
      + '<div class="toggle" style="margin-top:10px"><b>PCのデスクトップ通知を出す</b>'
@@ -7120,23 +7219,18 @@ function setCardBody(s){
      + '<button class="sw'+(s.quiet?' on':'')+'" onclick="setFlag(\''+s.id+'\',\'quiet\')"><i></i></button></div>'
      + (s.quiet
         ? '<p class="note" style="margin-top:4px">このセットを実行しているあいだは、<b>項目の終了音・残り30秒の知らせ・自動で進むときの進行音・読み上げ・離席中の音</b>をすべて止めます。ホーム画面の設定より<b>こちらが優先</b>されます。'
-          + '<br>下の<b>「セット全体のアラーム」は別のスイッチ</b>です（セットの終わりに1回鳴るのはそちら。標準タイマーはこのアプリから止められないため、鳴らしたくなければそちらも切ってください）。</p>'
+          + '<br>下の<b>「iPhoneへの渡し方」は別の設定</b>です（標準タイマーはこのアプリから止められないため、鳴らしたくなければそちらを「なし」か「🔔 通知だけ」にしてください）。</p>'
         : '')
      /* v36（2026-09-11 ご指摘）: 名前を変えただけ。中身は v5 から同じ。
         ご記入の「セット全体のアラームを飛ばすかどうか」は**このスイッチのこと**だったが、
         「開始時にiPhoneのタイマーへ渡す」という名前では、鳴っている音と結びつかなかった。
         ★機能は1つも変えていない。見出しの文言と、下の注記の1行を足しただけ。 */
-     + '<div class="toggle" style="margin-top:6px"><b>セット全体のアラーム<small>（開始時にiPhoneのタイマーへ渡す）</small></b>'
-     + '<button class="sw'+(s.timer?' on':'')+'" onclick="setFlag(\''+s.id+'\',\'timer\')"><i></i></button></div>'
-     + (s.timer
-        ? '<p class="note" style="margin-top:4px">押した瞬間に、このセットの<b>'+durLabel(limitOf(s))+'</b>をiPhone標準のタイマーへ渡します（ショートカット「'+esc(DB.scName)+'」）。ロック画面に残り時間が出て、アプリを閉じていても鳴ります。'
-          + '<br><b>セットの終わりに1回だけ鳴るのは、これです。</b>切ればこのセットでは渡しません。ただし<b>一度渡したタイマーはこのアプリから止められません</b>（始めたあとに切っても、その回の分は鳴り切ります）。</p>'
-        : '<p class="note" style="margin-top:4px">このセットでは、セット全体のタイマーは渡しません（＝終わりに1回鳴るアラームは出ません）。</p>')
+     + alarmPicker(s)   /* v76: オン／オフ → 4択 */
      + '<div class="toggle" style="margin-top:6px"><b>開始時にプレイリストを開く</b>'
      + '<button class="sw'+(s.spotify?' on':'')+'" onclick="setFlag(\''+s.id+'\',\'spotify\')"><i></i></button></div>'
-     + (s.timer && s.spotify
-        ? '<div class="warn" style="margin-top:7px"><b>開始時に開けるのは、どちらか一方だけです。</b>タイマーとSpotifyはどちらも前面のアプリを切り替えるため、同時には動きません。'
-          + 'このセットは<b>タイマーを渡す側</b>で動きます。プレイリストは実行中の画面の「🎵 プレイリストを開く」から開いてください。</div>'
+     + (alarmOf(s)!=="off" && s.spotify
+        ? '<div class="warn" style="margin-top:7px"><b>開始時に開けるのは、どちらか一方だけです。</b>タイマー（通知）とSpotifyはどちらも前面のアプリを切り替えるため、同時には動きません。'
+          + 'このセットは<b>タイマー（通知）を渡す側</b>で動きます。プレイリストは実行中の画面の「🎵 プレイリストを開く」から開いてください。</div>'
         : '')
      + (s.spotify
         ? '<input class="inp" type="text" style="margin-top:7px" id="sp_'+s.id+'" placeholder="このセット専用のURL（空ならホーム画面の既定URL）" value="'+esc(s.spotifyUrl||"")+'">'
@@ -7163,7 +7257,7 @@ function setCardActive(s,i){
   var h = '<div class="sec">'+esc(s.icon)+' '+esc(s.name)
      + (s.auto?'<span class="tag">自動で進む</span>':'')
      + (s.quiet?'<span class="tag">🔇 音なし</span>':'')   /* v36 */
-     + (s.timer?'<span class="tag">⏱ 全体アラーム</span>':'')   /* v36: 名前だけ変更 */
+     + (alarmOf(s)!=="off"?'<span class="tag">'+alarmLabel(alarmOf(s))+'</span>':'')   /* v76: 渡し方を表示 */
      + (s.rescue?'<span class="tag">崩れたとき用</span>':'')+'</div>';
   h += '<div class="card'+(isArmed?' del':'')+'">'
      + setCardBody(s)
@@ -7318,7 +7412,7 @@ function editRow(s, tag){
   return '<button class="setb" onclick="editGo(\''+s.id+'\')">'+esc(s.icon)+' '+esc(s.name)
        + (tag ? '<span class="tag">'+tag+'</span>' : '')
        + '<small>'+durLabel(limitOf(s))+' ・ '+countLabel(s)
-       + (s.timer ? ' ・ ⏱' : '') + (s.spotify ? ' ・ 🎵' : '')
+       + (alarmOf(s)!=="off" ? ' ・ '+alarmLabel(alarmOf(s)) : '') + (s.spotify ? ' ・ 🎵' : '')
        + '<br>押すと、このセットだけを開いて編集します。</small></button>';
 }
 function viewEdit(){
@@ -7621,7 +7715,7 @@ function viewAbout(){
     + '　ただし戻ったときは時刻から計算し直すので、<b>残り時間はズレません</b>。ズレるのは音だけです。<br><br>'
     + '・<b>画面上部（ダイナミックアイランド）への表示</b><br>'
     + '　Webページからは出せません。iOS標準のタイマーだけができることです。<br>'
-    + '　実行中の「⏱ iPhoneのタイマーにも渡す」から標準タイマーを起動してください。'
+    + '　セットの編集画面の「iPhoneへの渡し方」（⏱ セット全体／⏱ 項目ごと）で、標準タイマーへ渡せます（v76）。'
     + '</p></div>';
   h += '<div class="hint">中身の設計（何を並べるか）は B.M.C. の担当ですが、<b>合わなければ全部書き換えて構いません。</b>セットの追加・削除・並べ替えもできます。<b>直したことを私に伝える義務はありません。</b></div>';
   h += '<div class="warn">中身は<b>この端末のブラウザの中だけ</b>に保存されます。履歴やサイトデータを消すと既定に戻ります。Obsidianには入りません。</div>';
