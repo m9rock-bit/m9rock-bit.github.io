@@ -889,6 +889,7 @@ try{
     if(typeof p.spotifyUrl==="string") DB.spotifyUrl = p.spotifyUrl;
     if(p.scName) DB.scName = p.scName;
     if(typeof p.notifySc==="string") DB.notifySc = p.notifySc;   /* v76 */
+    if(typeof p.openAt==="number") DB.openAt = p.openAt;         /* v77: #open= で最後に始めた時刻 */
     if(Array.isArray(p.log)) DB.log = p.log;
     if(Array.isArray(p.notes)) DB.notes = p.notes;
     if(Array.isArray(p.times)) DB.times = p.times;
@@ -1618,7 +1619,7 @@ function parkBtn(){
 
 /* --- 状態 --- */
 /* v27: 版の表示（ホーム最下部）。中身を変えたら、ここも必ず上げる。 */
-var APPVER = "切り替えルーティン v76 ・ 2026-10-24";
+var APPVER = "切り替えルーティン v77 ・ 2026-10-25";
 var view = "home";
 var curId = null;
 var startAt = 0;
@@ -4624,6 +4625,7 @@ function viewHome(){
   var _ug = urgeSet() && curId!=="urge", _bz = breatherSet() && curId!=="breather";
   if(_ug || _bz){
     h += '<div class="sec">いま来たとき</div>';
+    if(openMsg && Date.now()-openMsgAt < 120000) h += '<p style="color:#e8c99a;font-size:13px;line-height:1.7;margin:0 0 6px">'+esc(openMsg)+'</p>';   /* v77 */
     h += '<div class="emgrid">'
        + (_ug ? '<button class="setb" style="border-color:#5f93a8;background:#141d21" onclick="urgeGo(\'watch\')">🌊 見たい</button>'
        + '<button class="setb" style="border-color:#5f93a8;background:#141d21" onclick="urgeGo(\'eat\')">🌊 食べたい</button>' : '')
@@ -4818,6 +4820,26 @@ function viewHome(){
      + '<input class="inp" type="text" id="nscn" value="'+esc(DB.notifySc||"")+'" onchange="DB.notifySc=this.value;save()">'
      + '<p class="note">セットの「iPhoneへの渡し方」で<b>🔔 通知だけ</b>を選んだときに使います。作り方（1回だけ・約2分）：ショートカットAppで新規作成し、名前をこの欄と同じにする →'
      + '①「待機」を追加し、秒数に「ショートカットの入力」を入れる ②「通知を表示」を追加し、本文「セットの時間です」。未作成なら🔔を選んでも何も起きません。</p></div>';
+  /* v77（2026-10-25 ご依頼）: ほかのアプリを開いたら、ここへ移る（iPhoneのショートカット「オートメーション」用）。
+     ★このページは他のアプリが開いたことを知れない。知らせるのはiPhoneのオートメーションで、
+       ページは #open=… で開かれたら、その画面をすぐ出すだけ。
+     ★「一定時間この画面から動けない」は作れない（Webページは端末を止められない）。ご本人へは個人秘書が返答済み。 */
+  (function(){
+    var base = location.origin + location.pathname;
+    var row = function(lb, k){ return '<div style="margin:5px 0"><span style="font-size:13px">'+lb+'</span>'
+      + '<input class="inp" type="text" readonly value="'+esc(base+'#open='+k)+'" onclick="this.select()" style="font-size:12px"></div>'; };
+    h += '<div class="card"><label>📲 ほかのアプリを開いたら、ここへ移る（ショートカットのオートメーション）</label>'
+       + row('🌊 見たい（YouTube・動画アプリに）', 'watch')
+       + row('🌊 食べたい（デリバリー・コンビニアプリに）', 'eat')
+       + row('🍵 ひと息', 'rest')
+       + row('🏠 ホームの「いま来たとき」だけ出す', 'home')
+       + '<p class="note">作り方（1回・約3分）：ショートカットApp →「オートメーション」→「＋」→「App」→ 対象のアプリを選ぶ →「開いている」にチェック →「すぐに実行」→ 次へ →「URLを開く」に上のURLを貼る。'
+       + '<br>・移るところまではできますが、<b>この画面から動けなくすることはできません</b>（Webページは端末を止められないため）。戻りたいときはそのまま戻って大丈夫です。'
+       + '<br>・一度始めたら<b>'+OPEN_COOL_MIN+'分間</b>は、また開いても新しく始めません（何度も引き戻されないように）。'
+       + '<br>・実行中のセットがあるときは、ボタンを押したときと同じく控えて寄り道し、終わればその続きに戻ります。'
+       + '<br>・ショートカットはSafariで開きます。ホーム画面に追加したアプリとは<b>記録が別に貯まります</b>（Safari側の記録は、Safariで開いたこの画面の「📤 記録を送る」から送れます）。'
+       + '<br>・「すぐに実行」をオフにすると、毎回「実行しますか」の通知になります（強すぎると感じたらこちら）。</p></div>';
+  })();
   /* v33（2026-09-07）: 実施記録をObsidianへ送る「記録ハブ」への導線。
      送る仕組み自体はこのファイルには入れていない（log.html にある）。
      理由: ①このファイルは既に310KBあり、同じ処理をgym側にも複製すると
@@ -8196,7 +8218,43 @@ function blFromHash(){
   if(!curId){ view = "bl"; render(); }
 }
 window.addEventListener("hashchange", blFromHash);
+/* v77（2026-10-25 ご依頼「動画のながら見や過食につながるアプリを起動したら、その画面に移動」）:
+   iPhoneのオートメーション（App → 開いたとき → URLを開く）から #open=watch|eat|rest|home で開かれたら、
+   その画面をすぐ出す。★#list= と同じく hashchange でも呼ぶ（同じURLの開き直しは読み込み直されないため）。
+   ★ハッシュはすぐ消す（再読み込みで二重に始めない）。
+   ★実行中のセットがあれば、🌊・🍵 のボタンと同じ寄り道（控えて、終われば続きへ）。🌊・🍵 の最中なら何もしない。
+   ★始めてから OPEN_COOL_MIN 分は新しく始めない（アプリへ戻るたびに引き戻されないように）。
+   ★🍰 予約・🍽️ 記録はほかのアプリ（Obsidian）を開くので、タップなしでは開けない＝ホームを出すだけ。 */
+var OPEN_COOL_MIN = 10;
+var openMsg = "", openMsgAt = 0;
+function openFromHash(){
+  var m = /[#&]open=([A-Za-z]+)/.exec(location.hash||"");
+  if(!m) return;
+  var k = m[1].toLowerCase(); if(k==="breather") k = "rest";
+  try{ history.replaceState(null,"",location.pathname+location.search); }catch(e){ location.hash = ""; }
+  var now = Date.now();
+  if(curId==="urge" || curId==="breather"){ render(); return; }
+  var isRun = (k==="watch" || k==="eat" || k==="rest");
+  var has = (k==="rest") ? !!breatherSet() : !!urgeSet();
+  if(isRun && !has){ openMsg = (k==="rest" ? "🍵 ひと息" : "🌊 いま来た")+" のセットが見つかりませんでした（削除されているかもしれません）。"; openMsgAt = now; if(!curId) view = "home"; render(); return; }
+  if(isRun && DB.openAt && now - DB.openAt < OPEN_COOL_MIN*60000){
+    openMsg = "さっき始めたばかりなので、今回は新しく始めていません（"+OPEN_COOL_MIN+"分あけています）。使いたいときは下から押せます。";
+    openMsgAt = now; if(!curId) view = "home"; render(); return;
+  }
+  if(isRun){
+    DB.openAt = now; save();
+    if(k==="rest") breatherGo(); else urgeGo(k);
+    render(); return;
+  }
+  if(k==="book" || k==="log") openMsg = "🍰 予約・🍽️ 記録は、下のボタンから開いてください（ほかのアプリはタップでしか開けません）。";
+  else openMsg = "";
+  openMsgAt = now;
+  if(!curId) view = "home";
+  render();
+}
+window.addEventListener("hashchange", openFromHash);
 blFromHash();
+openFromHash();
 render();
 fbInit();
 </script>
