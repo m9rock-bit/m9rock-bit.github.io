@@ -354,7 +354,7 @@ const CARDIO_DEF={
 const RATES=["かるすぎる","ちょうどよい","きつすぎる"];
 /* v9（2026-09-05）: 版の表示（ホーム最下部）。開いて1秒で新旧を見分けるため。
    中身を変えたら、ここも必ず上げる。 */
-const APPVER="B.M.C. ジム v26 ・ 2026-10-25";
+const APPVER="B.M.C. ジム v28 ・ 2026-10-25";
 const NORM=30;                    /* グラフの換算基準（30分あたり） */
 const HARDS=["余裕","ちょうどよい","きつい"];
 
@@ -1100,12 +1100,16 @@ function expand(blocks){
       var segs=(b.segs&&b.segs.length)?b.segs:[{lb:"速い",min:1,sp:8,inc:1}];
       for(var k=1;k<=reps;k++){
         segs.forEach(function(sg){
-          out.push({lb:(sg.lb||"")+" "+k+"/"+reps, min:+sg.min||0.5, sp:+sg.sp||5, inc:+sg.inc||0,
-                    b:bi, bt:"interval", lp:k});
+          var o1={lb:(sg.lb||"")+" "+k+"/"+reps, min:+sg.min||0.5, sp:+sg.sp||5, inc:+sg.inc||0,
+                    b:bi, bt:"interval", lp:k};
+          if(sg.hr) o1.hr=sg.hr;   /* v28: 目標心拍（表示だけ） */
+          out.push(o1);
         });
       }
     }else{
-      out.push({lb:b.lb||"", min:+b.min||1, sp:+b.sp||5, inc:+b.inc||0, b:bi, bt:b.type||"work"});
+      var o2={lb:b.lb||"", min:+b.min||1, sp:+b.sp||5, inc:+b.inc||0, b:bi, bt:b.type||"work"};
+      if(b.hr) o2.hr=b.hr;   /* v28 */
+      out.push(o2);
     }
   });
   return out;
@@ -1148,20 +1152,36 @@ function n1(v){ return (Math.round(v*10)/10).toFixed(1); }
    ★変わるのは①表示の言葉 ②＋−の刻みと範囲（レベル1・心拍5／レベル1〜30・心拍60〜200）
      ③次回の提案（バイクは「負荷レベルを1つ上げる／戻す」だけ。心拍は目安で、操作する値ではないため）
      ④記録の画面で距離が空でも保存でき、平均心拍（任意）を残せる。
-   ★CK＝いま描いている画面の機種。render() の頭で決め、記録を描くところだけ withK で切り替える。 */
+   ★CK＝いま描いている画面の機種。render() の頭で決め、記録を描くところだけ withK で切り替える。
+   ★v27（同日・ご依頼「心拍数ではなく、回転数/分の目標値にしてくれませんか」）:
+     バイクの inc は**目標回転数（rpm）**として読む（範囲30〜140・＋−は5ずつ）。心拍は記録の画面の任意欄に残すだけ。
+     推定カロリー＝**(機械のMETs − 1) × 体重kg × 時間h**（運動で増えた分＝安静時の分を引く）。
+     機械の kcal は安静時の代謝ぶんを含み、体重も既定値のことが多いので「比べる用」として別に残す。 */
 var CK="tread";
 function kindOf(g){ return (g && g.kind==="bike") ? "bike" : "tread"; }
 function isBike(k){ return (k===undefined?CK:k)==="bike"; }
 function lvTxt(v){ var x=Math.round((+v||0)*10)/10; return (x%1===0)? String(x) : x.toFixed(1); }
 function spTxt(v,k){ return isBike(k) ? "レベル"+lvTxt(v) : n1(v)+"km/h"; }
-function incTxt(v,k){ return isBike(k) ? "心拍"+Math.round(+v||0) : "傾斜"+n1(v)+"%"; }
+function incTxt(v,k){ return isBike(k) ? "回転数"+Math.round(+v||0) : "傾斜"+n1(v)+"%"; }
 function siTxt(sp,inc,sep,k){ return spTxt(sp,k)+(sep==null?" ／ ":sep)+incTxt(inc,k); }
 function machTxt(k){ return isBike(k) ? "リカンベントバイク" : "トレッドミル"; }
 function kClamp(f,v,k){
-  if(isBike(k)) return f==="sp" ? Math.max(1,Math.min(30,v)) : Math.max(60,Math.min(200,v));
+  if(isBike(k)) return f==="sp" ? Math.max(1,Math.min(30,v)) : Math.max(30,Math.min(140,v));   /* v27: inc＝回転数rpm */
   return f==="sp" ? Math.max(0.5,Math.min(25,v)) : Math.max(0,Math.min(15,v));
 }
 function kStep(f,k){ if(isBike(k)) return f==="sp"?1:5; return f==="sp"?cSet().spStep:cSet().incStep; }
+/* v27: 推定カロリー（運動で増えた分）。METs・体重・分が揃わなければ null。 */
+function bikeKcal(mets, kg, min){
+  var m=+mets, w=+kg, t=+min;
+  if(!(m>1) || !(w>0) || !(t>0)) return null;
+  return Math.round((m-1)*w*t/60);
+}
+function bodyKg(){ var v=+((cSet()||{}).bodyKg); return v>0 ? v : 63; }
+/* v28（同日・ご依頼「変更する数値ではないが、目標心拍数を各セットに表示してほしい」）:
+   ブロック・区間に hr（文字。例「110〜120」）を持たせ、**表示するだけ**。＋−・提案・評価の対象にしない。
+   トレッドミルでも入れれば出る（入れなければ何も出ない＝既存の表示は変わらない）。 */
+function hrTxt(x){ var h=x&&x.hr; return h ? "（心拍"+esc(String(h))+"）" : ""; }
+function hrClean(v){ return String(v==null?"":v).replace(/^\s*(目標)?心拍\s*/,"").replace(/[-ー－~]/g,"〜").replace(/\s+/g,"").slice(0,12); }
 function withK(k,fn){ var o=CK; CK=k; try{ return fn(); } finally{ CK=o; } }
 function pace(sp){
   if(!sp||sp<=0) return "—";
@@ -1176,16 +1196,16 @@ function per30(v,min){ return (min>0? v*NORM/min : 0); }
 function recSec(r){ var s=+((r||{}).sec)||0; return (s<0?0:(s>59?59:Math.round(s))); }
 function recMin(r){ return (+((r||{}).min)||0) + recSec(r)/60; }
 function minSecTxt(r){ var s=recSec(r); return (+((r||{}).min)||0)+"分"+(s?s+"秒":""); }
-function segLine(s){ return (s.lb?esc(s.lb)+" ":"")+s.min+"分 ／ "+siTxt(s.sp,s.inc); }
+function segLine(s){ return (s.lb?esc(s.lb)+" ":"")+s.min+"分 ／ "+siTxt(s.sp,s.inc)+hrTxt(s); }
 function blockLine(b,i){
   if(!b) return "";
   if(b.type==="interval"){
     var reps=Math.max(1,Math.round(+b.reps||1));
     return esc(blockName(b,i))+"（"+reps+"回・計"+blockMin(b)+"分）<br><span style=\"opacity:.75\">"
-      + (b.segs||[]).map(function(x){ return esc(x.lb||"")+" "+x.min+"分 "+siTxt(x.sp,x.inc," "); }).join(" → ")
+      + (b.segs||[]).map(function(x){ return esc(x.lb||"")+" "+x.min+"分 "+siTxt(x.sp,x.inc," ")+hrTxt(x); }).join(" → ")
       + "</span>";
   }
-  return esc(blockName(b,i))+" "+b.min+"分 ／ "+siTxt(b.sp,b.inc);
+  return esc(blockName(b,i))+" "+b.min+"分 ／ "+siTxt(b.sp,b.inc)+hrTxt(b);
 }
 
 /* ---------- 上げ下げの判断（v9: ブロックごと） ----------
@@ -1258,7 +1278,7 @@ function blockAdvice(bi){
   var base=act||t, fromActual=!!act;
   var cs=cSet(), dir=(v===1?1:-1);
   if(isBike()){
-    /* v26: バイクは負荷レベルだけを1つ動かす（心拍は目安。こいだ結果で決まる値なので提案の相手にしない）。 */
+    /* v26: バイクは負荷レベルだけを1つ動かす（v27: 回転数は目安。提案の相手にしない）。 */
     var fb=+base.sp||0, tb=kClamp("sp", fb+dir);
     if(tb===fb) return null;
     return {bi:bi, dir:dir, field:"sp", from:fb, to:tb, unit:"", name:"負荷レベル", rate:v,
@@ -1332,7 +1352,7 @@ function cardioCard(hideSec){
       <button class="btn ghost" onclick="cInOpen(null)">あとから記録する</button>
     </div>
     <button class="btn ghost" onclick="go('cgraph')">推移と記録（${n}回）</button>
-    ${last?`<p class="note">前回 ${mdw(last.date)} ／ ${minSecTxt(last)} ${n1(last.dist)}km ${last.kcal}kcal</p>`:
+    ${last?`<p class="note">前回 ${mdw(last.date)} ／ ${minSecTxt(last)} ${n1(last.dist)}km ${last.kcalEst!=null?"推定"+last.kcalEst:last.kcal}kcal</p>`:
            `<p class="note">走り終わるとブロックごとに「かるすぎる／ちょうどよい／きつすぎる」を聞きます。<strong>「かるすぎる」を選んだブロックは、次回ここで1段上げる提案が出ます。</strong></p>`}
   </div>`;
 }
@@ -1362,11 +1382,11 @@ function cProgNew(k){
     {type:"warm",lb:"ウォームアップ",min:5,sp:5.0,inc:2.0},
     {type:"work",lb:"メイン",min:20,sp:6.5,inc:2.0},
     {type:"cool",lb:"クールダウン",min:5,sp:4.5,inc:2.0}]};
-  if(k==="bike"){   /* v26: バイクは レベル・目標心拍 で始める */
+  if(k==="bike"){   /* v26→v27: バイクは レベル・目標回転数 で始める */
     g.kind="bike";
-    g.blocks=[{type:"warm",lb:"ウォームアップ",min:5,sp:3,inc:105},
-              {type:"work",lb:"メイン",min:40,sp:5,inc:120},
-              {type:"cool",lb:"クールダウン",min:5,sp:2,inc:100}];
+    g.blocks=[{type:"warm",lb:"ウォームアップ",min:5,sp:3,inc:60,hr:"100〜110"},
+              {type:"work",lb:"メイン",min:40,sp:5,inc:80,hr:"115〜128"},
+              {type:"cool",lb:"クールダウン",min:5,sp:2,inc:60,hr:"100以下"}];
   }
   cProgs().push(g); cSet().curProg=g.id; save(); cPlanOpen("cardio");
 }
@@ -1452,7 +1472,7 @@ function cGuideText(plan){
   for(var i=0;i<p.length;i++){
     var sec=Math.max(1, Math.round((+p[i].min||0)*60));
     var nx=p[i+1];
-    out.push(sec+"|"+(nx ? (isBike(gk) ? ("レベル"+lvTxt(nx.sp)+" 心拍"+Math.round(+nx.inc||0)) : ("傾斜"+n1(nx.inc)+" 速度"+n1(nx.sp))) : "走り終わりです"));
+    out.push(sec+"|"+(nx ? (isBike(gk) ? ("レベル"+lvTxt(nx.sp)+" 回転数"+Math.round(+nx.inc||0)) : ("傾斜"+n1(nx.inc)+" 速度"+n1(nx.sp))) : "走り終わりです"));
   }
   return out.join("\n");
 }
@@ -1588,7 +1608,7 @@ function cAdj(field, dir){
   if(!cRun) return;
   var q=cPos(); if(q.done) return;
   var s=cRun.plan[q.i]; if(!s) return;
-  var rk=kindOf(cRun);   /* v26: バイクは レベル1・心拍5 ずつ、範囲も別 */
+  var rk=kindOf(cRun);   /* v26: バイクは レベル1・回転数5 ずつ、範囲も別 */
   var step=kStep(field, rk);
   var v=kClamp(field, (+s[field]||0)+step*dir, rk);
   var was=+s[field]||0;                      /* v15: 変える前の値 */
@@ -1615,7 +1635,7 @@ function cPadOpen(kind){
   cPadClose();
   var rows, bk=isBike(kindOf(cRun));   /* v26 */
   var RS=bk ? {k:"sp", lb:"負荷レベル", v:lvTxt(s.sp), st:"1"} : {k:"sp", lb:"速度（km/h）", v:n1(s.sp), st:"0.1"};
-  var RI=bk ? {k:"inc", lb:"目標心拍（拍/分）", v:String(Math.round(+s.inc||0)), st:"1"} : {k:"inc", lb:"傾斜（%）", v:n1(s.inc), st:"0.1"};
+  var RI=bk ? {k:"inc", lb:"目標回転数（回/分）", v:String(Math.round(+s.inc||0)), st:"1"} : {k:"inc", lb:"傾斜（%）", v:n1(s.inc), st:"0.1"};
   if(kind==="sp"){
     rows=[RS];
   }else if(kind==="inc"){
@@ -1626,7 +1646,7 @@ function cPadOpen(kind){
   var d=document.createElement("div");
   d.className="cpad";
   d.innerHTML='<div class="cpadbox">'
-    + '<div class="cpadttl">'+(kind==="seg"?"この区間のあとに1つ足す":(kind==="sp"?(bk?"負荷レベル":"速度")+"を直接入れる":(bk?"目標心拍":"傾斜")+"を直接入れる"))+'</div>'
+    + '<div class="cpadttl">'+(kind==="seg"?"この区間のあとに1つ足す":(kind==="sp"?(bk?"負荷レベル":"速度")+"を直接入れる":(bk?"目標回転数":"傾斜")+"を直接入れる"))+'</div>'
     + rows.map(function(r){
         return '<label>'+r.lb+'</label><input id="cpad_'+r.k+'" type="number" inputmode="decimal" step="'+r.st+'" value="'+r.v+'">';
       }).join("")
@@ -1674,7 +1694,8 @@ function cSegInsert(min, sp, inc){
   if(!cRun) return false;
   var q=cPos(); if(q.done) return false;
   var cur=cRun.plan[q.i]; if(!cur) return false;
-  cRun.plan.splice(q.i+1, 0, {lb:"追加", min:min, sp:sp, inc:inc, b:cur.b, bt:cur.bt});
+  var add={lb:"追加", min:min, sp:sp, inc:inc, b:cur.b, bt:cur.bt}; if(cur.hr) add.hr=cur.hr;   /* v28 */
+  cRun.plan.splice(q.i+1, 0, add);
   cLog({i:q.i+1, lb:"追加", f:"add", min:min, sp:sp, inc:inc});   /* v15 */
   /* v15: 番号が1つずつ後ろへずれるので、区間の頭の控えも同じだけずらす
      （ずらさないと、差し込みより後ろの区間の実時間が別の区間の値になる）。 */
@@ -1757,8 +1778,8 @@ function viewCRun(){
   <div class="card">
     <div class="ctwo">
       <div>
-        <div class="cval${q.done?"":" tap"}" ${q.done?"":`onclick="cPadOpen('inc')"`}>${isBike()?Math.round(+s.inc||0):n1(s.inc)}<span>${isBike()?"拍":"%"}</span></div>
-        <div class="clab">${isBike()?"目標心拍":"傾斜"}${q.done?"":"（数字をタップ）"}</div>
+        <div class="cval${q.done?"":" tap"}" ${q.done?"":`onclick="cPadOpen('inc')"`}>${isBike()?Math.round(+s.inc||0):n1(s.inc)}<span>${isBike()?"rpm":"%"}</span></div>
+        <div class="clab">${isBike()?"目標回転数":"傾斜"}${q.done?"":"（数字をタップ）"}</div>
         ${q.done?"":`<div class="cadj">
           <button onclick="cAdj('inc',1)">＋</button>
           <button onclick="cAdj('inc',-1)">−</button>
@@ -1773,6 +1794,7 @@ function viewCRun(){
         </div>`}
       </div>
     </div>
+    ${(!q.done && s.hr)?`<div class="bigsub" style="margin:6px 0 0;font-size:15px">目標心拍 <strong style="color:#e0a86a">${esc(String(s.hr))}</strong> 拍/分</div>`:""}
     <div class="ctimer" style="color:${q.done?"#7fd1c1":"#e8ecf2"}">${q.done?"おつかれさまでした":mmss(q.left)}</div>
     <div class="bigsub">${q.done?"下のボタンから記録に進めます":"この区間の残り"}</div>
     <div class="bar"><i style="width:${pct}%"></i></div>
@@ -1802,7 +1824,7 @@ function viewCRun(){
   <div class="card">
     <p class="note" style="margin:0">${nx?`次は <strong>${segLine(nx)}</strong>`:`これが最後の区間です`}
     <br>${machTxt()}の操作はご自分で。ここは<strong>いま何に設定するかを出すだけ</strong>です。${q.done?"":`
-    <br>${isBike()?"心拍が目安から外れたら負荷レベルを上げ下げしてください。実際にレベルを変えたら、":"実際に速度や傾斜を変えたら、"}上の＋−も合わせて動かしてください（<strong>数字そのものをタップすると直接入れられます</strong>）。<strong>この回の記録にそのまま残ります</strong>（あとで直さなくて大丈夫です）。いまの区間だけに効きます。`}</p>
+    <br>${isBike()?"回転数は目安です。話せるくらいの強さに収まるよう、負荷レベルを上げ下げしてください。実際にレベルを変えたら、":"実際に速度や傾斜を変えたら、"}上の＋−も合わせて動かしてください（<strong>数字そのものをタップすると直接入れられます</strong>）。<strong>この回の記録にそのまま残ります</strong>（あとで直さなくて大丈夫です）。いまの区間だけに効きます。`}</p>
   </div>
   <button class="btn" onclick="cFinish()">終わった（記録する）</button>
   <button class="btn link" onclick="cQuit()">この回を残さずにやめる</button>`;
@@ -1823,9 +1845,27 @@ function cInOpen(seed){
         plan0:(seed&&seed.plan0)?seed.plan0:null,
         edits:(seed&&seed.edits)?seed.edits:[],
         segW:(seed&&seed.segW)?seed.segW:null,
-        kind:(seed&&seed.kind)||kindOf(curProg()), hr:"",   /* v26 */
+        kind:(seed&&seed.kind)||kindOf(curProg()), hr:"", mets:"", kg:String(bodyKg()),   /* v26・v27 */
         dist:"", kcal:"", memo:""};
   go("cin");
+}
+/* v27: 推定カロリーの表示（入力中は描き直さず、この欄だけ書き換える＝打ちかけの数字を消さない） */
+function cEstHtml(){
+  if(!cBuf) return "";
+  var mn=(+cBuf.min||0)+(Math.min(59,+cBuf.sec||0))/60;
+  var est=bikeKcal(parseFloat(cBuf.mets), parseFloat(cBuf.kg), mn);
+  if(est==null) return '推定カロリー：<strong>METsを入れると出ます</strong>';
+  var gross=Math.round(parseFloat(cBuf.mets)*parseFloat(cBuf.kg)*mn/60);
+  return '推定カロリー（運動で増えた分）：<strong>約'+est+'kcal</strong>'
+    + '<br><span style="opacity:.75">安静時の分も含めると約'+gross+'kcal。計算＝(METs−1)×体重×時間。</span>';
+}
+function cEstUpd(){
+  if(!cBuf) return;
+  var g=function(id){ var e=document.getElementById(id); return e?e.value:""; };
+  cBuf.mets=g("c_mets"); cBuf.kg=g("c_kg");
+  var m=parseFloat(g("c_min")), sc=parseFloat(g("c_sec"));
+  if(!isNaN(m)) cBuf.min=m; if(!isNaN(sc)) cBuf.sec=sc;
+  var e=document.getElementById("c_est"); if(e) e.innerHTML=cEstHtml();
 }
 function cinRate(bi,v){
   cinGrab(); if(!cBuf) return;
@@ -1840,6 +1880,7 @@ function cinGrab(){
   var sc=parseFloat(g("c_sec")); if(!isNaN(sc)&&sc>=0) cBuf.sec=Math.max(0,Math.min(59,Math.round(sc)));
   cBuf.dist=g("c_dist"); cBuf.kcal=g("c_kcal"); cBuf.memo=g("c_memo");
   if(document.getElementById("c_hr")) cBuf.hr=g("c_hr");   /* v26 */
+  if(document.getElementById("c_mets")){ cBuf.mets=g("c_mets"); cBuf.kg=g("c_kg"); }   /* v27 */
 }
 function cinSave(){
   cinGrab();
@@ -1863,7 +1904,12 @@ function cinSave(){
                   dist:Math.round(d*100)/100, kcal:(isNaN(k)?0:Math.round(k)),
                   hard:mid, memo:String(cBuf.memo||"").slice(0,120)};
   /* v26: バイクの回だけ kind と平均心拍を足す（トレッドミルの記録の形は従来どおり） */
-  if(bk){ rec.kind="bike"; var hr=parseFloat(cBuf.hr); if(!isNaN(hr)&&hr>0) rec.hr=Math.round(hr); }
+  if(bk){ rec.kind="bike"; var hr=parseFloat(cBuf.hr); if(!isNaN(hr)&&hr>0) rec.hr=Math.round(hr);
+    /* v27: METs と体重から推定（運動で増えた分）。体重は次回のために覚えておく。 */
+    var mt=parseFloat(cBuf.mets), kg=parseFloat(cBuf.kg);
+    if(!isNaN(kg)&&kg>20&&kg<200){ cSet().bodyKg=Math.round(kg*10)/10; rec.kg=cSet().bodyKg; }
+    if(!isNaN(mt)&&mt>0){ rec.mets=Math.round(mt*10)/10;
+      var est=bikeKcal(rec.mets, rec.kg||bodyKg(), recMin(rec)); if(est!=null) rec.kcalEst=est; } }
   DB.cardio.push(rec);
   save(); cBuf=null; cHold={};
   if(autoHub()) return;   /* v25: 有酸素を保存したら、そのまま記録ハブで自動送信 */
@@ -1891,14 +1937,19 @@ function viewCIn(){
   <div class="card">
     <label>時間<small>区間タイマーで走った日は、走った実時間が秒まで入っています</small></label>
     <div class="row">
-      <div style="flex:1;min-width:0"><input id="c_min" type="number" inputmode="numeric" step="1" min="0" value="${+cBuf.min||0}" placeholder="分"><div class="bigsub" style="margin:2px 0 0;text-align:center">分</div></div>
-      <div style="flex:1;min-width:0"><input id="c_sec" type="number" inputmode="numeric" step="1" min="0" max="59" value="${+cBuf.sec||0}" placeholder="秒"><div class="bigsub" style="margin:2px 0 0;text-align:center">秒</div></div>
+      <div style="flex:1;min-width:0"><input id="c_min" type="number" inputmode="numeric" step="1" min="0" value="${+cBuf.min||0}" placeholder="分" ${isBike()?'oninput="cEstUpd()"':""}><div class="bigsub" style="margin:2px 0 0;text-align:center">分</div></div>
+      <div style="flex:1;min-width:0"><input id="c_sec" type="number" inputmode="numeric" step="1" min="0" max="59" value="${+cBuf.sec||0}" placeholder="秒" ${isBike()?'oninput="cEstUpd()"':""}><div class="bigsub" style="margin:2px 0 0;text-align:center">秒</div></div>
     </div>
     <label>距離（km）${isBike()?"<small>表示が無ければ空のままで保存できます</small>":""}</label>
     <input id="c_dist" type="number" inputmode="decimal" step="0.01" value="${esc(cBuf.dist)}" placeholder="例 3.72">
-    ${isBike()?`<label>平均心拍（拍/分・任意）<small>バイクかGarminの表示をそのまま</small></label>
+    ${isBike()?`<label>機械のMETs（平均）<small>バイクの画面の値。推定カロリーはここから計算します</small></label>
+    <input id="c_mets" type="number" inputmode="decimal" step="0.1" value="${esc(cBuf.mets||"")}" placeholder="例 5.2" oninput="cEstUpd()">
+    <label>体重（kg）<small>前回入れた値が入っています</small></label>
+    <input id="c_kg" type="number" inputmode="decimal" step="0.1" value="${esc(cBuf.kg||"")}" oninput="cEstUpd()">
+    <div class="hint" id="c_est" style="margin-top:8px">${cEstHtml()}</div>
+    <label>平均心拍（拍/分・任意）<small>バイクかGarminの表示をそのまま</small></label>
     <input id="c_hr" type="number" inputmode="numeric" step="1" value="${esc(cBuf.hr||"")}" placeholder="例 122">`:""}
-    <label>消費カロリー（kcal）<small>機種と体重設定で変わるので、機械が変わった日は比べられません</small></label>
+    <label>${isBike()?"機械の表示kcal（任意・比べる用）":"消費カロリー（kcal）"}<small>${isBike()?"安静時の分を含み、体重も既定値のことが多いので、多めに出やすい値です":"機種と体重設定で変わるので、機械が変わった日は比べられません"}</small></label>
     <input id="c_kcal" type="number" inputmode="numeric" step="1" value="${esc(cBuf.kcal)}" placeholder="例 241">
     <label>メモ（任意）</label>
     <input id="c_memo" type="text" value="${esc(cBuf.memo)}" placeholder="機械が違った・膝の様子 など">
@@ -1957,11 +2008,13 @@ function cpGrab(){
         var m2=parseFloat(s2("sm")); if(!isNaN(m2)&&m2>0) sg.min=Math.round(m2*10)/10;
         var p2=parseFloat(s2("sp")); if(!isNaN(p2)&&p2>0) sg.sp=Math.round(p2*10)/10;
         var i2=parseFloat(s2("si")); if(!isNaN(i2)&&i2>=0) sg.inc=Math.round(i2*10)/10;
+        var h2=s2("sh"); if(h2!==null){ h2=hrClean(h2); if(h2) sg.hr=h2; else delete sg.hr; }   /* v28 */
       });
     }else{
       var mn=parseFloat(g("cp_mn"+i)); if(!isNaN(mn)&&mn>0) b.min=Math.round(mn*10)/10;
       var sp=parseFloat(g("cp_sp"+i)); if(!isNaN(sp)&&sp>0) b.sp=Math.round(sp*10)/10;
       var ic=parseFloat(g("cp_ic"+i)); if(!isNaN(ic)&&ic>=0) b.inc=Math.round(ic*10)/10;
+      var hh=g("cp_hr"+i); if(hh!==null){ hh=hrClean(hh); if(hh) b.hr=hh; else delete b.hr; }   /* v28 */
     }
   });
 }
@@ -2031,7 +2084,7 @@ function viewCPlan(){
     <button class="btn ${isBike()?"ghost":""}" style="margin-top:0" onclick="cpKind('tread')">🏃 トレッドミル</button>
     <button class="btn ${isBike()?"":"ghost"}" style="margin-top:0" onclick="cpKind('bike')">🚲 リカンベントバイク</button>
   </div>
-  ${isBike()?`<p class="note">バイクでは<strong>「レベル」＝負荷レベル、「心拍」＝目標心拍（拍/分）</strong>として入れます。</p>`:""}
+  ${isBike()?`<p class="note">バイクでは<strong>「レベル」＝負荷レベル、「回転数」＝目標回転数（回/分）</strong>として入れます。</p>`:""}
   ${bs.map(function(b,i){
     var head = `<div class="t"><h2>${i+1}　${esc(blockName(b,i))}</h2>
         <span class="pill">${blockMin(b)}分</span></div>`;
@@ -2051,8 +2104,9 @@ function viewCPlan(){
             <div class="row" style="margin-top:6px">
               <div><label>分</label><input id="cp_sm${i}_${j}" type="number" inputmode="decimal" step="0.5" value="${sg.min}" oninput="cpRecalc()"></div>
               <div><label>${isBike()?"レベル":"速度"}</label><input id="cp_sp${i}_${j}" type="number" inputmode="decimal" step="${isBike()?"1":"0.1"}" value="${isBike()?lvTxt(sg.sp):n1(sg.sp)}"></div>
-              <div><label>${isBike()?"心拍":"傾斜"}</label><input id="cp_si${i}_${j}" type="number" inputmode="decimal" step="${isBike()?"5":"0.5"}" value="${isBike()?Math.round(+sg.inc||0):n1(sg.inc)}"></div>
+              <div><label>${isBike()?"回転数":"傾斜"}</label><input id="cp_si${i}_${j}" type="number" inputmode="decimal" step="${isBike()?"5":"0.5"}" value="${isBike()?Math.round(+sg.inc||0):n1(sg.inc)}"></div>
             </div>
+            <label>目標心拍（表示だけ・任意）</label><input class="inp" id="cp_sh${i}_${j}" type="text" value="${esc(sg.hr||"")}" placeholder="例 110〜120">
             <button class="btn link" style="padding:5px" onclick="cpSegDel(${i},${j})">この区間を消す</button>
           </div>`;
         }).join("")}
@@ -2061,8 +2115,9 @@ function viewCPlan(){
       body = `<div class="row">
           <div><label>分</label><input id="cp_mn${i}" type="number" inputmode="decimal" step="1" value="${b.min}" oninput="cpRecalc()"></div>
           <div><label>${isBike()?"レベル":"速度 km/h"}</label><input id="cp_sp${i}" type="number" inputmode="decimal" step="${isBike()?"1":"0.1"}" value="${isBike()?lvTxt(b.sp):n1(b.sp)}"></div>
-          <div><label>${isBike()?"心拍":"傾斜 %"}</label><input id="cp_ic${i}" type="number" inputmode="decimal" step="${isBike()?"5":"0.5"}" value="${isBike()?Math.round(+b.inc||0):n1(b.inc)}"></div>
-        </div>`;
+          <div><label>${isBike()?"回転数":"傾斜 %"}</label><input id="cp_ic${i}" type="number" inputmode="decimal" step="${isBike()?"5":"0.5"}" value="${isBike()?Math.round(+b.inc||0):n1(b.inc)}"></div>
+        </div>
+        <label>目標心拍（表示だけ・任意）</label><input class="inp" id="cp_hr${i}" type="text" value="${esc(b.hr||"")}" placeholder="例 110〜120">`;
     }
     return `<div class="ex">
       ${head}${typeRow}
@@ -2085,7 +2140,7 @@ function viewCPlan(){
     <p class="note">追加したブロックは<strong>クールダウンの前</strong>に入ります。順番は↑↓で変えられます。</p>
   </div>
   <div class="sec">上げ方の設定</div>
-  ${isBike()?`<div class="card"><p class="note" style="margin:0"><strong>バイクは「かるすぎる」で負荷レベルを1つ上げ、「きつすぎる」で1つ戻す提案をします。</strong>心拍は目安で、提案の相手にはしません。走行中の＋−は レベル1・心拍5 ずつ動きます。<br>（下のトレッドミルの1段の設定は、バイクには使いません）</p></div>`:""}
+  ${isBike()?`<div class="card"><p class="note" style="margin:0"><strong>バイクは「かるすぎる」で負荷レベルを1つ上げ、「きつすぎる」で1つ戻す提案をします。</strong>回転数は目安で、提案の相手にはしません。走行中の＋−は レベル1・回転数5 ずつ動きます。<br>（下のトレッドミルの1段の設定は、バイクには使いません）</p></div>`:""}
   <div class="card" style="${isBike()?"display:none":""}">
     <div class="row">
       <div><label>速度の1段</label><input id="cp_ss" type="number" inputmode="decimal" step="0.1" value="${n1(cSet().spStep)}"></div>
@@ -2115,12 +2170,12 @@ function viewCPlan(){
 }
 function cpSave(){ cpGrab(); save(); go(cRet); }
 /* v26: 機種の切り替え。数字はそのまま残し、相手の機種で意味をなさない値だけ目安に置き換える
-   （トレッドミルの傾斜2%を「心拍2」にしない／心拍120を「傾斜120%」にしない）。 */
+   （トレッドミルの傾斜2%を「回転数2」にしない／回転数80を「傾斜80%」にしない）。 */
 function cpKind(k){
   cpGrab();
   var g=curProg(); if(!g) return;
   var fix=function(x){
-    if(k==="bike"){ if((+x.inc||0)<60) x.inc=115; if((+x.sp||0)>30) x.sp=5; }
+    if(k==="bike"){ if((+x.inc||0)<30 || (+x.inc||0)>140) x.inc=70; if((+x.sp||0)>30) x.sp=5; }
     else{ if((+x.inc||0)>15) x.inc=2; }
   };
   (g.blocks||[]).forEach(function(b){ fix(b); (b.segs||[]).forEach(fix); });
@@ -2179,8 +2234,12 @@ const CFMT=[
 "",
 "■ リカンベントバイクのとき（v26）",
 "・「プログラム名:」の下に「機種: リカンベントバイク」の1行を入れてください。",
-"・そのときは「速度」の欄に負荷レベル、「傾斜」の欄に目標心拍（拍/分）を入れます。",
-"    例） セット | メイン | 25分 | 5 | 120   （＝レベル5・心拍120を目安に25分）",
+"・そのときは「速度」の欄に負荷レベル、「傾斜」の欄に目標回転数（回/分＝rpm）を入れます。",
+"    例） セット | メイン | 25分 | 5 | 80   （＝レベル5・回転数80を目安に25分）",
+"",
+"■ 目標心拍を表示したいとき（v28・トレッドミルでもバイクでも）",
+"・行の最後に「| 心拍110〜120」の欄を足すと、その区間に目標心拍が表示されます（表示だけで、上げ下げの対象にはなりません）。",
+"    例） セット | メイン | 25分 | 5 | 80 | 心拍115〜128",
 "",
 "■ 例",
 CFMT_SAMPLE
@@ -2197,14 +2256,15 @@ function progToCText(g){
   if(g.note) L.push("説明: "+g.note);
   L.push("---");
   (g.blocks||[]).forEach(function(b){
-    if(b.type==="warm") L.push("ウォームアップ | "+b.min+"分 | "+n1(b.sp)+" | "+n1(b.inc));
-    else if(b.type==="cool") L.push("クールダウン | "+b.min+"分 | "+n1(b.sp)+" | "+n1(b.inc));
+    var H=function(x){ return x&&x.hr ? " | 心拍"+x.hr : ""; };   /* v28 */
+    if(b.type==="warm") L.push("ウォームアップ | "+b.min+"分 | "+n1(b.sp)+" | "+n1(b.inc)+H(b));
+    else if(b.type==="cool") L.push("クールダウン | "+b.min+"分 | "+n1(b.sp)+" | "+n1(b.inc)+H(b));
     else if(b.type==="interval"){
       L.push("インターバル | "+(b.lb||"インターバル")+" | "+Math.max(1,Math.round(+b.reps||1))+"回");
       (b.segs||[]).forEach(function(sg){
-        L.push("  "+(sg.lb||"")+" | "+sg.min+"分 | "+n1(sg.sp)+" | "+n1(sg.inc));
+        L.push("  "+(sg.lb||"")+" | "+sg.min+"分 | "+n1(sg.sp)+" | "+n1(sg.inc)+H(sg));
       });
-    }else L.push("セット | "+(b.lb||"セット")+" | "+b.min+"分 | "+n1(b.sp)+" | "+n1(b.inc));
+    }else L.push("セット | "+(b.lb||"セット")+" | "+b.min+"分 | "+n1(b.sp)+" | "+n1(b.inc)+H(b));
   });
   return L.join("\n");
 }
@@ -2223,22 +2283,28 @@ function parseCImport(text){
     if(/^-{3,}$/.test(line)){ started=true; return; }
     if(!started && !/\|/.test(line)) return;
     var c=line.split("|").map(function(x){return x.trim();});
+    /* v28: 行の最後の「心拍110〜120」の欄を抜き出して表示用に持つ（ほかの列の読み方は変えない） */
+    var hrv="";
+    if(c.length>=3 && /^(目標)?心拍/.test(c[c.length-1])){ hrv=hrClean(c.pop()); }   /* 最後の欄だけ（名前が「心拍◯」の行を壊さない） */
     var head=c[0];
     if(/^ウォームアップ|^warm/i.test(head)){
       cur=null;
       blocks.push({type:"warm", lb:(c.length>=5?c[1]:"ウォームアップ"),
         min:num(c.length>=5?c[2]:c[1])||5, sp:num(c.length>=5?c[3]:c[2])||5, inc:num(c.length>=5?c[4]:c[3])||0});
+      if(hrv) blocks[blocks.length-1].hr=hrv;
       return;
     }
     if(/^クールダウン|^cool/i.test(head)){
       cur=null;
       blocks.push({type:"cool", lb:(c.length>=5?c[1]:"クールダウン"),
         min:num(c.length>=5?c[2]:c[1])||5, sp:num(c.length>=5?c[3]:c[2])||4.5, inc:num(c.length>=5?c[4]:c[3])||0});
+      if(hrv) blocks[blocks.length-1].hr=hrv;
       return;
     }
     if(/^セット|^set/i.test(head)){
       cur=null;
       blocks.push({type:"work", lb:c[1]||"セット", min:num(c[2])||5, sp:num(c[3])||6, inc:num(c[4])||0});
+      if(hrv) blocks[blocks.length-1].hr=hrv;
       return;
     }
     if(/^インターバル|^interval/i.test(head)){
@@ -2250,6 +2316,7 @@ function parseCImport(text){
       var mn=num(c[1]), sp=num(c[2]), ic=num(c[3]);
       if(mn===null && c.length<2){ return; }
       cur.segs.push({lb:c[0]||"", min:mn||1, sp:sp||6, inc:ic||0});
+      if(hrv) cur.segs[cur.segs.length-1].hr=hrv;
       return;
     }
     errs.push(line);
@@ -2427,10 +2494,10 @@ function cActualCard0(r){
     return '<div class="prev">'+esc(s.lb||("区間"+(i+1)))
       + '<br><span style="opacity:.75">予定 '+mmss(planSec)+' ／ 実際 '
       + (act!=null? mmss(act)+(difTxt?'（'+difTxt+'）':'') : '—')
-      + (isBike() ? '<br>レベル '+chg("sp","")+' ／ 目標心拍 '+chg("inc","")
+      + (isBike() ? '<br>レベル '+chg("sp","")+' ／ 目標回転数 '+chg("inc","")
                   : '<br>傾斜 '+chg("inc","%")+' ／ 速度 '+chg("sp","km/h"))+'</span></div>';
   }).join("");
-  var fname={sp:(isBike()?"負荷レベル":"速度"), inc:(isBike()?"目標心拍":"傾斜"), skip:"この区間を飛ばした", add:"区間を1つ足した"};
+  var fname={sp:(isBike()?"負荷レベル":"速度"), inc:(isBike()?"目標回転数":"傾斜"), skip:"この区間を飛ばした", add:"区間を1つ足した"};
   var log=ed.map(function(e){
     var head=mmss(+e.w||0)+'　'+esc(e.lb||("区間"+((+e.i||0)+1)))+'　';
     if(e.f==="sp"||e.f==="inc")
@@ -2472,7 +2539,8 @@ function viewCGraph0(KK){
   if(!A2.length) return `<h1>有酸素の記録</h1>${sw}<p class="sub">まだ${machTxt()}の記録がありません。</p>
     <button class="btn ghost" onclick="go('cardio')">戻る</button>`;
   var dist=A2.map(function(r){ return Math.round(per30(r.dist,recMin(r))*100)/100; });
-  var kcal=A2.map(function(r){ return Math.round(per30(r.kcal,recMin(r))); });
+  var kOf=function(r){ return (KK==="bike" && r.kcalEst!=null) ? r.kcalEst : r.kcal; };   /* v27 */
+  var kcal=A2.map(function(r){ return Math.round(per30(kOf(r),recMin(r))); });
   var ds=A2.map(function(r){ return mdw(r.date); });
   var sel = (cSel>=0 && cSel<A2.length) ? A2[cSel] : null;
   return `
@@ -2482,21 +2550,21 @@ function viewCGraph0(KK){
   <div class="card">
     ${cChart(dist,ds,"30分あたりの距離","km",true)}
     <div style="height:14px"></div>
-    ${cChart(kcal,ds,"30分あたりの消費カロリー","kcal",false)}
+    ${cChart(kcal,ds,KK==="bike"?"30分あたりの推定カロリー（METsのある回）":"30分あたりの消費カロリー","kcal",false)}
     <p class="note">体調・睡眠・生理周期で上下します。<strong>1回の落ち込みは判断材料にしません。</strong>次に上げるかどうかは、記録したきつさ（余裕／ちょうどよい／きつい）だけで決めています。
     <br>カロリーは機械と体重設定で変わるため、<strong>ちがう機械の日とは比べられません。</strong></p>
   </div>
   ${sel?`<div class="card">
     <div class="bigsub">${mdw(sel.date)} の中身</div>
     ${(sel.plan||[]).map(function(s){return `<div class="prev">${segLine(s)}</div>`}).join("")}
-    <p class="note">${minSecTxt(sel)} ／ ${n1(sel.dist)}km ／ ${sel.kcal}kcal${sel.hr?" ／ 平均心拍"+sel.hr:""} ／ ${HARDS[(sel.hard||2)-1]}${sel.memo?"<br>"+esc(sel.memo):""}</p>
+    <p class="note">${minSecTxt(sel)} ／ ${n1(sel.dist)}km ／ ${sel.kcalEst!=null?"推定"+sel.kcalEst+"kcal（METs"+sel.mets+"）／ 機械"+sel.kcal:sel.kcal}kcal${sel.hr?" ／ 平均心拍"+sel.hr:""} ／ ${HARDS[(sel.hard||2)-1]}${sel.memo?"<br>"+esc(sel.memo):""}</p>
   </div>${cActualCard(sel)}`:""}
   <div class="sec">一覧（新しい順）</div>
   <div class="card">
     ${A2.slice().reverse().map(function(r){
       var i=DB.cardio.indexOf(r), m=mainOf(r.plan||[]);   /* v26: 削除は元の並びの番号で */
-      return `<div class="log"><b>${mdw(r.date)}</b> ${minSecTxt(r)} ／ ${n1(r.dist)}km ／ ${r.kcal}kcal${r.hr?" ／ 心拍"+r.hr:""} ／ ${HARDS[(r.hard||2)-1]}
-        <small>メイン ${siTxt(m.sp,m.inc," ・ ")} ／ 30分あたり ${n1(per30(r.dist,recMin(r)))}km・${Math.round(per30(r.kcal,recMin(r)))}kcal${r.memo?"<br>"+esc(r.memo):""}
+      return `<div class="log"><b>${mdw(r.date)}</b> ${minSecTxt(r)} ／ ${n1(r.dist)}km ／ ${r.kcalEst!=null?"推定"+r.kcalEst:r.kcal}kcal${r.hr?" ／ 心拍"+r.hr:""} ／ ${HARDS[(r.hard||2)-1]}
+        <small>メイン ${siTxt(m.sp,m.inc," ・ ")} ／ 30分あたり ${n1(per30(r.dist,recMin(r)))}km・${Math.round(per30(kOf(r),recMin(r)))}kcal${r.memo?"<br>"+esc(r.memo):""}
         <br><span class="link" style="cursor:pointer;color:#6f7a8c;text-decoration:underline" onclick="cDel(${i})">この回を削除</span></small></div>`;
     }).join("")}
   </div>
@@ -2507,7 +2575,7 @@ function viewCGraph0(KK){
 function viewCardio(){
   return `
   <h1>有酸素（${machTxt()}）</h1>
-  <p class="sub">${isBike()?"<strong>目標は「目安の心拍に収まる負荷レベルで、時間いっぱいこぎ切ること」</strong>です。<br>":"<strong>目標は距離ではなく「今日この速度・傾斜で走り切ること」</strong>です（距離は速度×時間で決まるので、直接は動かせないためです）。<br>"}<strong>時間の長さに決まりはありません。</strong>グラフだけは、長さのちがう回を並べるために30分あたりへ換算しています。</p>
+  <p class="sub">${isBike()?"<strong>目標は「目安の回転数で、話せるくらいの強さのまま時間いっぱいこぎ切ること」</strong>です。カロリーは機械のMETsから推定します。<br>":"<strong>目標は距離ではなく「今日この速度・傾斜で走り切ること」</strong>です（距離は速度×時間で決まるので、直接は動かせないためです）。<br>"}<strong>時間の長さに決まりはありません。</strong>グラフだけは、長さのちがう回を並べるために30分あたりへ換算しています。</p>
   ${cardioCard(true)}
   <button class="btn ghost" onclick="go('home')">筋トレの画面に戻る</button>`;
 }

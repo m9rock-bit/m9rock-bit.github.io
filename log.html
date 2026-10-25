@@ -91,7 +91,7 @@ h1{font-size:21px;margin:2px 0 4px}
 var HKEY = "bmc_log_hub_v1";
 var RKEY = "bmc_routine_v1";
 var GKEY = "bmc_gym_v1";
-var APPVER = "B.M.C. 記録ハブ v11 ・ 2026-10-25";
+var APPVER = "B.M.C. 記録ハブ v12 ・ 2026-10-25";
 
 var H = {
   vault: "My Valut",
@@ -362,11 +362,13 @@ function collect(){
       var res = [];
       if(num(c.dist)) res.push(num(c.dist)+"km");
       if(num(c.hard)) res.push("きつさ"+num(c.hard));
-      if(num(c.kcal)) res.push(num(c.kcal)+"kcal");
+      var bk = c.kind==="bike";
+      /* v12 (2026-10-25): バイクは推定カロリー（METsから）を先に、機械の表示は「機械◯kcal」として分けて書く */
+      if(bk && c.kcalEst!=null) res.push("推定"+num(c.kcalEst)+"kcal（METs"+num(c.mets)+"）");
+      if(num(c.kcal)) res.push((bk ? "機械" : "")+num(c.kcal)+"kcal");
       /* v11 (2026-10-25): gym v26 のリカンベントバイク。バイクの回だけ平均心拍を足し、
          区間は sp＝負荷レベル・inc＝目標心拍として書く。**行の列の数・種別名は変えない**
          （「有酸素」「有酸素区間」のまま。トレッドミルの行は1文字も変わらない）。 */
-      var bk = c.kind==="bike";
       if(bk && num(c.hr)) res.push("平均心拍"+num(c.hr));
       add("c"+c.date, c.date, line(c.date, "gym", "有酸素",
         /* v5: gym v14 から所要時間に秒（c.sec）が入るようになった。
@@ -381,7 +383,7 @@ function collect(){
         var rt = RATES[num(rates[x.b])-1] || "";
         add("v"+c.date+"-"+i, c.date, line(c.date, "gym", "有酸素区間",
           (c.progName||"有酸素")+" › "+(x.lb||"区間"),
-          (bk ? "レベル"+lvl(x.sp)+"・心拍"+Math.round(x.inc) : n1(x.sp)+"km/h・傾斜"+n1(x.inc)+"%")+(x.n>1 ? " ×"+x.n : ""),
+          (bk ? "レベル"+lvl(x.sp)+"・回転数"+Math.round(x.inc) : n1(x.sp)+"km/h・傾斜"+n1(x.inc)+"%")+(x.n>1 ? " ×"+x.n : ""),
           (x.min ? n1(x.min)+"分"+(x.n>1 ? "×"+x.n+"＝"+n1(x.min*x.n)+"分" : "") : ""),
           (x.lps.length ? x.lps.join("・")+"回目" : "")
             + (x.lps.length && rt ? " ／ " : "") + (rt ? "手ごたえ: "+rt : ""),
@@ -436,7 +438,7 @@ function defLinesGym(){
   var now = Date.now(), out = [];
   progs.forEach(function(pg){
     var bl = pg.blocks || [], total = 0, bk = pg.kind==="bike";   /* v11 */
-    function si(x){ return bk ? "レベル"+lvl(x.sp)+"・心拍"+Math.round(num(x.inc)) : n1(x.sp)+"km/h・傾斜"+n1(x.inc)+"%"; }
+    function si(x){ return bk ? "レベル"+lvl(x.sp)+"・回転数"+Math.round(num(x.inc)) : n1(x.sp)+"km/h・傾斜"+n1(x.inc)+"%"; }
     bl.forEach(function(b){
       if(b.type==="interval"){
         var reps = Math.max(1, Math.round(num(b.reps)||1));
