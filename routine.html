@@ -836,7 +836,7 @@ function defaults(){ return [
 var FOCUS_DEF = { len:{am:120,pm:90,ev:50,kids:15}, from:{pm:12,ev:16}, seg:[15,25,40], segKids:[5,5,5], sound:false, native:true, notify:true, lastBreak:"",
   /* v20 (2026-09-03): 集中ブロックのプレイリスト。spMode は "default"（既定URL）か "own"（専用URL）。 */
   spotify:false, spMode:"default", spotifyUrl:"" };
-var DB = { v:19, sets:null, chime:true, voice:true, third:true, noteOpen:false, spotifyUrl:"", scName:"ルーティンタイマー", notifySc:"ルーティン通知", log:[], count:0, focus:null, notes:[], times:[], sleepActive:false, sleepStartAt:0,
+var DB = { v:19, sets:null, chime:true, voice:true, third:true, noteOpen:false, spotifyUrl:"", scName:"ルーティンタイマー", notifySc:"ルーティン通知", notifyListSc:"有酸素ガイド", log:[], count:0, focus:null, notes:[], times:[], sleepActive:false, sleepStartAt:0,
   /* v20 (2026-09-03): 就寝のプレイリスト。spMode は "default"（既定URL）か "own"（専用URL）。 */
   sleepSpotify:false, sleepSpMode:"default", sleepSpotifyUrl:"",
   /* v22 (2026-09-05): 実行中の途中経過の控え（詳細は save() の下のコメント） */
@@ -889,6 +889,7 @@ try{
     if(typeof p.spotifyUrl==="string") DB.spotifyUrl = p.spotifyUrl;
     if(p.scName) DB.scName = p.scName;
     if(typeof p.notifySc==="string") DB.notifySc = p.notifySc;   /* v76 */
+    if(typeof p.notifyListSc==="string") DB.notifyListSc = p.notifyListSc;   /* v79 */
     if(typeof p.openAt==="number") DB.openAt = p.openAt;         /* v77: #open= で最後に始めた時刻 */
     if(Array.isArray(p.log)) DB.log = p.log;
     if(Array.isArray(p.notes)) DB.notes = p.notes;
@@ -1289,6 +1290,7 @@ function loadRun(r){
   brPick = (r.bp && typeof r.bp==="object") ? r.bp : {};
   brAsk = (typeof r.ba==="number") ? r.ba : -1;
   brLastPh = "";
+  tapPaused = false;   /* v78: 一時停止は控えに入れない（開き直したら続きから数える） */
   startAt = Date.now() - Math.max(0, r.elapsed||0)*1000;
   pauseAt = autoPaused ? Date.now() : 0;
 }
@@ -1619,7 +1621,7 @@ function parkBtn(){
 
 /* --- 状態 --- */
 /* v27: 版の表示（ホーム最下部）。中身を変えたら、ここも必ず上げる。 */
-var APPVER = "切り替えルーティン v77 ・ 2026-10-25";
+var APPVER = "切り替えルーティン v79 ・ 2026-10-25";
 var view = "home";
 var curId = null;
 var startAt = 0;
@@ -2414,6 +2416,35 @@ function guideArm(s){
     guideOn = true; return true;
   }catch(e){ return false; }
 }
+/* ===== v79（2026-10-25・指示_2026-10-25_5 / 🤖 AIへ 19:30）: 🔔 通知だけ のセットは、
+   gym の有酸素のように**セット全体の通知を開始時に1度だけ**渡す =====
+   ご記入「routine.htmlで通知を渡す場合は、gymの有酸素のように、セット全体の通知を渡す形にして欲しい」。
+   ★本文は案内列（v55・guideText）と同じ「秒数|次の項目」＋最後「おしまいです」。
+     ショートカットは gym の「有酸素ガイド」と同じ作り（待機 → 通知を表示 → 読み上げ のくり返し）
+     なので、既定の名前を「有酸素ガイド」にした（DB.notifyListSc。ホームの設定で変えられる）。
+   ★**タップで進むセットにも効かせる**（v55 は自動のセットだけだった）。予定の長さで案内するので、
+     ✓ を早めたり遅らせたりするとずれる。実行画面に1行出す。渡し直しはしない（v55・gym v21 と同じ）。
+   ★名前が空なら false を返し、呼び出し側が従来の合計1本（notifyRun）へ戻す。
+   ★DB.guide（自動のセットの案内列）が先に渡していれば、そちらで足りる（呼び出し側の else if）。
+   ★記録（doneSet・実績秒数・送る行・セット定義）の形は1文字も変えていない。 */
+var guideTap = false;   /* この回、タップ式に一覧を渡したか */
+function notifyListArm(s){
+  guideTap = false;
+  var nm = String(DB.notifyListSc||"").trim(); if(!nm) return false;
+  var txt = guideText(s); if(!txt) return false;
+  try{
+    location.href = "shortcuts://run-shortcut?name=" + encodeURIComponent(nm)
+                  + "&input=text&text=" + encodeURIComponent(txt);
+    guideOn = true; guideOff = false; guideTap = !s.auto; return true;
+  }catch(e){ return false; }
+}
+/* タップ式の実行画面に出す1行（一覧を渡した回だけ）。 */
+function guideTapNote(){
+  if(!guideOn || !guideTap) return "";
+  if(guideOff) return guideNote();
+  return '<p class="note" style="color:#9fb8d0">🔔 始めたときに、<b>予定の長さで項目ごとの通知</b>を渡しました。'
+       + '✓ を早めたり遅らせたりすると、通知の時刻はずれます（<b>画面の数字が正</b>です）。</p>';
+}
 /* 進み方が変わった＝渡した案内はもうあてにならない。 */
 function guideDrift(){ if(guideOn) guideOff = true; }
 /* 実行中の画面に出す1行（ずれたときだけ）。 */
@@ -2444,7 +2475,7 @@ function awayBlock(s){
     h += '<div class="hint" style="border-color:#7a9ec4;color:#bcd6ee">'
        + (handWord()==="通知" ? '<b>🔔 '+durLabel(awaySec)+' 後の通知を渡しました。</b>' : '<b>⏰ iPhoneの標準タイマーに '+durLabel(awaySec)+' を渡しました。</b>')
        + 'ロック画面に残り時間が出て、他のアプリを使っていても鳴ります。</div>';
-  }else if(l > 0){
+  }else if(l > 0 && !(guideOn && guideTap && !guideOff)){   /* v79: 一覧を渡した回は出さない */
     h += '<div class="hint">この項目には、離席中に鳴るものが<b>仕掛かっていません</b>。'
        + '下のボタンで、いつでも渡せます。</div>';
   }
@@ -3216,10 +3247,10 @@ function start(id, fromIndex, mode){   /* v38: mode = "rest" | "joy"（省略時
      （どちらを優先するかは編集画面にも書いてある）。 */
   /* v55: 外向きの動作は1つだけ（v8の線）。案内列を渡せた回は、それで足りる
      （最後の行が「おしまいです」なので、セット全体のタイマーは要らない）。 */
-  guideOn = false; guideOff = false;
+  guideOn = false; guideOff = false; guideTap = false;   /* v79 */
   if(s && guideArm(s)){ /* v55: 案内列を1度だけ渡した */ }
   else if(s && alarmOf(s)==="set" && limitOf(s)>0){ nativeTimer(limitOf(s)); }
-  else if(s && alarmOf(s)==="notify" && limitOf(s)>0){ notifyRun(limitOf(s)); }   /* v76 */
+  else if(s && alarmOf(s)==="notify" && limitOf(s)>0){ if(!notifyListArm(s)) notifyRun(limitOf(s)); }   /* v76 → v79: 項目ごとの一覧を1度だけ。名前が空なら合計1本 */
   else if(s && alarmOf(s)==="step"){   /* v76: 最初の項目の分だけ渡す */
     if(s.auto){ var _st0 = stepsOf(s); if(_st0[0]) nativeTimer(Math.max(1, Math.round(_st0[0].sec))); }
     else awayArm();
@@ -3234,7 +3265,7 @@ function stop(){ mediaAudio(false);   /* v57 */ brPick = {}; brAsk = -1; brLastP
   joyAsk=false; joyAt=0; joyTaken=0;
   blAsk=""; blEndAt=0; blName=""; blTaken=0; blDone=[];
   foldBrkI=-1; foldBrkM=0; foldBrkUsed=false; brkPendI=-1; brkPendM=0;
-  guideOn=false; guideOff=false; aEdit=false; aEditI=-1; }   /* v38 / v41 / v44 / v54 / v55 */
+  guideOn=false; guideOff=false; aEdit=false; aEditI=-1; tapPaused=false; }   /* v38 / v41 / v44 / v54 / v55 / v78 */
 
 /* ============================================================
    v16: 🛌就寝＋🌃中途覚醒対応
@@ -4346,7 +4377,10 @@ function alarmNote(s){
   var a = alarmOf(s);
   if(a==="set") return '始めた瞬間に、このセットの<b>'+durLabel(limitOf(s))+'</b>をiPhone標準のタイマーへ渡します（ショートカット「'+esc(DB.scName)+'」）。<b>セットの終わりに1回だけ鳴ります。</b>一度渡したタイマーはこのアプリから止められません。';
   if(a==="step") return '<b>項目が進むたびに、その項目の分だけ</b>iPhone標準のタイマーへ渡します（ショートカット「'+esc(DB.scName)+'」）。<b>進むたびに画面が一度ショートカットAppへ飛びます。</b>自動で進むセットでは、この画面を開いているあいだに進んだときだけ渡します。';
-  if(a==="notify") return '始めた瞬間に、このセットの<b>'+durLabel(limitOf(s))+'</b>を通知用のショートカット「'+esc(DB.notifySc||"")+'」へ渡します。<b>鳴らさず、終わりにバナーが出るだけ</b>です。ショートカットが未作成なら何も起きません（作り方はホーム画面の設定）。';
+  if(a==="notify") return (String(DB.notifyListSc||"").trim()
+      ? '始めた瞬間に、<b>項目ごとの通知の一覧</b>（gymの有酸素と同じ形）をショートカット「'+esc(DB.notifyListSc)+'」へ1度だけ渡します。<b>項目が切り替わる予定の時刻ごとに、次の項目が通知で来て</b>、最後は「おしまいです」。画面がショートカットAppへ飛ぶのは開始の1回だけです。タップで進むセットは予定の長さで案内するので、✓を早めたり遅らせたりするとずれます。'
+      : '始めた瞬間に、このセットの<b>'+durLabel(limitOf(s))+'</b>を通知用のショートカット「'+esc(DB.notifySc||"")+'」へ渡します。<b>鳴らさず、終わりにバナーが出るだけ</b>です。')
+      + 'ショートカットが未作成なら何も起きません（名前と作り方はホーム画面の設定）。';
   return 'このセットでは、iPhoneへは何も渡しません（終わりのアラームも通知も出ません）。差し込み・後回し・🎉 いま楽しむ のときも渡しません。「⏰ …を渡す」ボタンを自分で押したときだけ渡します。';
 }
 function alarmPicker(s){
@@ -4819,7 +4853,15 @@ function viewHome(){
   h += '<div class="card"><label>🔔 通知用ショートカットの名前（鳴らさずバナーだけ）</label>'
      + '<input class="inp" type="text" id="nscn" value="'+esc(DB.notifySc||"")+'" onchange="DB.notifySc=this.value;save()">'
      + '<p class="note">セットの「iPhoneへの渡し方」で<b>🔔 通知だけ</b>を選んだときに使います。作り方（1回だけ・約2分）：ショートカットAppで新規作成し、名前をこの欄と同じにする →'
-     + '①「待機」を追加し、秒数に「ショートカットの入力」を入れる ②「通知を表示」を追加し、本文「セットの時間です」。未作成なら🔔を選んでも何も起きません。</p></div>';
+     + '①「待機」を追加し、秒数に「ショートカットの入力」を入れる ②「通知を表示」を追加し、本文「セットの時間です」。未作成なら🔔を選んでも何も起きません。'
+     + '<br><b>v79からは、🔔 のセットを始めたときは下の「項目ごとの通知」を使います</b>（こちらは集中ブロックと「⏰ …を通知へ渡す」ボタンで使います）。</p></div>';
+  /* v79: 🔔 通知だけ のセットを始めたときに、項目ごとの一覧を渡すショートカット */
+  h += '<div class="card"><label>🔔 項目ごとの通知のショートカットの名前（セットを始めたとき）</label>'
+     + '<input class="inp" type="text" id="nlsc" value="'+esc(DB.notifyListSc||"")+'" onchange="DB.notifyListSc=this.value.trim();save()">'
+     + '<p class="note">「iPhoneへの渡し方」が<b>🔔 通知だけ</b>のセットを始めたとき、<b>項目ごとの「秒数|次の項目」の一覧</b>を1度だけ渡します。'
+     + '<b>gymの「有酸素ガイド」と同じ作りなので、既定の名前はそれにしてあります</b>（そのまま使えます。読み上げも付きます）。'
+     + '読み上げが要らなければ、同じ作りで「読み上げ」を外したショートカットを作り、その名前に変えてください。'
+     + '<b>空にすると</b>、これまでどおり合計1本の通知（上の欄）に戻ります。</p></div>';
   /* v77（2026-10-25 ご依頼）: ほかのアプリを開いたら、ここへ移る（iPhoneのショートカット「オートメーション」用）。
      ★このページは他のアプリが開いたことを知れない。知らせるのはiPhoneのオートメーションで、
        ページは #open=… で開かれたら、その画面をすぐ出すだけ。
@@ -5086,6 +5128,33 @@ function clearLog(){
 
 var runShowDone = false;   /* v70: 実行画面で「終わったもの」を開いているか（この回だけ・保存しない） */
 function runDoneFold(){ runShowDone = !runShowDone; render(); }
+/* ===== v78（2026-10-25 ご記入・同日2回「画面の上にSkipボタン」「セットの上部にスキップと一時停止」）=====
+   タップで進むセットの上の固定のかたまり（v70 の hTop）に「↷ スキップ」「⏸ 一時停止」を横に並べた。
+   ★一時停止は**いまの項目の時計だけを止める**。止め方は 🎉・📋 の差し込みと同じ（commitSeg()で
+     ここまでの分を項目に残し stepAt=0、再開で stepAt を入れ直す＝joyNowEnd と同じ）。
+     項目は進めない・スキップにしない・記録（doneSet・実績秒数）の形は1文字も変えていない。
+   ★止まっているかどうかは「tapPaused かつ stepAt が0」で判定する。✓・スキップ・取り消しなど
+     stepAt を入れ直す操作をすれば、自然に一時停止も解ける（解き忘れの状態を作らない）。
+   ★全体の経過（startAt）は止めない（🎉・📋 の差し込みと同じ）。終わる時刻は「いま戻った前提」で動く。
+   ★控えには入れない。開き直した回は resumeRun が時計を入れ直すので、続きから数える。
+   ★🎉・📋 の差し込み中は押せない（あちらがすでに時計を止めているため）。 */
+var tapPaused = false;
+function tapPausedNow(){ return tapPaused && !stepAt; }
+function tapPauseToggle(){
+  var s = setOf(curId); if(!s || s.auto) return;
+  if(tapPausedNow()){
+    tapPaused = false; stepAt = Date.now();
+    saveRun(); render(); return;
+  }
+  if(joyOn() || blOn()) return;
+  if(curStep >= stepsOf(s).length) return;
+  commitSeg();            /* ここまでの分をその項目に残す（再開したら続きから） */
+  tapPaused = true;
+  guideDrift();           /* v55: 時計が止まるので、渡した案内はずれる */
+  saveRun();
+  awayClear();            /* 止めているあいだに離席中の音が鳴らないように（🎉 と同じ） */
+  render();
+}
 function viewRun(){
   var s = setOf(curId);
   if(s && s.auto) return viewRunAuto(s);
@@ -5127,7 +5196,7 @@ function viewRun(){
   h += awayBackBox(s, st);   /* v35: 1分以上離れて戻ってきたときだけ出る */
   hTop += '<div class="card">';
   hTop += '<div class="bigsub" style="margin-bottom:2px">'+(curStep<st.length ? (curStep+1)+' / '+st.length+'　'+esc(cur?cur.text:"") : 'ぜんぶ終わりました')+'</div>';
-  hTop += '<div class="big'+(sl<0?' over':'')+'">'+mmss(sl)+'</div>';
+  hTop += '<div class="big'+((sl<0||tapPausedNow())?' over':'')+'">'+mmss(sl)+'</div>';   /* v78: 一時停止中も色を変える（自動セットと同じ） */
   /* ★v49（2026-09-23 ご記入A「終了時刻目安が閉じられている」）: 終了時刻は
      v19からここに出していたが、**v40の .note たたみ込みに巻き込まれて
      「くわしく」の中に隠れていた**（.note を連続でまとめて <details> に入れる
@@ -5137,7 +5206,7 @@ function viewRun(){
        諦めたもの: この行から「予定を過ぎています。続けて大丈夫です」の
        後半の言い回しを短くした（意味は残している）。
      ★.note の中の同じ一文は消した。2か所に出すと、どちらかが古くなる。 */
-  hTop += '<div class="bigsub">'+(sl<0 ? 'この項目は予定を過ぎています' : 'この項目の残り時間')
+  hTop += '<div class="bigsub">'+(tapPausedNow() ? '⏸ 一時停止中（この項目の時計は止まっています）' : (sl<0 ? 'この項目は予定を過ぎています' : 'この項目の残り時間'))
      + (curStep<st.length ? '　・　全体は <b style="color:#e0a86a">'+etaLabel()+'</b> ごろ終わり' : '')
      + '</div>';
   hTop += '<div class="bar"><i style="width:'+spct+'%"></i></div>';
@@ -5164,10 +5233,17 @@ function viewRun(){
        + '<button class="btn ghost" style="margin-top:0" onclick="extendStep(60)">＋1分 延長</button>'
        + '<button class="btn ghost" style="margin-top:0" onclick="extendStep(300)">＋5分 延長</button>'
        + '</div>';
+    /* v78（2026-10-25 ご記入・同日2回）: スキップと一時停止を上の固定のかたまりへ。
+       スキップは下にあった「↷ この項目は今日やらない」をここへ移したもの（押す機能 skipStep は同じ）。 */
+    hTop += '<div class="row" style="margin-top:7px">'
+       + '<button class="btn ghost" style="margin-top:0" onclick="skipStep()">↷ スキップ</button>'
+       + ((joyOn() || blOn()) ? '' : '<button class="btn ghost" style="margin-top:0'+(tapPausedNow()?';background:#3a3020;color:#e8c99a':'')+'" onclick="tapPauseToggle()">'+(tapPausedNow()?'▶ 再開する':'⏸ 一時停止')+'</button>')
+       + '</div>';
     hTop += emUI();   /* v70: 🌊 見たい・🌊 食べたい・🍵 ひと息・🍰 予約・🍽️ 記録 を上に固定 */
     /* v35（2026-09-10 ご依頼 ＝ 指示_2026-09-10 R4）: 離席中に鳴るものを
        ここに1か所へまとめた。v32の「残り30秒で鳴るタイマー」もこの中に畳んである。 */
     h += awayBlock(s);
+    h += guideTapNote();   /* v79 */
     /* v37（2026-09-11 ご依頼）: ⏸ あとで戻る。**スキップの上**に置く。
        「いまはできない」ときに最初に目に入るのがスキップだと、あとでやる
        つもりのものが「やらなかった項目」として記録に残るため。 */
@@ -5236,7 +5312,7 @@ function viewRun(){
        無いのではなく、**その回だけ飛ばす＝この↷が「消したい」気持ちに
        結びついていなかった**と読んだ。記録に残す値（doneSet="skip"）は
        1文字も変えていない。変えたのは画面の文字だけ。 */
-    h += '<button class="btn ghost" onclick="skipStep()">↷ この項目は今日やらない（スキップ）</button>';
+    /* v78: ここにあった「↷ この項目は今日やらない（スキップ）」は上の固定のかたまりへ移した（二重に置かない）。 */
     /* v26（2026-09-05 ご指摘）: 🧸 と 🛟 は画面のいちばん下にあり、
        **いちばん急いで押したいときに、いちばん遠かった。**スキップの直下へ移した。
        この2つは「いま出た衝動・いま出たイライラ」に対する入口なので、
@@ -5305,7 +5381,7 @@ function viewRun(){
         hList += '<div class="iobox">'
            + '<label style="margin-top:0">この項目を消します</label>'
            + '<p class="note" style="margin-top:5px"><b>'+esc(x.text)+'</b> を<b>このセットから消します。</b>'
-           + '<b>次回以降も出てきません</b>（その回だけ飛ばす「↷ この項目は今日やらない」とは別です）。'
+           + '<b>次回以降も出てきません</b>（その回だけ飛ばす上の「↷ スキップ」とは別です）。'
            + '<br>元に戻す仕組みはありません。必要になったら編集画面から足し直してください。'
            + '<br>いままでの実績の記録は<b>消えません</b>（今日やったことはそのまま残ります）。</p>'
            + '<div class="row" style="margin-top:8px">'
