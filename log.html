@@ -91,7 +91,7 @@ h1{font-size:21px;margin:2px 0 4px}
 var HKEY = "bmc_log_hub_v1";
 var RKEY = "bmc_routine_v1";
 var GKEY = "bmc_gym_v1";
-var APPVER = "B.M.C. 記録ハブ v10 ・ 2026-10-24";
+var APPVER = "B.M.C. 記録ハブ v11 ・ 2026-10-25";
 
 var H = {
   vault: "My Valut",
@@ -243,6 +243,7 @@ function gymRoutine(g, r){
    インターバルは同じ設定が回数ぶん並ぶだけなので、10ループを10行にすると読めない。
    逆に、走行中に速度・傾斜を変えた区間はそこで別の行に割れる＝**その日に上げた事実が残る。**
    （gym側は「いまの区間だけに効く」変更を記録の plan にそのまま書いている） */
+function lvl(v){ var x = Math.round(num(v)*10)/10; return (x%1===0) ? String(x) : x.toFixed(1); }   /* v11 */
 function segRows(c){
   var pl = (c && c.plan) || [];
   if(!pl.length) return [];
@@ -362,6 +363,11 @@ function collect(){
       if(num(c.dist)) res.push(num(c.dist)+"km");
       if(num(c.hard)) res.push("きつさ"+num(c.hard));
       if(num(c.kcal)) res.push(num(c.kcal)+"kcal");
+      /* v11 (2026-10-25): gym v26 のリカンベントバイク。バイクの回だけ平均心拍を足し、
+         区間は sp＝負荷レベル・inc＝目標心拍として書く。**行の列の数・種別名は変えない**
+         （「有酸素」「有酸素区間」のまま。トレッドミルの行は1文字も変わらない）。 */
+      var bk = c.kind==="bike";
+      if(bk && num(c.hr)) res.push("平均心拍"+num(c.hr));
       add("c"+c.date, c.date, line(c.date, "gym", "有酸素",
         /* v5: gym v14 から所要時間に秒（c.sec）が入るようになった。
            古い記録には無いので、無ければ従来どおり分だけを出す。 */
@@ -375,7 +381,7 @@ function collect(){
         var rt = RATES[num(rates[x.b])-1] || "";
         add("v"+c.date+"-"+i, c.date, line(c.date, "gym", "有酸素区間",
           (c.progName||"有酸素")+" › "+(x.lb||"区間"),
-          n1(x.sp)+"km/h・傾斜"+n1(x.inc)+"%"+(x.n>1 ? " ×"+x.n : ""),
+          (bk ? "レベル"+lvl(x.sp)+"・心拍"+Math.round(x.inc) : n1(x.sp)+"km/h・傾斜"+n1(x.inc)+"%")+(x.n>1 ? " ×"+x.n : ""),
           (x.min ? n1(x.min)+"分"+(x.n>1 ? "×"+x.n+"＝"+n1(x.min*x.n)+"分" : "") : ""),
           (x.lps.length ? x.lps.join("・")+"回目" : "")
             + (x.lps.length && rt ? " ／ " : "") + (rt ? "手ごたえ: "+rt : ""),
@@ -429,7 +435,8 @@ function defLinesGym(){
   var progs = (g.settings && g.settings.cardio && g.settings.cardio.progs) || [];
   var now = Date.now(), out = [];
   progs.forEach(function(pg){
-    var bl = pg.blocks || [], total = 0;
+    var bl = pg.blocks || [], total = 0, bk = pg.kind==="bike";   /* v11 */
+    function si(x){ return bk ? "レベル"+lvl(x.sp)+"・心拍"+Math.round(num(x.inc)) : n1(x.sp)+"km/h・傾斜"+n1(x.inc)+"%"; }
     bl.forEach(function(b){
       if(b.type==="interval"){
         var reps = Math.max(1, Math.round(num(b.reps)||1));
@@ -446,12 +453,12 @@ function defLinesGym(){
         var reps = Math.max(1, Math.round(num(b.reps)||1)), t2 = 0;
         var segs = (b.segs||[]).map(function(sg){
           t2 += num(sg.min)*reps;
-          return (sg.lb||"")+" "+n1(sg.min)+"分 "+n1(sg.sp)+"km/h・傾斜"+n1(sg.inc)+"%";
+          return (sg.lb||"")+" "+n1(sg.min)+"分 "+si(sg);
         });
         res = "インターバル ×"+reps+"（"+segs.join(" → ")+"）";
         dur = n1(t2)+"分";
       }else{
-        res = (b.lb||"")+" "+n1(b.sp)+"km/h・傾斜"+n1(b.inc)+"%";
+        res = (b.lb||"")+" "+si(b);
         dur = n1(b.min)+"分";
       }
       out.push({ id:"p"+h+"-"+(i+1), t:now, s:line(now, "gym", "有酸素プログラム",
