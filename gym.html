@@ -101,6 +101,8 @@ h2{font-size:15px;margin:0 0 3px}
   color:#cbd5e3;font-size:21px;font-family:inherit;cursor:pointer;flex:none;
 }
 .stepper .val{flex:1;text-align:center;font-size:20px;font-variant-numeric:tabular-nums}
+.stepper .val.tap{cursor:pointer}
+.stepper .val.tap:active{opacity:.6}
 .stepper .val small{display:block;font-size:11px;color:#6f7a8c;margin-top:2px}
 
 .ex{border-top:1px solid #232b38;padding:13px 2px}
@@ -263,16 +265,16 @@ const PROG_FROM=new Date(2026,8,1).getTime();   /* 2026-09-01 から重量アッ
 
 /* ---------- プログラム定義（筋トレプログラム_2026-08-08 §1・§2） ---------- */
 const PROGRAM=[
-  {id:"tri", name:"トライセッププッシュダウン", r:"A", w:6.5,  reps:15, cap:18, step:1.0,  unit:"kg"},
-  {id:"bul", name:"ブルガリアンスクワット",     r:"A", w:12,   reps:10, cap:13, step:2.0,  unit:"kg", memo:"片足ずつ"},
-  {id:"lat", name:"ラットプルダウン",           r:"B", w:28,   reps:12, cap:15, step:2.5,  unit:"kg"},
+  {id:"tri", name:"トライセッププッシュダウン", r:"A", w:6.5,  reps:15, cap:18, step:1.0,  unit:"kg", memo:"肘を脇に固定し前腕だけ動かす。1秒で押し下げ→下で肘を伸ばしきって1秒止め→2秒で戻す。二の腕の裏が硬くなる感覚。肩をすくめない"},
+  {id:"bul", name:"ブルガリアンスクワット",     r:"A", w:12,   reps:10, cap:13, step:2.0,  unit:"kg", memo:"片足ずつ。体重は前足に、上体を少し前へ。3秒で下ろす→下で1秒止め→1〜2秒で立つ。前足のお尻ともも前が伸びる感覚。前膝は内に入れない"},
+  {id:"lat", name:"ラットプルダウン",           r:"B", w:28,   reps:12, cap:15, step:2.5,  unit:"kg", memo:"胸を張り、肩を下げてから肘を体の横へ。1秒で引く→胸の前で1秒止め→2秒で戻す。脇の下（背中の横）が縮む感覚。腕で引かない。パワーグリップ可"},
   {id:"add", name:"ヒップアダクション",         r:"B", w:29,   reps:8,  cap:12, step:2.5,  unit:"kg",
-   memo:"9月に上げるときはこの種目だけ急がない（12回まで伸びてから）"},
-  {id:"abd", name:"ヒップアブダクション",       r:"B", w:36,   reps:12, cap:15, step:2.5,  unit:"kg"},
-  {id:"crm", name:"クランチ（マシン）",         r:"B", w:18,   reps:10, cap:14, step:2.5,  unit:"kg"},
-  {id:"che", name:"チェストプレス（マシン）",   r:"C", w:17.5, reps:8,  cap:12, step:2.5,  unit:"kg"},
-  {id:"rdl", name:"ルーマニアンデッドリフト",   r:"C", w:24,   reps:12, cap:15, step:2.5,  unit:"kg"},
-  {id:"bic", name:"バイシクルクランチ",         r:"C", w:0,    reps:15, cap:20, step:0,    unit:"自重"}
+   memo:"腰を背もたれにつけ、2秒で閉じる→1秒止め→2秒で戻す。内ももが締まる感覚。戻すときも力を抜かない。重さは12回まで伸びてから上げる"},
+  {id:"abd", name:"ヒップアブダクション",       r:"B", w:36,   reps:12, cap:15, step:2.5,  unit:"kg", memo:"腰を背もたれにつけ、1秒で開く→1秒止め→2秒で閉じる。お尻の横（腰骨の下）が熱くなる感覚。勢いで戻さない"},
+  {id:"crm", name:"クランチ（マシン）",         r:"B", w:18,   reps:10, cap:14, step:2.5,  unit:"kg", memo:"みぞおちを丸める意識。息を吐きながら1秒で縮める→1秒止め→2秒で戻す。お腹の上が縮む感覚。腰や首で引かない"},
+  {id:"che", name:"チェストプレス（マシン）",   r:"C", w:17.5, reps:8,  cap:12, step:2.5,  unit:"kg", memo:"肩甲骨を寄せて胸を張る。肘は肩より少し下。1秒で押す→胸が伸びるところまで2秒で戻す。胸の外側が張る感覚。肘はロックしない"},
+  {id:"rdl", name:"ルーマニアンデッドリフト",   r:"C", w:24,   reps:12, cap:15, step:2.5,  unit:"kg", memo:"パワーグリップを巻き、持ったら指の力を抜く。膝は軽く曲げて固定、お尻を真後ろへ。3秒で下ろす→もも裏が伸びたところで1秒止め→お尻を前へ押して1〜2秒で立つ。もも裏が引っ張られる感覚。腰が疲れたら深すぎ"},
+  {id:"bic", name:"バイシクルクランチ",         r:"C", w:0,    reps:15, cap:20, step:0,    unit:"自重", memo:"腰を床に押しつけたまま。1秒でひねって肩を反対の膝へ→1秒止め→戻して反対側。脇腹がねじれて縮む感覚。肘だけ振らない"}
 ];
 
 /* ---------- v4（2026-08-19）: 環境ごとの代替種目 ----------
@@ -354,7 +356,7 @@ const CARDIO_DEF={
 const RATES=["かるすぎる","ちょうどよい","きつすぎる"];
 /* v9（2026-09-05）: 版の表示（ホーム最下部）。開いて1秒で新旧を見分けるため。
    中身を変えたら、ここも必ず上げる。 */
-const APPVER="B.M.C. ジム v28 ・ 2026-10-25";
+const APPVER="B.M.C. ジム v31 ・ 2026-10-27";
 const NORM=30;                    /* グラフの換算基準（30分あたり） */
 const HARDS=["余裕","ちょうどよい","きつい"];
 
@@ -3555,7 +3557,7 @@ function viewEx(){
     <label>重さ</label>
     <div class="stepper">
       <button onclick="bumpW(-1)">−</button>
-      <div class="val">${fmtW(e,tmpW)}<small>1段 ${e.step}kg</small></div>
+      <div class="val tap" onclick="wPadOpen()" title="タップして数字を入れる">${fmtW(e,tmpW)}<small>1段 ${e.step}kg ・ タップで直接入力</small></div>
       <button onclick="bumpW(1)">＋</button>
     </div>` : ""}
 
@@ -3673,6 +3675,43 @@ function openEx(id){ unlockAudio(); curId=id; tmpW=null; tmpR=null; tmpB=null; g
 function bumpW(d){
   const e=def(curId,(DB.active&&DB.active.env)||"gym"); if(!e || !e.step) return;
   tmpW=Math.max(0, Math.round((tmpW + d*e.step)*100)/100); render();
+}
+/* v31 (2026-10-27・チャットでのご依頼「何秒でおろす、とめる、などの動作の感覚も追加して欲しい」):
+   v30 の9種目の memo に、テンポ（◯秒で動かす→◯秒止める→◯秒で戻す）と「どこにどう効く感覚か」を足した。
+   rdl はお使いの道具がパワーグリップ（ALLOUT）と分かったので「ストラップ」から書き換えた。
+   変えたのは PROGRAM の memo の文字だけ（v30 と同じ範囲）。 */
+/* v30 (2026-10-27・チャットでのご依頼「gymアプリのルーティンにはれるフォームの注意事項が欲しい」):
+   A/B/C の9種目の memo（ジム版）にフォームの注意を1行ずつ入れた。種目画面の「前回」の下と
+   ホームの一覧に灰色で出る。ジム版はアプリ内で編集できない（isEditableEnv）ため、コード側に書いた。
+   自宅版（ALT・DB.settings.alt）の memo、種目id・重さ・回数・刻み・記録の形・ハブへ送る行は変えていない。
+   rdl は握力が先に尽きてもも裏に効いていない（10/25 28kg×9/9/7）ことへの対処として、ストラップと可動域を書いた。 */
+/* v29 (2026-10-26・日次ノート🤖AIへ 05:53「重量の表示をタップしたらマニュアルで入力できるように」):
+   重さの数字をタップすると、有酸素の速度・傾斜と同じ小窓（.cpad / cPad）で数字を直接入れられる。
+   入れた値は tmpW（この画面で記録に使う値）にだけ入る。記録の形・種目の既定（w・step）は変えない。
+   cPad を共用するので isTyping() は自動で効く（描き直しで入力が消えない）。 */
+function wPadOpen(){
+  if(cPad) return;
+  const e=def(curId,(DB.active&&DB.active.env)||"gym"); if(!e) return;
+  var d=document.createElement("div");
+  d.className="cpad";
+  d.innerHTML='<div class="cpadbox">'
+    + '<div class="cpadttl">重さを直接入れる</div>'
+    + '<label>重さ（kg）</label><input id="wpad_w" type="number" inputmode="decimal" step="0.25" min="0" value="'+(tmpW==null?"":tmpW)+'">'
+    + '<p class="note" style="margin:8px 0 0">この記録に使う重さだけが変わります。<strong>種目の既定と刻み（1段 '+e.step+'kg）は書き換えません。</strong></p>'
+    + '<div class="row" style="margin-top:10px">'
+    + '<button class="btn ghost" style="margin-top:0" onclick="cPadClose()">やめる</button>'
+    + '<button class="btn" style="margin-top:0" onclick="wPadSave()">決定</button>'
+    + '</div></div>';
+  document.body.appendChild(d);
+  cPad=d;
+  var f=d.querySelector("input"); if(f){ try{ f.focus(); f.select(); }catch(x){} }
+}
+function wPadSave(){
+  var el=document.getElementById("wpad_w");
+  var v=el?parseFloat(String(el.value).replace(",", ".")):NaN;
+  if(isNaN(v) || v<0){ alert("0以上の数字を入れてください。"); return; }
+  tmpW=Math.round(v*100)/100;
+  cPadClose(); render();
 }
 /* v5: バンドは登録した並び（弱い→強い）の中を1つずつ動く。
    登録にない呼び名（改名・削除のあと）だったときは、いちばん弱いところから入り直す。 */
