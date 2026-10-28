@@ -1621,7 +1621,7 @@ function parkBtn(){
 
 /* --- 状態 --- */
 /* v27: 版の表示（ホーム最下部）。中身を変えたら、ここも必ず上げる。 */
-var APPVER = "切り替えルーティン v81 ・ 2026-10-27";
+var APPVER = "切り替えルーティン v82 ・ 2026-10-28";
 var view = "home";
 var curId = null;
 var startAt = 0;
@@ -2029,8 +2029,8 @@ function musicToggle(){
    ★記録ハブへ送る行の形・タイマー・集計は1バイトも変えていない（claude.md §1-1 の1に当たらない）。
    ★オフにする口は 設定 の 🎵 のすぐ下（DB.breathPad）。新しいノート・入力欄は増やしていない。 */
 var padNodes = null;
-var PAD_VOL = .055;        /* ふだんの大きさ（合図は .9。十分に下。耳の邪魔をしない） */
-var PAD_DUCK = .012;       /* 合図の前後で落とす先 */
+var PAD_VOL = .11;         /* v82: .055→.11（10/28「聞こえなかった」。合図は .9 なのでまだ十分に下） */
+var PAD_DUCK = .025;       /* 合図の前後で落とす先（v82: PAD_VOL に合わせて上げた） */
 var PAD_DUCK_SEC = 1.8;    /* 落としている長さ */
 function padWant(){
   try{
@@ -2052,15 +2052,18 @@ function padStart(){
     if(!ac) ac = new (window.AudioContext||window.webkitAudioContext)();
     if(ac.state === "suspended" && ac.resume) ac.resume();
     var g = ac.createGain(), lp = ac.createBiquadFilter();
-    lp.type = "lowpass"; lp.frequency.value = 520;        /* 高いところを削って、やわらかくする */
-    var o1 = ac.createOscillator(), o2 = ac.createOscillator();
-    o1.type = "sine"; o2.type = "sine";
-    o1.frequency.value = 110; o2.frequency.value = 110.6; /* わずかにずらして、ゆらぎを作る */
-    o1.connect(lp); o2.connect(lp); lp.connect(g); g.connect(ac.destination);
+    lp.type = "lowpass"; lp.frequency.value = 1400;       /* v82: 520→1400（高いところだけ削る） */
+    /* v82（2026-10-28「聞こえなかった」）: 110Hz は iPhone の本体スピーカーでほとんど鳴らない
+       （小さなスピーカーは 300Hz より下がほぼ出ない）。1オクターブ上の 220Hz と、5度上の 330Hz（小さめ）にした。 */
+    var o1 = ac.createOscillator(), o2 = ac.createOscillator(), o3 = ac.createOscillator(), g3 = ac.createGain();
+    o1.type = "sine"; o2.type = "sine"; o3.type = "sine";
+    o1.frequency.value = 220; o2.frequency.value = 220.7; /* わずかにずらして、ゆらぎを作る */
+    o3.frequency.value = 330; g3.gain.value = .45;
+    o1.connect(lp); o2.connect(lp); o3.connect(g3); g3.connect(lp); lp.connect(g); g.connect(ac.destination);
     g.gain.setValueAtTime(.0001, ac.currentTime);
     g.gain.exponentialRampToValueAtTime(PAD_VOL, ac.currentTime + 2.5);   /* ゆっくり立ち上げる */
-    o1.start(); o2.start();
-    padNodes = { o1:o1, o2:o2, g:g };
+    o1.start(); o2.start(); o3.start();
+    padNodes = { o1:o1, o2:o2, o3:o3, g:g };
   }catch(e){ padNodes = null; }
 }
 function padStop(){
@@ -2071,7 +2074,7 @@ function padStop(){
     pn.g.gain.cancelScheduledValues(t);
     pn.g.gain.setValueAtTime(Math.max(.0001, pn.g.gain.value), t);
     pn.g.gain.exponentialRampToValueAtTime(.0001, t + 1.2);   /* ふっと切らない */
-    pn.o1.stop(t + 1.4); pn.o2.stop(t + 1.4);
+    pn.o1.stop(t + 1.4); pn.o2.stop(t + 1.4); if(pn.o3) pn.o3.stop(t + 1.4);
   }catch(e){}
 }
 /* render() から毎回通る。止める条件を1か所に集めたいので、autoTick ではなくここで見る
