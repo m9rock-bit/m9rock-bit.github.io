@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Player">
+<meta name="theme-color" content="#12151c">
+<title>B.M.C. 決めた動画だけ</title>
+<!--
+  作成: B.M.C.（Claude） / 作成日: 2026-10-29
+  仕様: 00_System/Rules/claude_personal/specialists/B.M.C/仕様書_2026-10-29_決めた動画だけを時間を区切って流すアプリ（player.html）.md
+  ★設計の要点（変えるときは理由も一緒に残してください）
+  1. 流すのは「登録した動画」だけ。動画が終わったら YouTube のおすすめへ行かせず、アプリが次の登録動画へ進める。
+  2. 決めた分数（playMin）を過ぎたら、いまの動画が終わったところで止める（途中で切らない）。
+     止めた時刻からクールダウン（coolMin）のあいだは流せない。時刻は保存するので、アプリを閉じ直しても続く。
+  3. 聴ける時間帯（windows）が1つ以上あるときは、その外では流さない（仕様書 Q3＝ア）。
+     時間帯の途中で時刻が外へ出たら、いまの動画の終わりで止める（2と同じ扱い）。
+     時間帯が1つも無いときは、いつでも流れる（ホームに「まだ決めていません」と出す）。
+  4. YouTube の規約で、動画は画面に見える形で流す。画面を消すと止まる（Premium のバックグラウンド再生はこのアプリには効かない）。
+     画面が自動で消えないよう、流している間だけ Wake Lock を取る（対応していない端末では何もしない）。
+  5. 登録は「リンクをコピー → 📋 コピーした動画を登録」。ホーム画面のアイコンから開いたアプリは Safari と保存場所が別なので、
+     共有から URL 付きで開く形は使わない（仕様書 §7）。
+-->
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0}
+body{background:#12151c;color:#e8ecf2;font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif;
+  padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+.wrap{max-width:560px;margin:0 auto;padding:16px 16px 70px}
+h1{font-size:19px;margin:4px 0 2px}
+.sub{color:#8a94a6;font-size:12.5px;margin:0 0 14px;line-height:1.65}
+.card{background:#1a1f29;border:1px solid #262d3a;border-radius:14px;padding:14px 15px;margin-bottom:11px}
+.sec{font-size:12px;color:#6f7a8c;margin:22px 0 8px;letter-spacing:.06em}
+.btn{display:block;width:100%;padding:16px;border-radius:12px;border:none;background:#e0a86a;color:#20160c;
+  font-size:17px;font-weight:700;font-family:inherit;cursor:pointer;margin-top:10px}
+.btn.ghost{background:#232b38;color:#cbd5e3;font-weight:600;font-size:14px;padding:12px}
+.btn.small{display:inline-block;width:auto;padding:7px 11px;font-size:13px;margin:0}
+.btn.danger{background:#3a2427;color:#e8b3b8}
+.btn:disabled{opacity:.4}
+.row{display:flex;gap:8px;align-items:center}
+.note{color:#8a94a6;font-size:12.5px;line-height:1.7;margin:6px 0 0}
+.big{font-size:34px;font-weight:700;margin:4px 0}
+.vitem{display:flex;gap:8px;align-items:center;padding:9px 0;border-top:1px solid #232a36}
+.vitem:first-child{border-top:none}
+.vitem .t{flex:1;font-size:14px;line-height:1.45;word-break:break-all}
+.vitem .t small{display:block;color:#6f7a8c;font-size:11px}
+.vitem.done .t{color:#6f7a8c}
+input[type=text],input[type=number],input[type=time],textarea{width:100%;background:#12151c;color:#e8ecf2;border:1px solid #2b3444;
+  border-radius:9px;padding:9px;font-size:15px;font-family:inherit}
+textarea{min-height:90px}
+label{display:block;font-size:13px;color:#a9b4c6;margin:12px 0 5px}
+.days{display:flex;gap:4px;flex-wrap:wrap;margin:6px 0}
+.day{padding:6px 9px;border-radius:8px;background:#232b38;color:#8a94a6;border:1px solid #2b3444;font-size:13px}
+.day.on{background:#2b3a4a;color:#e8ecf2;border-color:#7aa0c4}
+.lock{border-color:#5f93a8;background:#141d21}
+.pwrap{position:relative;width:100%;padding-top:56.25%;background:#000;border-radius:12px;overflow:hidden;margin:6px 0}
+.pwrap > div,.pwrap iframe{position:absolute;inset:0;width:100%;height:100%}
+#toast{position:fixed;left:50%;bottom:calc(76px + env(safe-area-inset-bottom));transform:translateX(-50%);background:#2b3444;color:#e8ecf2;
+  padding:10px 14px;border-radius:10px;font-size:13.5px;max-width:90%;display:none;z-index:9999}
+#fbBtn{position:fixed;right:12px;bottom:calc(12px + env(safe-area-inset-bottom));width:46px;height:46px;border-radius:23px;border:1px solid #2b3444;
+  background:#1a1f29;color:#e8ecf2;font-size:20px;opacity:.85;z-index:9000}
+#fbWrap{position:fixed;inset:0;z-index:9001;display:none}
+#fbWrap.on{display:block}
+#fbBack{position:absolute;inset:0;background:rgba(0,0,0,.55)}
+#fbPanel{position:absolute;left:0;right:0;bottom:0;max-height:90%;overflow-y:auto;background:#1a1f29;border-radius:16px 16px 0 0;
+  padding:16px 16px calc(20px + env(safe-area-inset-bottom))}
+.fbsend{display:block;width:100%;padding:16px;border-radius:12px;background:#e0a86a;color:#20160c;font-size:16px;font-weight:700;
+  text-align:center;text-decoration:none;margin-top:10px}
+.cats{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+<div id="toast"></div>
+<script>
+var APPVER = "決めた動画だけ v1 ・ 2026-10-29";
+var KEY = "bmc_player_v1";
+var WD = ["日","月","火","水","木","金","土"];
+
+/* ---------- 保存 ---------- */
+var DB = {
+  list: [],                 /* {id, title, done} */
+  set: { playMin:15, coolMin:15, next:"炭酸水 → 2階でととのう", windows:[] },  /* windows: {name, days:[0-6], from:"21:00", to:"22:00"} */
+  st: { coolUntil:0, sess:null },  /* sess: {start, acc, last} */
+  log: []                   /* {t, min, n} */
+};
+function load(){
+  try{
+    var o = JSON.parse(localStorage.getItem(KEY));
+    if(o && typeof o==="object"){
+      if(Array.isArray(o.list)) DB.list = o.list.filter(function(x){ return x && typeof x.id==="string"; });
+      if(o.set && typeof o.set==="object"){
+        if(+o.set.playMin>0) DB.set.playMin = +o.set.playMin;
+        if(+o.set.coolMin>=0) DB.set.coolMin = +o.set.coolMin;
+        if(typeof o.set.next==="string") DB.set.next = o.set.next;
+        if(Array.isArray(o.set.windows)) DB.set.windows = o.set.windows;
+      }
+      if(o.st && typeof o.st==="object"){
+        if(+o.st.coolUntil>0) DB.st.coolUntil = +o.st.coolUntil;
+        if(o.st.sess && typeof o.st.sess==="object") DB.st.sess = o.st.sess;
+      }
+      if(Array.isArray(o.log)) DB.log = o.log;
+    }
+  }catch(e){}
+}
+function save(){ try{ localStorage.setItem(KEY, JSON.stringify(DB)); }catch(e){} }
+
+/* ---------- 小道具 ---------- */
+function esc(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+function p2(n){ return (n<10?"0":"")+n; }
+function hm(d){ return p2(d.getHours())+":"+p2(d.getMinutes()); }
+function mmss(sec){ sec = Math.max(0, Math.ceil(sec)); return Math.floor(sec/60)+":"+p2(sec%60); }
+function toast(m){ var t=document.getElementById("toast"); t.textContent=m; t.style.display="block"; clearTimeout(toast._t); toast._t=setTimeout(function(){ t.style.display="none"; }, 3200); }
+function now(){ return Date.now(); }
+
+/* ---------- 動画の URL から id を取る ---------- */
+function ytIds(text){
+  var out = [], seen = {};
+  var re = /(?:youtube\.com\/(?:watch\?(?:[^\s]*?&)?v=|shorts\/|live\/|embed\/)|youtu\.be\/)([A-Za-z0-9_-]{11})/g, m;
+  while((m = re.exec(String(text||""))) !== null){
+    if(!seen[m[1]]){ seen[m[1]] = 1; out.push(m[1]); }
+  }
+  return out;
+}
+function addIds(ids){
+  var have = {}; DB.list.forEach(function(x){ have[x.id] = 1; });
+  var added = [];
+  ids.forEach(function(id){ if(!have[id]){ DB.list.push({ id:id, title:"", done:false }); have[id]=1; added.push(id); } });
+  save();
+  added.forEach(fetchTitle);
+  return added.length;
+}
+/* 名前は YouTube の oEmbed から取れたら入れる。取れなくても登録は済んでいる（あとで手で直せる）。 */
+function fetchTitle(id){
+  try{
+    fetch("https://www.youtube.com/oembed?format=json&url="+encodeURIComponent("https://www.youtube.com/watch?v="+id))
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(j){
+        if(!j || !j.title) return;
+        var it = DB.list.filter(function(x){ return x.id===id; })[0];
+        if(it && !it.title){ it.title = j.title + (j.author_name ? "（"+j.author_name+"）" : ""); save(); if(view==="home"||view==="list") render(); }
+      }).catch(function(){});
+  }catch(e){}
+}
+function nameOf(x){ return x.title || ("動画 "+x.id); }
+
+/* ---------- 時間帯 ---------- */
+function toMin(s){ var m = String(s||"").match(/^(\d{1,2}):(\d{2})$/); return m ? (+m[1])*60 + (+m[2]) : null; }
+/* 時間帯 w の中にいるか。to が from より前なら日をまたぐ（例 23:00〜01:00）。曜日は「始まった日」で見る。 */
+function inWin(w, d){
+  var f = toMin(w.from), t = toMin(w.to); if(f===null || t===null) return false;
+  var days = Array.isArray(w.days) && w.days.length ? w.days : [0,1,2,3,4,5,6];
+  var m = d.getHours()*60 + d.getMinutes(), wd = d.getDay();
+  if(f < t) return days.indexOf(wd)>=0 && m>=f && m<t;
+  if(f > t){
+    if(m>=f) return days.indexOf(wd)>=0;
+    if(m<t)  return days.indexOf((wd+6)%7)>=0;
+    return false;
+  }
+  return false;
+}
+function hasWins(){ return DB.set.windows.length > 0; }
+function allowedNow(d){ d = d || new Date(); if(!hasWins()) return true; return DB.set.windows.some(function(w){ return inWin(w, d); }); }
+/* 次に聴ける時刻（7日先まで1分刻みでなく、各時間帯の開始時刻を並べて最も早いもの） */
+function nextOpen(d){
+  d = d || new Date();
+  var best = null;
+  for(var k=0;k<8;k++){
+    DB.set.windows.forEach(function(w){
+      var f = toMin(w.from); if(f===null) return;
+      var days = Array.isArray(w.days) && w.days.length ? w.days : [0,1,2,3,4,5,6];
+      var c = new Date(d.getFullYear(), d.getMonth(), d.getDate()+k, Math.floor(f/60), f%60, 0, 0);
+      if(days.indexOf(c.getDay())<0) return;
+      if(c.getTime() <= d.getTime()) return;
+      if(!best || c < best) best = c;
+    });
+    if(best) break;
+  }
+  return best;
+}
+function whenLabel(c){
+  if(!c) return "";
+  var t = new Date(), same = c.toDateString()===t.toDateString();
+  var tm = new Date(t.getFullYear(), t.getMonth(), t.getDate()+1);
+  return (same ? "今日" : (c.toDateString()===tm.toDateString() ? "明日" : WD[c.getDay()]+"曜")) + " " + hm(c);
+}
+
+/* ---------- いま流せるか ---------- */
+function coolLeft(){ return Math.max(0, (DB.st.coolUntil - now())/1000); }
+function queue(){ return DB.list.filter(function(x){ return !x.done; }); }
+function blockReason(){
+  if(coolLeft() > 0) return "cool";
+  if(!allowedNow()) return "win";
+  if(!queue().length) return "empty";
+  return "";
+}
+
+/* ---------- 再生 ---------- */
+var view = "home", player = null, ytReady = false, cur = null, ticker = null, wake = null, stopAfter = false, pState = -1;
+function sessAcc(){ var s = DB.st.sess; return s ? s.acc : 0; }
+function limitSec(){ return DB.set.playMin * 60; }
+
+function loadYT(){
+  if(window.YT && window.YT.Player){ ytReady = true; return; }
+  if(document.getElementById("ytapi")) return;
+  var s = document.createElement("script"); s.id = "ytapi"; s.src = "https://www.youtube.com/iframe_api";
+  document.head.appendChild(s);
+}
+window.onYouTubeIframeAPIReady = function(){ ytReady = true; if(view==="play" && !player) mkPlayer(); };
+
+function start(){
+  var r = blockReason();
+  if(r){ render(); return; }
+  if(!DB.st.sess) DB.st.sess = { start: now(), acc: 0, last: now(), n: 0 };
+  stopAfter = false;
+  cur = queue()[0].id;
+  save();
+  view = "play"; render();
+  loadYT();
+  if(ytReady) mkPlayer();
+  wakeOn();
+  if(!ticker) ticker = setInterval(tick, 1000);
+}
+function mkPlayer(){
+  var el = document.getElementById("yt"); if(!el || !cur) return;
+  player = new YT.Player("yt", {
+    videoId: cur,
+    playerVars: { rel:0, playsinline:1, modestbranding:1, autoplay:1 },
+    events: {
+      onReady: function(e){ try{ e.target.playVideo(); }catch(x){} },
+      onStateChange: onState,
+      onError: function(){ toast("この動画は流せませんでした。次へ進みます。"); finishVideo(true); }
+    }
+  });
+}
+function onState(e){
+  pState = e.data;
+  if(e.data === 0) finishVideo(false);   /* ENDED */
+}
+/* 1秒ごと：流れているあいだだけ時間を足す。決めた分数・時間帯を超えたら「この動画で終わり」にする。 */
+function tick(){
+  if(view !== "play") return;
+  var s = DB.st.sess; if(!s) return;
+  if(pState === 1){ s.acc += 1; s.last = now(); }
+  if(s.acc >= limitSec() || !allowedNow()) stopAfter = true;
+  if(s.acc % 15 === 0) save();
+  var el = document.getElementById("pinfo"); if(el) el.innerHTML = playInfo();
+}
+function finishVideo(skipped){
+  var it = DB.list.filter(function(x){ return x.id===cur; })[0];
+  if(it && !skipped) it.done = true;
+  if(it && skipped) { DB.list.splice(DB.list.indexOf(it),1); DB.list.push(it); }
+  if(DB.st.sess) DB.st.sess.n = (DB.st.sess.n||0) + (skipped?0:1);
+  save();
+  var s = DB.st.sess;
+  if(stopAfter || (s && s.acc >= limitSec()) || !allowedNow() || !queue().length || (skipped && queue()[0].id===cur)){
+    endSession(); return;
+  }
+  cur = queue()[0].id;
+  try{ player.loadVideoById(cur); }catch(e){}
+  render();
+}
+/* 終わり：クールダウンを始め、記録を1行残す。 */
+function endSession(){
+  var s = DB.st.sess;
+  if(s){
+    DB.log.unshift({ t: now(), min: Math.round(s.acc/60), n: s.n||0 });
+    if(DB.log.length > 60) DB.log.length = 60;
+  }
+  DB.st.sess = null;
+  DB.st.coolUntil = now() + DB.set.coolMin*60*1000;
+  save();
+  try{ if(player){ player.stopVideo(); player.destroy(); } }catch(e){}
+  player = null; cur = null; pState = -1;
+  wakeOff();
+  view = "done"; render();
+}
+/* 途中でやめる：その回はそこで終わり（クールダウンも始まる）。 */
+function quit(){ endSession(); }
+function skip(){ finishVideo(true); }
+
+/* 開き直したとき：前の回が残っていて、決めた分数を超えていたら終わりにする（閉じてやり直す抜け道をふさぐ）。 */
+function resumeCheck(){
+  var s = DB.st.sess; if(!s) return;
+  if(s.acc >= limitSec()){
+    DB.log.unshift({ t: s.last||now(), min: Math.round(s.acc/60), n: s.n||0 });
+    DB.st.sess = null;
+    DB.st.coolUntil = Math.max(DB.st.coolUntil, (s.last||now()) + DB.set.coolMin*60*1000);
+    save();
+  }
+}
+
+async function wakeOn(){ try{ if(navigator.wakeLock) wake = await navigator.wakeLock.request("screen"); }catch(e){} }
+function wakeOff(){ try{ if(wake){ wake.release(); wake = null; } }catch(e){} }
+document.addEventListener("visibilitychange", function(){ if(document.visibilityState==="visible" && view==="play") wakeOn(); });
+
+/* ---------- 登録 ---------- */
+function pasteClip(){
+  if(navigator.clipboard && navigator.clipboard.readText){
+    navigator.clipboard.readText().then(function(t){
+      var ids = ytIds(t);
+      if(!ids.length){ toast("コピーした中に YouTube の動画が見つかりませんでした。下の枠に貼っても登録できます。"); return; }
+      var n = addIds(ids);
+      toast(n ? (n+"本 登録しました。") : "どれも登録済みでした。");
+      render();
+    }, function(){ toast("読み取れませんでした。下の枠に長押しで貼ってから「登録する」を押してください。"); view="list"; render(); });
+  }else{ toast("この端末では読み取れません。下の枠に貼ってください。"); view="list"; render(); }
+}
+function pasteBox(){
+  var t = document.getElementById("pastebox"); if(!t) return;
+  var ids = ytIds(t.value);
+  if(!ids.length){ toast("YouTube の動画のリンクが見つかりませんでした。"); return; }
+  var n = addIds(ids); t.value = "";
+  toast(n ? (n+"本 登録しました。") : "どれも登録済みでした。"); render();
+}
+function mv(i, d){ var j=i+d; if(j<0||j>=DB.list.length) return; var a=DB.list[i]; DB.list[i]=DB.list[j]; DB.list[j]=a; save(); render(); }
+var armDel = -1;
+function del(i){ if(armDel!==i){ armDel=i; render(); return; } DB.list.splice(i,1); armDel=-1; save(); render(); }
+function undone(i){ DB.list[i].done = false; var a = DB.list.splice(i,1)[0]; var k = DB.list.filter(function(x){return !x.done;}).length; DB.list.splice(k,0,a); save(); render(); }
+function rename(i){ var el=document.getElementById("nm"+i); if(!el) return; DB.list[i].title = el.value.trim(); save(); toast("名前を直しました。"); }
+function clearDone(){ DB.list = DB.list.filter(function(x){ return !x.done; }); save(); render(); }
+
+/* ---------- 設定 ---------- */
+function setNum(k, v){ v = Math.round(+v); if(k==="playMin" && v<1) v=1; if(k==="coolMin" && v<0) v=0; DB.set[k]=v; save(); render(); }
+function addWin(){ DB.set.windows.push({ name:"", days:[0,1,2,3,4,5,6], from:"21:00", to:"22:00" }); save(); render(); }
+function delWin(i){ DB.set.windows.splice(i,1); save(); render(); }
+function winDay(i, d){ var w=DB.set.windows[i]; var k=w.days.indexOf(d); if(k>=0) w.days.splice(k,1); else w.days.push(d); w.days.sort(); save(); render(); }
+function winSet(i, k, el){ DB.set.windows[i][k] = el.value; save(); }
+function setNext(el){ DB.set.next = el.value; save(); }
+function expData(){
+  var t = document.getElementById("expbox"); if(!t) return;
+  t.value = JSON.stringify({ app:"bmc_player", v:1, list:DB.list, set:DB.set }, null, 0);
+  try{ t.select(); document.execCommand("copy"); toast("コピーしました。メモなどに貼って残してください。"); }catch(e){}
+}
+function impData(){
+  var t = document.getElementById("impbox"); if(!t) return;
+  try{
+    var o = JSON.parse(t.value);
+    if(!o || o.app!=="bmc_player") throw 0;
+    if(Array.isArray(o.list)) DB.list = o.list;
+    if(o.set) DB.set = Object.assign(DB.set, o.set);
+    save(); toast("取り込みました。"); view="home"; render();
+  }catch(e){ toast("このアプリの控えではないようです。"); }
+}
+
+/* ---------- 画面 ---------- */
+function go(v){ armDel=-1; view=v; render(); }
+function playInfo(){
+  var s = DB.st.sess, acc = s ? s.acc : 0, left = limitSec() - acc;
+  return (stopAfter
+      ? "⏹ 時間になりました。<b>この動画が終わったら止まります。</b>"
+      : "あと <b>"+mmss(left)+"</b>（決めた "+DB.set.playMin+" 分）")
+    + "<br><span class='note'>画面はつけたままにしてください（消すと止まります）。</span>";
+}
+function render(){
+  var a = document.getElementById("app"), h = "";
+  if(view === "home"){
+    resumeCheck();
+    var r = blockReason(), q = queue();
+    h += "<h1>🎧 決めた動画だけ</h1><p class='sub'>登録した動画だけを、決めた時間だけ流します。</p>";
+    if(r === "cool"){
+      h += "<div class='card lock'><div class='note' style='margin:0'>🧊 クールダウン中</div><div class='big' id='cd'>"+mmss(coolLeft())+"</div>"
+        +  "<div class='note'>"+hm(new Date(DB.st.coolUntil))+" から聴けます。</div></div>";
+    }else if(r === "win"){
+      var nx = nextOpen();
+      h += "<div class='card lock'><div class='note' style='margin:0'>⏰ いまは聴ける時間帯の外です</div>"
+        +  "<div class='big' style='font-size:22px'>"+(nx ? whenLabel(nx)+" から" : "時間帯を見直してください")+"</div></div>";
+    }else if(r === "empty"){
+      h += "<div class='card'><b>まだ動画がありません。</b><div class='note'>YouTube で「共有 → リンクをコピー」→ 下の「📋 コピーした動画を登録」。</div></div>";
+    }else{
+      var s = DB.st.sess;
+      h += "<div class='card'><div class='note' style='margin:0'>次に流れる</div><div style='font-size:15px;margin:4px 0'>"+esc(nameOf(q[0]))+"</div>"
+        +  "<div class='note'>"+(s ? "続きから：あと "+mmss(limitSec()-s.acc) : DB.set.playMin+" 分（決めた時間を過ぎたら、その動画の終わりで止まります）")+"</div></div>"
+        +  "<button class='btn' onclick='start()'>▶ 始める</button>";
+    }
+    h += "<button class='btn ghost' onclick='pasteClip()'>📋 コピーした動画を登録</button>";
+    if(!hasWins()) h += "<p class='note'>⏰ 聴ける時間帯がまだありません（いまはいつでも流れます）→ 下の「⚙️ 設定」で決められます。</p>";
+    h += "<div class='sec'>リスト（"+q.length+"本）</div><div class='card'>";
+    if(!q.length) h += "<div class='note' style='margin:0'>（空です）</div>";
+    q.slice(0,5).forEach(function(x){ h += "<div class='vitem'><div class='t'>"+esc(nameOf(x))+"</div></div>"; });
+    if(q.length>5) h += "<div class='note'>ほか "+(q.length-5)+" 本</div>";
+    h += "</div><div class='row'><button class='btn ghost' onclick=\"go('list')\">✏️ リストを直す</button><button class='btn ghost' onclick=\"go('set')\">⚙️ 設定</button></div>";
+    if(DB.log.length){
+      h += "<div class='sec'>これまで</div><div class='card'>";
+      DB.log.slice(0,7).forEach(function(l){ var d=new Date(l.t); h += "<div class='note' style='margin:2px 0'>"+(d.getMonth()+1)+"/"+d.getDate()+"("+WD[d.getDay()]+") "+hm(d)+" ・ "+l.min+"分 ・ "+l.n+"本</div>"; });
+      h += "</div>";
+    }
+    h += "<p class='note' style='text-align:center;margin-top:20px'>"+APPVER+"</p>";
+  }
+  else if(view === "play"){
+    var it = DB.list.filter(function(x){ return x.id===cur; })[0];
+    h += "<h1>🎧 "+esc(it ? nameOf(it) : "")+"</h1>"
+      +  "<div class='pwrap'><div id='yt'></div></div>"
+      +  "<div class='card' id='pinfo'>"+playInfo()+"</div>"
+      +  "<div class='row'><button class='btn ghost' onclick='skip()'>⏭ この動画は飛ばす</button><button class='btn ghost' onclick='quit()'>⏹ ここでやめる</button></div>"
+      +  "<p class='note'>「ここでやめる」もクールダウンが始まります。</p>";
+  }
+  else if(view === "done"){
+    h += "<h1>今日はここまで</h1><div class='card'><div class='big' style='font-size:22px'>"+esc(DB.set.next||"おつかれさまでした")+"</div>"
+      +  "<div class='note'>次に聴けるのは "+hm(new Date(DB.st.coolUntil))+" から（クールダウン "+DB.set.coolMin+" 分）。</div></div>"
+      +  "<button class='btn ghost' onclick=\"go('home')\">ホームへ</button>";
+  }
+  else if(view === "list"){
+    h += "<h1>✏️ リストを直す</h1><p class='sub'>上から順に流れます。聴き終わった動画は下の「聴いた」に移ります。</p>";
+    h += "<button class='btn ghost' onclick='pasteClip()'>📋 コピーした動画を登録</button>"
+      +  "<label>読み取れないときは、ここに長押しで貼る（1行に1本・いくつでも）</label><textarea id='pastebox' placeholder='https://youtu.be/…'></textarea>"
+      +  "<button class='btn ghost' onclick='pasteBox()'>登録する</button>";
+    h += "<div class='sec'>これから</div><div class='card'>";
+    DB.list.forEach(function(x,i){
+      if(x.done) return;
+      h += "<div class='vitem'><div class='t'><input type='text' id='nm"+i+"' value='"+esc(x.title)+"' placeholder='"+esc(nameOf(x))+"' onchange='rename("+i+")'><small>"+esc(x.id)+"</small></div>"
+        +  "<button class='btn ghost small' onclick='mv("+i+",-1)'>↑</button><button class='btn ghost small' onclick='mv("+i+",1)'>↓</button>"
+        +  "<button class='btn small "+(armDel===i?"danger":"ghost")+"' onclick='del("+i+")'>"+(armDel===i?"消す？":"🗑")+"</button></div>";
+    });
+    h += "</div><div class='sec'>聴いた</div><div class='card'>";
+    var any = false;
+    DB.list.forEach(function(x,i){ if(!x.done) return; any = true;
+      h += "<div class='vitem done'><div class='t'>"+esc(nameOf(x))+"</div><button class='btn ghost small' onclick='undone("+i+")'>↩ もう一度</button></div>"; });
+    if(!any) h += "<div class='note' style='margin:0'>（まだありません）</div>";
+    h += "</div>" + (any ? "<button class='btn ghost' onclick='clearDone()'>聴いた動画をリストから外す</button>" : "")
+      +  "<button class='btn ghost' onclick=\"go('home')\">ホームへ</button>";
+  }
+  else if(view === "set"){
+    h += "<h1>⚙️ 設定</h1>";
+    h += "<div class='card'><label style='margin-top:0'>1回に聴ける分数</label><div class='row'><input type='number' min='1' step='5' value='"+DB.set.playMin+"' onchange=\"setNum('playMin',this.value)\"><span>分</span></div>"
+      +  "<label>聴いたあと、流せない時間（クールダウン）</label><div class='row'><input type='number' min='0' step='5' value='"+DB.set.coolMin+"' onchange=\"setNum('coolMin',this.value)\"><span>分</span></div>"
+      +  "<label>終わったときに出す、次にすること</label><input type='text' value='"+esc(DB.set.next)+"' onchange='setNext(this)'></div>";
+    h += "<div class='sec'>聴ける時間帯（1つも無いときは、いつでも流れます）</div>";
+    DB.set.windows.forEach(function(w,i){
+      h += "<div class='card'><input type='text' value='"+esc(w.name)+"' placeholder='名前（例：子どもが寝たあと）' onchange=\"winSet("+i+",'name',this)\">"
+        +  "<div class='days'>";
+      for(var d=0; d<7; d++) h += "<span class='day"+(w.days.indexOf(d)>=0?" on":"")+"' onclick='winDay("+i+","+d+")'>"+WD[d]+"</span>";
+      h += "</div><div class='row'><input type='time' value='"+esc(w.from)+"' onchange=\"winSet("+i+",'from',this)\"><span>〜</span><input type='time' value='"+esc(w.to)+"' onchange=\"winSet("+i+",'to',this)\"></div>"
+        +  "<button class='btn danger small' style='margin-top:8px' onclick='delWin("+i+")'>この時間帯を消す</button></div>";
+    });
+    h += "<button class='btn ghost' onclick='addWin()'>＋ 時間帯を足す</button>";
+    h += "<div class='sec'>控え</div><div class='card'><button class='btn ghost' style='margin-top:0' onclick='expData()'>リストと設定をコピーする</button><textarea id='expbox' readonly style='margin-top:8px;min-height:50px'></textarea>"
+      +  "<label>控えから戻す（貼って「取り込む」）</label><textarea id='impbox' style='min-height:50px'></textarea><button class='btn ghost' onclick='impData()'>取り込む</button></div>";
+    h += "<button class='btn ghost' onclick=\"go('home')\">ホームへ</button>";
+  }
+  a.innerHTML = h;
+}
+/* クールダウンの残りを1秒ごとに描き直す（ホームのときだけ） */
+setInterval(function(){
+  if(view!=="home") return;
+  var el = document.getElementById("cd");
+  if(el){ if(coolLeft()>0) el.textContent = mmss(coolLeft()); else render(); }
+}, 1000);
+
+/* ---------- 🗒 気になったこと（routine.html と同じ形・届け先は日次ノートの 🤖 AIへ） ---------- */
+var FBKEY = "bmc_fb_player_v1", FBAPP = "決めた動画だけ（player）";
+var FBCATS = ["押しにくい","表示が分かりにくい","止まり方","登録のしかた","こうしたい"];
+var FBDIR = "20_Projects/Private/B.M.C";
+var FB = { items:[], vault:"My Valut", heading:"🤖 AIへ" }, fbCat = "";
+function fbLoad(){ try{ var o=JSON.parse(localStorage.getItem(FBKEY)); if(o && Array.isArray(o.items)) FB.items=o.items; if(o && typeof o.vault==="string") FB.vault=o.vault; }catch(e){} }
+function fbSave(){ try{ localStorage.setItem(FBKEY, JSON.stringify(FB)); }catch(e){} }
+/* 0時〜3時台は前日のノートへ（routine と同じ線引き） */
+function fbNote(t){ var d=new Date(t); if(d.getHours()<4) d.setDate(d.getDate()-1); return p2(d.getFullYear()%100)+"-"+p2(d.getMonth()+1)+"-"+p2(d.getDate())+"("+WD[d.getDay()]+")"; }
+function fbUnsent(){ return FB.items.filter(function(x){ return !x.sent; }); }
+function fbText(list){ return list.map(function(x){ var d=new Date(x.t); return "##### "+fbNote(x.t).slice(0,8)+" "+hm(d)+"\n- "+FBAPP+" ／ "+hm(d)+" ／ "+x.ctx+" ／ "+x.cat+(x.memo?" ／ "+x.memo:""); }).join("\n")+"\n"; }
+function fbUri(list){
+  return "obsidian://advanced-uri?vault="+encodeURIComponent(FB.vault)+"&filepath="+encodeURIComponent(FBDIR+"/"+fbNote(list[0].t)+".md")
+    + "&heading="+encodeURIComponent(FB.heading)+"&mode=append&data="+encodeURIComponent(fbText(list));
+}
+function fbOpenP(){ fbCat=""; document.getElementById("fbWrap").classList.add("on"); fbRender(); }
+function fbClose(){ document.getElementById("fbWrap").classList.remove("on"); }
+function fbAdd(){
+  var m = document.getElementById("fbmemo"); var memo = m ? m.value.trim() : "";
+  if(!fbCat && !memo){ toast("種類を選ぶか、一言書いてください。"); return; }
+  FB.items.push({ t:now(), ctx:({home:"ホーム",play:"再生中",done:"終わり",list:"リスト",set:"設定"})[view]||view, cat:fbCat||"ひとこと", memo:memo, sent:false });
+  fbSave(); fbRender();
+}
+function fbMark(){ FB.items.forEach(function(x){ x.sent=true; }); fbSave(); setTimeout(fbRender, 300); return true; }
+function fbCopy(){ var t=document.getElementById("fbout"); try{ t.select(); document.execCommand("copy"); toast("コピーしました。日次ノートの「🤖 AIへ」に貼ってください。"); }catch(e){} }
+function fbRender(){
+  var p = document.getElementById("fbPanel"), un = fbUnsent(), h = "<h1>🗒 気になったこと</h1><p class='sub'>直してほしいことを1つ。B.M.C. が拾って直します。</p><div class='cats'>";
+  FBCATS.forEach(function(c){ h += "<span class='day"+(fbCat===c?" on":"")+"' onclick=\"fbCat='"+c+"';fbRender()\">"+c+"</span>"; });
+  h += "</div><textarea id='fbmemo' placeholder='一言（なくても可）'></textarea><button class='btn ghost' onclick='fbAdd()'>ためておく</button>";
+  if(un.length){
+    h += "<div class='sec'>まだ送っていないもの（"+un.length+"件）</div>"
+      +  "<a class='fbsend' href='"+esc(fbUri(un))+"' onclick='return fbMark()'>Obsidianへ送る（"+esc(fbNote(un[0].t))+"）</a>"
+      +  "<label>送れないときは、コピーして貼る</label><textarea id='fbout' readonly>"+esc(fbText(un))+"</textarea><button class='btn ghost' onclick='fbCopy()'>コピーする</button>";
+  }
+  h += "<button class='btn ghost' onclick='fbClose()'>閉じる</button>";
+  p.innerHTML = h;
+}
+function fbInit(){
+  fbLoad();
+  var b = document.createElement("button"); b.id="fbBtn"; b.type="button"; b.textContent="🗒"; b.onclick=fbOpenP; document.body.appendChild(b);
+  var w = document.createElement("div"); w.id="fbWrap"; w.innerHTML="<div id='fbBack' onclick='fbClose()'></div><div id='fbPanel'></div>"; document.body.appendChild(w);
+}
+
+load(); fbInit(); render();
+</script>
+</body>
+</html>
