@@ -18,6 +18,10 @@
   3. 聴ける時間帯（windows）が1つ以上あるときは、その外では流さない（仕様書 Q3＝ア）。
      時間帯の途中で時刻が外へ出たら、いまの動画の終わりで止める（2と同じ扱い）。
      時間帯が1つも無いときは、いつでも流れる（ホームに「まだ決めていません」と出す）。
+  6. v2（2026-10-29）: 動画は youtube-nocookie.com の埋め込みから読み、YouTube の部品（www.youtube.com/iframe_api）も読み込まない。
+     スクリーンタイムで youtube.com を止めても、このアプリからは流せるようにするため（ご本人：夜は player.html からだけ見たい）。
+     再生の状態（終わった等）は、埋め込みとの postMessage で受け取る（YouTube の公式の埋め込みの約束ごと）。
+     ★再生中は #yt を描き直さない（描き直すと iframe が消える。v1 では2本目に進むときに消えていた）。
   4. YouTube の規約で、動画は画面に見える形で流す。画面を消すと止まる（Premium のバックグラウンド再生はこのアプリには効かない）。
      画面が自動で消えないよう、流している間だけ Wake Lock を取る（対応していない端末では何もしない）。
   5. 登録は「リンクをコピー → 📋 コピーした動画を登録」。ホーム画面のアイコンから開いたアプリは Safari と保存場所が別なので、
@@ -75,7 +79,7 @@ label{display:block;font-size:13px;color:#a9b4c6;margin:12px 0 5px}
 <div class="wrap" id="app"></div>
 <div id="toast"></div>
 <script>
-var APPVER = "決めた動画だけ v1 ・ 2026-10-29";
+var APPVER = "決めた動画だけ v2 ・ 2026-10-29";
 var KEY = "bmc_player_v1";
 var WD = ["日","月","火","水","木","金","土"];
 
@@ -198,17 +202,10 @@ function blockReason(){
 }
 
 /* ---------- 再生 ---------- */
-var view = "home", player = null, ytReady = false, cur = null, ticker = null, wake = null, stopAfter = false, pState = -1;
+var view = "home", ifr = null, cur = null, ticker = null, wake = null, stopAfter = false, pState = -1, heard = false;
+var YTO = "https://www.youtube-nocookie.com";
 function sessAcc(){ var s = DB.st.sess; return s ? s.acc : 0; }
 function limitSec(){ return DB.set.playMin * 60; }
-
-function loadYT(){
-  if(window.YT && window.YT.Player){ ytReady = true; return; }
-  if(document.getElementById("ytapi")) return;
-  var s = document.createElement("script"); s.id = "ytapi"; s.src = "https://www.youtube.com/iframe_api";
-  document.head.appendChild(s);
-}
-window.onYouTubeIframeAPIReady = function(){ ytReady = true; if(view==="play" && !player) mkPlayer(); };
 
 function start(){
   var r = blockReason();
@@ -218,23 +215,41 @@ function start(){
   cur = queue()[0].id;
   save();
   view = "play"; render();
-  loadYT();
-  if(ytReady) mkPlayer();
+  mkPlayer();
   wakeOn();
   if(!ticker) ticker = setInterval(tick, 1000);
 }
-function mkPlayer(){
-  var el = document.getElementById("yt"); if(!el || !cur) return;
-  player = new YT.Player("yt", {
-    videoId: cur,
-    playerVars: { rel:0, playsinline:1, modestbranding:1, autoplay:1 },
-    events: {
-      onReady: function(e){ try{ e.target.playVideo(); }catch(x){} },
-      onStateChange: onState,
-      onError: function(){ toast("この動画は流せませんでした。次へ進みます。"); finishVideo(true); }
-    }
-  });
+function embedSrc(id){
+  var o = (location.origin && location.origin !== "null") ? "&origin="+encodeURIComponent(location.origin) : "";
+  return YTO+"/embed/"+id+"?enablejsapi=1&autoplay=1&playsinline=1&rel=0&modestbranding=1"+o;
 }
+function mkPlayer(){
+  var box = document.getElementById("yt"); if(!box || !cur) return;
+  heard = false; pState = -1;
+  box.innerHTML = '<iframe id="ytf" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen src="'+embedSrc(cur)+'"></iframe>';
+  ifr = document.getElementById("ytf");
+  ifr.addEventListener("load", listenLoop);
+}
+function ytPost(o){ try{ if(ifr && ifr.contentWindow) ifr.contentWindow.postMessage(JSON.stringify(o), YTO); }catch(e){} }
+function ytCmd(f, args){ ytPost({ event:"command", func:f, args:args||[], id:"bmc", channel:"widget" }); }
+/* 埋め込みに「状態を知らせて」と頼む。返事が来るまで少し繰り返す。 */
+function listenLoop(){
+  var k = 0;
+  (function go(){ if(heard || !ifr || k++ > 20) return; ytPost({ event:"listening", id:"bmc", channel:"widget" }); setTimeout(go, 500); })();
+}
+window.addEventListener("message", function(e){
+  if(e.origin !== YTO) return;
+  var d; try{ d = typeof e.data==="string" ? JSON.parse(e.data) : e.data; }catch(x){ return; }
+  if(!d || typeof d!=="object") return;
+  heard = true;
+  if(d.event === "onError"){ toast("この動画は流せませんでした。次へ進みます。"); finishVideo(true); return; }
+  var st = null;
+  if(d.event === "onStateChange") st = d.info;
+  else if(d.event === "infoDelivery" && d.info && typeof d.info.playerState === "number") st = d.info.playerState;
+  else if(d.event === "initialDelivery" && d.info && typeof d.info.playerState === "number") st = d.info.playerState;
+  if(typeof st !== "number" || st === pState) return;
+  onState({ data: st });
+});
 function onState(e){
   pState = e.data;
   if(e.data === 0) finishVideo(false);   /* ENDED */
@@ -249,6 +264,7 @@ function tick(){
   var el = document.getElementById("pinfo"); if(el) el.innerHTML = playInfo();
 }
 function finishVideo(skipped){
+  if(view !== "play") return;
   var it = DB.list.filter(function(x){ return x.id===cur; })[0];
   if(it && !skipped) it.done = true;
   if(it && skipped) { DB.list.splice(DB.list.indexOf(it),1); DB.list.push(it); }
@@ -259,8 +275,10 @@ function finishVideo(skipped){
     endSession(); return;
   }
   cur = queue()[0].id;
-  try{ player.loadVideoById(cur); }catch(e){}
-  render();
+  pState = -1;
+  ytCmd("loadVideoById", [cur]);
+  /* 再生中は全体を描き直さない（iframe が消えるため）。見出しだけ差し替える。 */
+  var t = document.getElementById("ptitle"); if(t){ var nx = DB.list.filter(function(x){ return x.id===cur; })[0]; t.textContent = "🎧 "+(nx ? nameOf(nx) : ""); }
 }
 /* 終わり：クールダウンを始め、記録を1行残す。 */
 function endSession(){
@@ -272,8 +290,8 @@ function endSession(){
   DB.st.sess = null;
   DB.st.coolUntil = now() + DB.set.coolMin*60*1000;
   save();
-  try{ if(player){ player.stopVideo(); player.destroy(); } }catch(e){}
-  player = null; cur = null; pState = -1;
+  ytCmd("stopVideo");
+  ifr = null; cur = null; pState = -1;
   wakeOff();
   view = "done"; render();
 }
@@ -391,11 +409,11 @@ function render(){
   }
   else if(view === "play"){
     var it = DB.list.filter(function(x){ return x.id===cur; })[0];
-    h += "<h1>🎧 "+esc(it ? nameOf(it) : "")+"</h1>"
+    h += "<h1 id='ptitle'>🎧 "+esc(it ? nameOf(it) : "")+"</h1>"
       +  "<div class='pwrap'><div id='yt'></div></div>"
       +  "<div class='card' id='pinfo'>"+playInfo()+"</div>"
       +  "<div class='row'><button class='btn ghost' onclick='skip()'>⏭ この動画は飛ばす</button><button class='btn ghost' onclick='quit()'>⏹ ここでやめる</button></div>"
-      +  "<p class='note'>「ここでやめる」もクールダウンが始まります。</p>";
+      +  "<p class='note'>「ここでやめる」もクールダウンが始まります。動画が始まらないときは、動画の ▶ を押してください。</p>";
   }
   else if(view === "done"){
     h += "<h1>今日はここまで</h1><div class='card'><div class='big' style='font-size:22px'>"+esc(DB.set.next||"おつかれさまでした")+"</div>"
