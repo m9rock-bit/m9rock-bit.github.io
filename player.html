@@ -79,7 +79,7 @@ label{display:block;font-size:13px;color:#a9b4c6;margin:12px 0 5px}
 <div class="wrap" id="app"></div>
 <div id="toast"></div>
 <script>
-var APPVER = "決めた動画だけ v2 ・ 2026-10-29";
+var APPVER = "決めた動画だけ v3 ・ 2026-10-29";
 var KEY = "bmc_player_v1";
 var WD = ["日","月","火","水","木","金","土"];
 
@@ -128,10 +128,23 @@ function ytIds(text){
   }
   return out;
 }
-function addIds(ids){
+/* v3（2026-10-29）: 1行に「URL 名前」と並んでいたら、その行のURL以外の文字を名前にする。
+   Spark（SKILL_youtube-new-list）が「URL ｜ チャンネル ｜ 題名」の1行1本で出すため。
+   スクリーンタイムやフィルターで oEmbed が取れない夜でも、名前が付く。 */
+function ytTitles(text){
+  var map = {};
+  String(text||"").split(/\r?\n/).forEach(function(line){
+    var ids = ytIds(line); if(ids.length !== 1) return;
+    var t = line.replace(/https?:\/\/\S+/g, "").replace(/^[\s｜|・:：\-–—]+|[\s｜|・:：\-–—]+$/g, "").replace(/\s*[｜|]\s*/g, " ｜ ").trim();
+    if(t && !map[ids[0]]) map[ids[0]] = t.slice(0, 120);   /* 同じ動画が2回あれば先の行の名前 */
+  });
+  return map;
+}
+function addIds(ids, titles){
+  titles = titles || {};
   var have = {}; DB.list.forEach(function(x){ have[x.id] = 1; });
   var added = [];
-  ids.forEach(function(id){ if(!have[id]){ DB.list.push({ id:id, title:"", done:false }); have[id]=1; added.push(id); } });
+  ids.forEach(function(id){ if(!have[id]){ DB.list.push({ id:id, title:titles[id]||"", done:false }); have[id]=1; added.push(id); } });
   save();
   added.forEach(fetchTitle);
   return added.length;
@@ -320,7 +333,7 @@ function pasteClip(){
     navigator.clipboard.readText().then(function(t){
       var ids = ytIds(t);
       if(!ids.length){ toast("コピーした中に YouTube の動画が見つかりませんでした。下の枠に貼っても登録できます。"); return; }
-      var n = addIds(ids);
+      var n = addIds(ids, ytTitles(t));
       toast(n ? (n+"本 登録しました。") : "どれも登録済みでした。");
       render();
     }, function(){ toast("読み取れませんでした。下の枠に長押しで貼ってから「登録する」を押してください。"); view="list"; render(); });
@@ -330,7 +343,7 @@ function pasteBox(){
   var t = document.getElementById("pastebox"); if(!t) return;
   var ids = ytIds(t.value);
   if(!ids.length){ toast("YouTube の動画のリンクが見つかりませんでした。"); return; }
-  var n = addIds(ids); t.value = "";
+  var n = addIds(ids, ytTitles(t.value)); t.value = "";
   toast(n ? (n+"本 登録しました。") : "どれも登録済みでした。"); render();
 }
 function mv(i, d){ var j=i+d; if(j<0||j>=DB.list.length) return; var a=DB.list[i]; DB.list[i]=DB.list[j]; DB.list[j]=a; save(); render(); }
