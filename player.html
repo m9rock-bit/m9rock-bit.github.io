@@ -24,6 +24,18 @@
      ★再生中は #yt を描き直さない（描き直すと iframe が消える。v1 では2本目に進むときに消えていた）。
   4. YouTube の規約で、動画は画面に見える形で流す。画面を消すと止まる（Premium のバックグラウンド再生はこのアプリには効かない）。
      画面が自動で消えないよう、流している間だけ Wake Lock を取る（対応していない端末では何もしない）。
+  7. v4（2026-10-30・仕様書_2026-10-30_playerのお休みの時間帯と設定のロック）:
+     ・3 の「聴ける時間帯」（set.windows）は使わない（値は消さずに残し、設定画面に見せるだけ）。
+       代わりに「お休みの時間帯」（set.rest）＝その中では流さない。途中で入ったら、いまの動画の終わりで止める。
+     ・「設定を変えられる時間帯」（set.edit）が1つ以上あるとき、その外では設定画面すべてと控えの取り込みをロックする。
+       ★ロックは画面だけでなく、設定を書き換える関数の入口（canEdit）でも止める。関数を直接呼んでも変わらない。
+       ★設定を変えられる時間帯は「下書き → 保存する」で変える（足した瞬間にロックされて時刻を直せなくなるのを防ぐ）。
+     ・逃げ道：「どうしても変えたい」→ 待ち時間（set.waitH、既定24時間）後に1回だけ開く。開いているのは30分まで、
+       または設定画面を出るまで。押した時刻は st.reqLog に残す（判定の材料）。
+     ・動画の登録・リストの操作・控えのコピー・🗒 はロックしない。
+  8. v4: 流せないとき（お休み中・クールダウン中・聴き終えた画面）は、routine の 🌊 見たい／🍵 ひと息 へのボタンを出す。
+     相対リンク（routine.html#open=watch／#open=rest）で同じ画面のまま移る。★新しいタブや Safari で開くと
+     保存場所が別になり、空の routine が開くため target は付けない。routine 側は v77 の入口をそのまま使う。
   5. 登録は「リンクをコピー → 📋 コピーした動画を登録」。ホーム画面のアイコンから開いたアプリは Safari と保存場所が別なので、
      共有から URL 付きで開く形は使わない（仕様書 §7）。
 -->
@@ -43,6 +55,9 @@ h1{font-size:19px;margin:4px 0 2px}
 .btn.small{display:inline-block;width:auto;padding:7px 11px;font-size:13px;margin:0}
 .btn.danger{background:#3a2427;color:#e8b3b8}
 .btn:disabled{opacity:.4}
+a.btn{text-align:center;text-decoration:none;box-sizing:border-box}
+.row a.btn.alt{flex:1;margin-top:0}
+input:disabled{opacity:.55}
 .row{display:flex;gap:8px;align-items:center}
 .note{color:#8a94a6;font-size:12.5px;line-height:1.7;margin:6px 0 0}
 .big{font-size:34px;font-weight:700;margin:4px 0}
@@ -79,15 +94,16 @@ label{display:block;font-size:13px;color:#a9b4c6;margin:12px 0 5px}
 <div class="wrap" id="app"></div>
 <div id="toast"></div>
 <script>
-var APPVER = "決めた動画だけ v3 ・ 2026-10-29";
+var APPVER = "決めた動画だけ v4 ・ 2026-10-30";
 var KEY = "bmc_player_v1";
 var WD = ["日","月","火","水","木","金","土"];
 
 /* ---------- 保存 ---------- */
 var DB = {
   list: [],                 /* {id, title, done} */
-  set: { playMin:15, coolMin:15, next:"炭酸水 → 2階でととのう", windows:[] },  /* windows: {name, days:[0-6], from:"21:00", to:"22:00"} */
-  st: { coolUntil:0, sess:null },  /* sess: {start, acc, last} */
+  set: { playMin:15, coolMin:15, next:"炭酸水 → 2階でととのう", windows:[],  /* windows: v3 の聴ける時間帯（v4 では使わない・残すだけ） */
+         rest:[], edit:[], waitH:24 },  /* v4: rest＝お休みの時間帯 {name,days,from,to}／edit＝設定を変えられる時間帯／waitH＝逃げ道の待ち時間 */
+  st: { coolUntil:0, sess:null, unlockAt:0, unlockOpen:0, reqLog:[] },  /* sess: {start, acc, last}／v4: unlockAt＝開く時刻、unlockOpen＝開いた時刻 */
   log: []                   /* {t, min, n} */
 };
 function load(){
@@ -100,10 +116,17 @@ function load(){
         if(+o.set.coolMin>=0) DB.set.coolMin = +o.set.coolMin;
         if(typeof o.set.next==="string") DB.set.next = o.set.next;
         if(Array.isArray(o.set.windows)) DB.set.windows = o.set.windows;
+        /* v4: ★ここに足さないと、開き直すたびに消える（読み戻しは1つずつ拾う形） */
+        if(Array.isArray(o.set.rest)) DB.set.rest = o.set.rest;
+        if(Array.isArray(o.set.edit)) DB.set.edit = o.set.edit;
+        if(+o.set.waitH>0) DB.set.waitH = +o.set.waitH;
       }
       if(o.st && typeof o.st==="object"){
         if(+o.st.coolUntil>0) DB.st.coolUntil = +o.st.coolUntil;
         if(o.st.sess && typeof o.st.sess==="object") DB.st.sess = o.st.sess;
+        if(+o.st.unlockAt>0) DB.st.unlockAt = +o.st.unlockAt;
+        if(+o.st.unlockOpen>0) DB.st.unlockOpen = +o.st.unlockOpen;
+        if(Array.isArray(o.st.reqLog)) DB.st.reqLog = o.st.reqLog;
       }
       if(Array.isArray(o.log)) DB.log = o.log;
     }
@@ -178,24 +201,53 @@ function inWin(w, d){
   }
   return false;
 }
-function hasWins(){ return DB.set.windows.length > 0; }
-function allowedNow(d){ d = d || new Date(); if(!hasWins()) return true; return DB.set.windows.some(function(w){ return inWin(w, d); }); }
-/* 次に聴ける時刻（7日先まで1分刻みでなく、各時間帯の開始時刻を並べて最も早いもの） */
-function nextOpen(d){
+/* v4: お休みの時間帯（rest）の中では流さない。v3 の windows（聴ける時間帯）は見ない。 */
+function anyIn(list, d){ return (list||[]).some(function(w){ return inWin(w, d); }); }
+function hasRest(){ return DB.set.rest.length > 0; }
+function restNow(d){ return anyIn(DB.set.rest, d || new Date()); }
+function allowedNow(d){ return !restNow(d); }
+/* 条件 ok(d) が成り立つ次の時刻（1分刻みで8日先まで。見つからなければ null） */
+function nextWhen(ok, d){
   d = d || new Date();
-  var best = null;
-  for(var k=0;k<8;k++){
-    DB.set.windows.forEach(function(w){
-      var f = toMin(w.from); if(f===null) return;
-      var days = Array.isArray(w.days) && w.days.length ? w.days : [0,1,2,3,4,5,6];
-      var c = new Date(d.getFullYear(), d.getMonth(), d.getDate()+k, Math.floor(f/60), f%60, 0, 0);
-      if(days.indexOf(c.getDay())<0) return;
-      if(c.getTime() <= d.getTime()) return;
-      if(!best || c < best) best = c;
-    });
-    if(best) break;
-  }
-  return best;
+  var c = new Date(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes()+1, 0, 0);
+  for(var k=0; k<8*1440; k++){ if(ok(c)) return c; c = new Date(c.getTime()+60000); }
+  return null;
+}
+function nextOpen(d){ return nextWhen(function(c){ return !restNow(c); }, d); }
+
+/* ---------- v4: 設定のロック ---------- */
+var OPEN_MIN = 30;           /* 逃げ道で開いてから閉じるまで（分） */
+function hasEdit(){ return DB.set.edit.length > 0; }
+function editWinNow(d){ return !hasEdit() || anyIn(DB.set.edit, d || new Date()); }
+function openLeft(){ return DB.st.unlockOpen ? Math.max(0, DB.st.unlockOpen + OPEN_MIN*60000 - now()) : 0; }
+/* 待ち時間を過ぎた申し出を「開いた」に切り替える。30分を過ぎた「開いた」は閉じる。 */
+function unlockTick(){
+  var ch = false;
+  if(DB.st.unlockAt && now() >= DB.st.unlockAt){ DB.st.unlockAt = 0; DB.st.unlockOpen = now(); ch = true; }
+  if(DB.st.unlockOpen && openLeft() <= 0){ DB.st.unlockOpen = 0; ch = true; }
+  if(ch) save();
+}
+function canEdit(){ unlockTick(); return editWinNow() || openLeft() > 0; }
+/* 設定を書き換える関数の入口で呼ぶ。ロック中なら何も変えずに false。 */
+function guard(){
+  if(canEdit()) return true;
+  toast("🔒 いまは設定を変えられない時間です。"); render(); return false;
+}
+function nextEditLabel(){ var c = nextWhen(function(x){ return anyIn(DB.set.edit, x); }); return c ? whenLabel(c) : ""; }
+function reqUnlock(){
+  if(canEdit() || DB.st.unlockAt) return;
+  DB.st.unlockAt = now() + DB.set.waitH*3600000;
+  DB.st.reqLog.unshift(now()); if(DB.st.reqLog.length > 60) DB.st.reqLog.length = 60;
+  save(); toast("申し出ました。"+dtLabel(new Date(DB.st.unlockAt))+" に開きます。"); render();
+}
+function cancelUnlock(){ DB.st.unlockAt = 0; save(); toast("取り消しました。"); render(); }
+function dtLabel(c){ return (c.getMonth()+1)+"/"+c.getDate()+"("+WD[c.getDay()]+") "+hm(c); }
+
+/* ---------- v4: 流せないときの行き先（routine v77 の #open= 入口） ---------- */
+function altBtns(){
+  return "<div class='sec'>かわりに（routine へ）</div><div class='row'>"
+    + "<a class='btn ghost alt' href='routine.html#open=watch'>🌊 見たい</a>"
+    + "<a class='btn ghost alt' href='routine.html#open=rest'>🍵 ひと息</a></div>";
 }
 function whenLabel(c){
   if(!c) return "";
@@ -354,30 +406,52 @@ function rename(i){ var el=document.getElementById("nm"+i); if(!el) return; DB.l
 function clearDone(){ DB.list = DB.list.filter(function(x){ return !x.done; }); save(); render(); }
 
 /* ---------- 設定 ---------- */
-function setNum(k, v){ v = Math.round(+v); if(k==="playMin" && v<1) v=1; if(k==="coolMin" && v<0) v=0; DB.set[k]=v; save(); render(); }
-function addWin(){ DB.set.windows.push({ name:"", days:[0,1,2,3,4,5,6], from:"21:00", to:"22:00" }); save(); render(); }
-function delWin(i){ DB.set.windows.splice(i,1); save(); render(); }
-function winDay(i, d){ var w=DB.set.windows[i]; var k=w.days.indexOf(d); if(k>=0) w.days.splice(k,1); else w.days.push(d); w.days.sort(); save(); render(); }
-function winSet(i, k, el){ DB.set.windows[i][k] = el.value; save(); }
-function setNext(el){ DB.set.next = el.value; save(); }
+function setNum(k, v){ if(!guard()) return; v = Math.round(+v); if(k==="playMin" && v<1) v=1; if(k==="coolMin" && v<0) v=0; if(k==="waitH" && v<1) v=1; DB.set[k]=v; save(); render(); }
+/* v4: お休みの時間帯（rest）はその場で保存。設定を変えられる時間帯（edit）は下書き（editDraft）で直して「保存する」。 */
+var editDraft = null;
+function wl(kind){ return kind==="edit" ? editDraft : DB.set[kind]; }
+function wDone(kind){ if(kind!=="edit") save(); render(); }
+function addWin(kind){ if(!guard()) return; wl(kind).push(kind==="edit" ? { name:"", days:[1,2,3,4,5], from:"07:30", to:"08:30" } : { name:"", days:[1,2,3,4,5], from:"18:30", to:"20:15" }); wDone(kind); }
+function delWin(kind, i){ if(!guard()) return; wl(kind).splice(i,1); wDone(kind); }
+function winDay(kind, i, d){ if(!guard()) return; var w=wl(kind)[i]; var k=w.days.indexOf(d); if(k>=0) w.days.splice(k,1); else w.days.push(d); w.days.sort(); wDone(kind); }
+function winSet(kind, i, k, el){ if(!guard()) return; wl(kind)[i][k] = el.value; if(kind!=="edit") save(); }
+function delOld(){ if(!guard()) return; DB.set.windows = []; save(); render(); }
+function saveEdit(){
+  if(!guard() || !editDraft) return;
+  var keep = DB.set.edit; DB.set.edit = editDraft.map(function(w){ return JSON.parse(JSON.stringify(w)); });
+  var lockNow = !editWinNow() && openLeft() <= 0;
+  if(lockNow && !confirm("保存すると、いまからロックされます（次に変えられるのは "+(nextEditLabel()||"—")+"）。保存しますか？")){ DB.set.edit = keep; return; }
+  save(); editDraft = JSON.parse(JSON.stringify(DB.set.edit)); toast(lockNow ? "保存しました。🔒 ロックしました。" : "保存しました。"); render();
+}
+function setNext(el){ if(!guard()) return; DB.set.next = el.value; save(); }
 function expData(){
   var t = document.getElementById("expbox"); if(!t) return;
   t.value = JSON.stringify({ app:"bmc_player", v:1, list:DB.list, set:DB.set }, null, 0);
   try{ t.select(); document.execCommand("copy"); toast("コピーしました。メモなどに貼って残してください。"); }catch(e){}
 }
 function impData(){
+  if(!guard()) return;   /* v4: 取り込みで設定を書き換えられないように、関数の入口でも止める */
   var t = document.getElementById("impbox"); if(!t) return;
   try{
     var o = JSON.parse(t.value);
     if(!o || o.app!=="bmc_player") throw 0;
     if(Array.isArray(o.list)) DB.list = o.list;
-    if(o.set) DB.set = Object.assign(DB.set, o.set);
+    if(o.set && typeof o.set==="object"){
+      DB.set = Object.assign(DB.set, o.set);
+      ["windows","rest","edit"].forEach(function(k){ if(!Array.isArray(DB.set[k])) DB.set[k] = []; });
+    }
     save(); toast("取り込みました。"); view="home"; render();
   }catch(e){ toast("このアプリの控えではないようです。"); }
 }
 
 /* ---------- 画面 ---------- */
-function go(v){ armDel=-1; view=v; render(); }
+function go(v){
+  armDel=-1;
+  /* v4: 逃げ道で開いた設定は、設定画面を出たら閉じる（1回だけ） */
+  if(view==="set" && v!=="set"){ editDraft = null; if(DB.st.unlockOpen){ DB.st.unlockOpen = 0; save(); } }
+  if(v==="set") editDraft = JSON.parse(JSON.stringify(DB.set.edit));
+  view=v; render();
+}
 function playInfo(){
   var s = DB.st.sess, acc = s ? s.acc : 0, left = limitSec() - acc;
   return (stopAfter
@@ -393,11 +467,11 @@ function render(){
     h += "<h1>🎧 決めた動画だけ</h1><p class='sub'>登録した動画だけを、決めた時間だけ流します。</p>";
     if(r === "cool"){
       h += "<div class='card lock'><div class='note' style='margin:0'>🧊 クールダウン中</div><div class='big' id='cd'>"+mmss(coolLeft())+"</div>"
-        +  "<div class='note'>"+hm(new Date(DB.st.coolUntil))+" から聴けます。</div></div>";
+        +  "<div class='note'>"+hm(new Date(DB.st.coolUntil))+" から聴けます。</div></div>" + altBtns();
     }else if(r === "win"){
       var nx = nextOpen();
-      h += "<div class='card lock'><div class='note' style='margin:0'>⏰ いまは聴ける時間帯の外です</div>"
-        +  "<div class='big' style='font-size:22px'>"+(nx ? whenLabel(nx)+" から" : "時間帯を見直してください")+"</div></div>";
+      h += "<div class='card lock'><div class='note' style='margin:0'>🌙 お休み中</div>"
+        +  "<div class='big' style='font-size:22px'>"+(nx ? whenLabel(nx)+" から流せます" : "お休みの時間帯を見直してください")+"</div></div>" + altBtns();
     }else if(r === "empty"){
       h += "<div class='card'><b>まだ動画がありません。</b><div class='note'>YouTube で「共有 → リンクをコピー」→ 下の「📋 コピーした動画を登録」。</div></div>";
     }else{
@@ -407,7 +481,7 @@ function render(){
         +  "<button class='btn' onclick='start()'>▶ 始める</button>";
     }
     h += "<button class='btn ghost' onclick='pasteClip()'>📋 コピーした動画を登録</button>";
-    if(!hasWins()) h += "<p class='note'>⏰ 聴ける時間帯がまだありません（いまはいつでも流れます）→ 下の「⚙️ 設定」で決められます。</p>";
+    if(!hasRest()) h += "<p class='note'>🌙 お休みの時間帯がまだありません（いまはいつでも流れます）→ 下の「⚙️ 設定」で決められます。</p>";
     h += "<div class='sec'>リスト（"+q.length+"本）</div><div class='card'>";
     if(!q.length) h += "<div class='note' style='margin:0'>（空です）</div>";
     q.slice(0,5).forEach(function(x){ h += "<div class='vitem'><div class='t'>"+esc(nameOf(x))+"</div></div>"; });
@@ -431,6 +505,7 @@ function render(){
   else if(view === "done"){
     h += "<h1>今日はここまで</h1><div class='card'><div class='big' style='font-size:22px'>"+esc(DB.set.next||"おつかれさまでした")+"</div>"
       +  "<div class='note'>次に聴けるのは "+hm(new Date(DB.st.coolUntil))+" から（クールダウン "+DB.set.coolMin+" 分）。</div></div>"
+      +  altBtns()
       +  "<button class='btn ghost' onclick=\"go('home')\">ホームへ</button>";
   }
   else if(view === "list"){
@@ -454,25 +529,67 @@ function render(){
       +  "<button class='btn ghost' onclick=\"go('home')\">ホームへ</button>";
   }
   else if(view === "set"){
+    var ok = canEdit(), ol = openLeft();
+    if(!editDraft) editDraft = JSON.parse(JSON.stringify(DB.set.edit));
     h += "<h1>⚙️ 設定</h1>";
-    h += "<div class='card'><label style='margin-top:0'>1回に聴ける分数</label><div class='row'><input type='number' min='1' step='5' value='"+DB.set.playMin+"' onchange=\"setNum('playMin',this.value)\"><span>分</span></div>"
-      +  "<label>聴いたあと、流せない時間（クールダウン）</label><div class='row'><input type='number' min='0' step='5' value='"+DB.set.coolMin+"' onchange=\"setNum('coolMin',this.value)\"><span>分</span></div>"
-      +  "<label>終わったときに出す、次にすること</label><input type='text' value='"+esc(DB.set.next)+"' onchange='setNext(this)'></div>";
-    h += "<div class='sec'>聴ける時間帯（1つも無いときは、いつでも流れます）</div>";
-    DB.set.windows.forEach(function(w,i){
-      h += "<div class='card'><input type='text' value='"+esc(w.name)+"' placeholder='名前（例：子どもが寝たあと）' onchange=\"winSet("+i+",'name',this)\">"
-        +  "<div class='days'>";
-      for(var d=0; d<7; d++) h += "<span class='day"+(w.days.indexOf(d)>=0?" on":"")+"' onclick='winDay("+i+","+d+")'>"+WD[d]+"</span>";
-      h += "</div><div class='row'><input type='time' value='"+esc(w.from)+"' onchange=\"winSet("+i+",'from',this)\"><span>〜</span><input type='time' value='"+esc(w.to)+"' onchange=\"winSet("+i+",'to',this)\"></div>"
-        +  "<button class='btn danger small' style='margin-top:8px' onclick='delWin("+i+")'>この時間帯を消す</button></div>";
-    });
-    h += "<button class='btn ghost' onclick='addWin()'>＋ 時間帯を足す</button>";
-    h += "<div class='sec'>控え</div><div class='card'><button class='btn ghost' style='margin-top:0' onclick='expData()'>リストと設定をコピーする</button><textarea id='expbox' readonly style='margin-top:8px;min-height:50px'></textarea>"
-      +  "<label>控えから戻す（貼って「取り込む」）</label><textarea id='impbox' style='min-height:50px'></textarea><button class='btn ghost' onclick='impData()'>取り込む</button></div>";
-    h += "<button class='btn ghost' onclick=\"go('home')\">ホームへ</button>";
+    if(!ok){
+      h += "<div class='card lock'><div class='note' style='margin:0'>🔒 いまは見るだけです</div>"
+        +  "<div class='big' style='font-size:20px'>"+(nextEditLabel() ? "次に変えられるのは "+nextEditLabel()+" から" : "設定を変えられる時間帯を見直してください")+"</div>";
+      if(DB.st.unlockAt){
+        h += "<div class='note'>⏳ "+dtLabel(new Date(DB.st.unlockAt))+" に開きます（1回だけ・開いてから"+OPEN_MIN+"分）。</div>"
+          +  "<button class='btn ghost' onclick='cancelUnlock()'>申し出を取り消す</button>";
+      }else{
+        h += "<button class='btn ghost' onclick='reqUnlock()'>どうしても変えたい（"+DB.set.waitH+"時間後に1回だけ開きます）</button>";
+      }
+      h += "</div>";
+    }else if(ol > 0){
+      h += "<div class='card lock'><div class='note' style='margin:0'>🔓 "+hm(new Date(now()+ol))+" まで開いています（この画面を出ると閉じます）</div></div>";
+    }else if(hasEdit()){
+      h += "<p class='note'>🔓 いまは設定を変えられる時間帯です。</p>";
+    }
+    var dis = ok ? "" : " disabled";
+    function wcards(kind, list, ph){
+      var x = "";
+      list.forEach(function(w,i){
+        x += "<div class='card'><input type='text'"+dis+" value='"+esc(w.name)+"' placeholder='"+ph+"' onchange=\"winSet('"+kind+"',"+i+",'name',this)\">"
+          +  "<div class='days'>";
+        for(var d=0; d<7; d++) x += "<span class='day"+(w.days.indexOf(d)>=0?" on":"")+"'"+(ok ? " onclick=\"winDay('"+kind+"',"+i+","+d+")\"" : "")+">"+WD[d]+"</span>";
+        x += "</div><div class='row'><input type='time'"+dis+" value='"+esc(w.from)+"' onchange=\"winSet('"+kind+"',"+i+",'from',this)\"><span>〜</span><input type='time'"+dis+" value='"+esc(w.to)+"' onchange=\"winSet('"+kind+"',"+i+",'to',this)\"></div>"
+          +  (ok ? "<button class='btn danger small' style='margin-top:8px' onclick=\"delWin('"+kind+"',"+i+")\">この時間帯を消す</button>" : "")
+          +  "</div>";
+      });
+      if(!list.length) x += "<div class='card'><div class='note' style='margin:0'>（まだありません）</div></div>";
+      if(ok) x += "<button class='btn ghost' onclick=\"addWin('"+kind+"')\">＋ 時間帯を足す</button>";
+      return x;
+    }
+    h += "<div class='sec'>🌙 お休みの時間帯（この中では流しません。1つも無いときは、いつでも流れます）</div>";
+    h += wcards("rest", DB.set.rest, "名前（例：ワンオペの帰宅後）");
+    h += "<div class='card'><label style='margin-top:0'>1回に聴ける分数</label><div class='row'><input type='number'"+dis+" min='1' step='5' value='"+DB.set.playMin+"' onchange=\"setNum('playMin',this.value)\"><span>分</span></div>"
+      +  "<label>聴いたあと、流せない時間（クールダウン）</label><div class='row'><input type='number'"+dis+" min='0' step='5' value='"+DB.set.coolMin+"' onchange=\"setNum('coolMin',this.value)\"><span>分</span></div>"
+      +  "<label>終わったときに出す、次にすること</label><input type='text'"+dis+" value='"+esc(DB.set.next)+"' onchange='setNext(this)'></div>";
+    h += "<div class='sec'>🔒 設定を変えられる時間帯（この外では、この画面と取り込みがロックされます。1つも無いときはロックしません）</div>";
+    h += wcards("edit", ok ? editDraft : DB.set.edit, "名前（例：朝の通勤）");
+    if(ok) h += "<button class='btn' onclick='saveEdit()'>🔒 この時間帯を保存する</button><p class='note'>ここだけは「保存する」を押すまで変わりません（足した瞬間にロックされて時刻を直せなくなるのを防ぐため）。</p>";
+    h += "<div class='card'><label style='margin-top:0'>「どうしても変えたい」の待ち時間</label><div class='row'><input type='number'"+dis+" min='1' step='1' value='"+DB.set.waitH+"' onchange=\"setNum('waitH',this.value)\"><span>時間</span></div>"
+      +  "<div class='note'>これまでの申し出："+DB.st.reqLog.length+"回"+(DB.st.reqLog.length ? "（最後 "+dtLabel(new Date(DB.st.reqLog[0]))+"）" : "")+"</div></div>";
+    if(DB.set.windows.length){
+      h += "<div class='sec'>v3 の聴ける時間帯（v4 からは使っていません。お休みの時間帯に入れ直す目安に）</div><div class='card'>";
+      DB.set.windows.forEach(function(w){ h += "<div class='note' style='margin:2px 0'>"+esc(w.name||"（名前なし）")+" ・ "+(w.days||[]).map(function(d){return WD[d];}).join("")+" "+esc(w.from)+"〜"+esc(w.to)+"</div>"; });
+      h += (ok ? "<button class='btn ghost small' style='margin-top:8px' onclick='delOld()'>この表示を消す</button>" : "") + "</div>";
+    }
+    h += "<div class='sec'>控え</div><div class='card'><button class='btn ghost' style='margin-top:0' onclick='expData()'>リストと設定をコピーする</button><textarea id='expbox' readonly style='margin-top:8px;min-height:50px'></textarea>";
+    if(ok) h += "<label>控えから戻す（貼って「取り込む」）</label><textarea id='impbox' style='min-height:50px'></textarea><button class='btn ghost' onclick='impData()'>取り込む</button>";
+    else h += "<div class='note'>🔒 控えからの取り込みは、設定を変えられる時間帯だけです。</div>";
+    h += "</div><button class='btn ghost' onclick=\"go('home')\">ホームへ</button>";
   }
   a.innerHTML = h;
 }
+/* v4: 設定画面は30秒ごとに、ロックの状態（開いた・閉じた）が変わっていたら描き直す */
+var lastOk = null;
+setInterval(function(){
+  if(view!=="set") return;
+  var ok = canEdit(); if(lastOk!==null && ok!==lastOk) render(); lastOk = ok;
+}, 30000);
 /* クールダウンの残りを1秒ごとに描き直す（ホームのときだけ） */
 setInterval(function(){
   if(view!=="home") return;

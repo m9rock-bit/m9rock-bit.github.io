@@ -1621,7 +1621,7 @@ function parkBtn(){
 
 /* --- 状態 --- */
 /* v27: 版の表示（ホーム最下部）。中身を変えたら、ここも必ず上げる。 */
-var APPVER = "切り替えルーティン v82 ・ 2026-10-28";
+var APPVER = "切り替えルーティン v84 ・ 2026-10-29";
 var view = "home";
 var curId = null;
 var startAt = 0;
@@ -1914,6 +1914,7 @@ var ac = null;
    だった。集中ブロックの区切りも、🫁呼吸法の吸う・止める・吐くも同じ。
    → 開始ボタンを押した瞬間に、ここを必ず通す。 */
 function unlockAudio(){
+  audioMix();   /* v84: 音を出す前に「ほかのアプリの音と混ぜる」種別へ（Spotifyを止めない） */
   try{
     if(!ac) ac = new (window.AudioContext||window.webkitAudioContext)();
     if(ac.state === "suspended" && ac.resume) ac.resume();
@@ -2003,7 +2004,29 @@ function chimeWake(){
      そのため終了・中断・やめる で必ず "auto" に戻す（stop／enterDone）。 */
 function mediaAudio(on){
   try{
-    if(navigator.audioSession) navigator.audioSession.type = on ? "playback" : "auto";
+    if(navigator.audioSession) navigator.audioSession.type = on ? "playback" : audioIdle();   /* v84: "auto"→audioIdle() */
+  }catch(e){}
+}
+/* ===== v84（2026-10-29・指示_2026-10-29_2「セットのタイマーが起動するたびにSpotifyが止まる」） =====
+   原因（いちばん有力）：セットを始めるたびに unlockAudio() が無音の1音を鳴らして音を「開通」させる。
+   このとき iPhone の Safari の音の種別が "auto" のままだと、ページが音を出し始めた＝
+   ほかのアプリの音を止めてよい、と扱われ、Spotify が止まる。🎵 スイッチ（v67）は
+   離席中の音（new Audio）しか止めておらず、この開通の1音・チャイム・読み上げは対象外だった。
+   → 🍵（media）と離席中の音を仕掛けるとき以外は "ambient"（ほかのアプリの音と混ぜて鳴らす種別）にする。
+   ★"ambient" は消音スイッチ（マナーモード）に従うが、Safari のチャイム・読み上げは
+     もともと "auto" でも消音スイッチに従っていたので、鳴り方は変わらない（引き換えなし）。
+   ★離席中の音は裏に回っても鳴らし続ける必要があるため "auto" のまま（awayPlay で戻す）。
+     これは従来どおり Spotify を止めるので、仕掛けたときの案内に 🎵 を1タップで入れるボタンを出した。
+   ★navigator.audioSession は Safari 16.4〜。無い端末では何もしない（従来どおり）。実機は未確認。 */
+function audioIdle(){
+  try{ return awaySoundOK(setOf(curId)) ? "auto" : "ambient"; }catch(e){ return "ambient"; }
+}
+function audioMix(){
+  try{
+    if(!navigator.audioSession) return;
+    var s = null; try{ s = setOf(curId); }catch(e){}
+    if(s && s.media) return;   /* 🍵 は v57 の "playback" を優先 */
+    navigator.audioSession.type = audioIdle();
   }catch(e){}
 }
 function musicToggle(){
@@ -2011,6 +2034,7 @@ function musicToggle(){
   /* オンにした瞬間に、いま仕掛かっている離席中の音も止める
      （止めないと、オンにしても鳴っている1本がSpotifyを押さえ続ける） */
   if(DB.musicOn) awayClear(); else awayArm();
+  if(!((setOf(curId)||{}).media)) mediaAudio(false);   /* v84: 種別も合わせ直す */
   render();
 }
 
@@ -2297,6 +2321,7 @@ function awayPlay(sec, label){
     awayHush();
     var gen = awayGen;
     awayUrl = URL.createObjectURL(bl);
+    try{ if(navigator.audioSession && navigator.audioSession.type === "ambient") navigator.audioSession.type = "auto"; }catch(e){}   /* v84: 裏でも鳴らすため */
     awayAudio = new Audio();
     awayAudio.src = awayUrl;
     awayAudio.preload = "auto";
@@ -2473,7 +2498,9 @@ function awayBlock(s){
        + (rest>0 ? 'あと <b>'+mmss(rest)+'</b> で鳴ります。' : 'もう鳴ったはずの時刻です。')
        + '他のアプリを開いていても鳴ります（この画面を閉じない限り）。'
        + (awayKind==="both" ? '<br>iPhone標準のタイマーにも渡してあります。' : '')
-       + '<br><b>鳴らしているあいだ、Spotify・YouTubeの音は止まります。</b></div>';
+       + '<br><b>鳴らしているあいだ、Spotify・YouTubeの音は止まります。</b>'
+       + (DB.musicOn ? '' : '<br><button class="btn link" onclick="musicToggle()">🎵 いま音楽を聞いているので、離席中の音をやめる</button>')   /* v84 */
+       + '</div>';
   }else if(armed && awayKind==="timer"){
     h += '<div class="hint" style="border-color:#7a9ec4;color:#bcd6ee">'
        + (handWord()==="通知" ? '<b>🔔 '+durLabel(awaySec)+' 後の通知を渡しました。</b>' : '<b>⏰ iPhoneの標準タイマーに '+durLabel(awaySec)+' を渡しました。</b>')
@@ -2867,11 +2894,24 @@ var APPS = {
 function appOf(x){
   var k = x && x.app ? String(x.app).trim() : "";
   if(!k) return null;
+  /* v83（指示_2026-10-28_2）: 4列目 close ＝ Quick Memo の「🚃 今日を閉じる」。
+     ほかのHTMLアプリではなく Obsidian を開くので、URLは設定のコマンドIDから作る。
+     コマンドIDが空のときは出さない（押しても何も起きないボタンを作らない）。 */
+  if(k==="close"){
+    var u = mealUri(MEAL.cmdClose);
+    return u ? { icon:"📝", name:"今日を閉じる", url:u } : null;
+  }
   if(APPS[k]) return APPS[k];
   if(/^https?:\/\//.test(k)) return { icon:"🔗", name:"リンクを開く", url:k };
   return null;
 }
 function openApp(k){
+  /* v83: close は Obsidian（別アプリ）なので新規タブではなく openUrl で開く */
+  if(k==="close"){
+    var cu = mealUri(MEAL.cmdClose);
+    if(cu) openUrl(cu);
+    return;
+  }
   var a = APPS[k] || (/^https?:\/\//.test(k) ? { url:k } : null);
   if(!a) return;
   /* 同じタブで開くと、いま動いている実行の状態（画面の中だけにある）が消えるので新規タブ */
@@ -4681,6 +4721,9 @@ function viewHome(){
        + (_bz ? '🍵 ひと息＝脳がつかれた・2回目が来た・再開する前に。<b>約7分</b>、合図の音と声で進むのでイヤホンで。<br>' : '')
        + (mealUri(MEAL.cmdLog) ? '🍽️ 食事を記録＝Meal Log を開きます（まとめて翌朝でも大丈夫です）。' : '')
        + (mealUri(MEAL.cmdBook) ? '<br>🍰 予約する＝食べる前に1つ選ぶ。器に出して、袋はしまう。種類は1つ。' : '')
+       /* v83: 📝 の説明。Obsidian側のホットキー登録が済んでいない間は押しても何も起きないので、
+          そのことを1行で書いておく（指示_2026-10-28_2 §3）。 */
+       + (mealUri(MEAL.cmdClose) ? '<br>📝 今日を閉じる＝帰りの電車で問い4つに答えると、その日の夜の日記に入ります。<b>Obsidian側のテンプレートの登録がまだのときは、押しても何も起きません。</b>' : '')
        + '</p>';
   }
   if(_ug){
@@ -4780,7 +4823,8 @@ function viewHome(){
      + '<p class="note">オンのあいだは<b>離席中の音を仕掛けません</b>。'
      + 'これを入れないと、続きに戻った回や項目が進むたびにアプリが音を出し始めるため、'
      + '<b>Spotifyなどの再生が止まります</b>（iPhoneの仕様）。'
-     + '音楽を聞き終えたらオフに戻すと、離席中の音がまた鳴るようになります。</p></div>';
+     + '音楽を聞き終えたらオフに戻すと、離席中の音がまた鳴るようになります。'
+     + '<br>v84から、チャイム・読み上げはSpotifyと混ぜて鳴らします（このスイッチに関係なく。iPhoneのSafari 16.4以降）。</p></div>';
   /* v72: 🌬️ の持続音。🎵 のすぐ下に置く（どちらも音楽まわりのスイッチなので、探す場所を1か所にする） */
   h += '<div class="card"><div class="toggle"><b>🌬️ 呼吸のあいだ、静かな音を流す</b>'
      + '<button class="sw'+(DB.breathPad!==false?' on':'')+'" onclick="DB.breathPad=(DB.breathPad===false);save();render()"><i></i></button></div>'
@@ -5492,6 +5536,9 @@ function emUI(){
   var _ma = mealUri(MEAL.cmdBook), _mb = mealUri(MEAL.cmdLog);
   if(_ma) b.push('<button class="btn ghost" style="margin-top:0;padding:10px 6px;border-color:#c4a06a;color:#e8c99a" onclick="openUrl(\''+_ma+'\')">🍰 予約</button>');
   if(_mb) b.push('<button class="btn ghost" style="margin-top:0;padding:10px 6px;border-color:#a08fb9;color:#d8cbe8" onclick="openUrl(\''+_mb+'\')">🍽️ 記録</button>');
+  /* v83: 📝 今日を閉じる も実行中の同じ行に（button + openUrl。理由は上の注記と同じ） */
+  var _mc = mealUri(MEAL.cmdClose);
+  if(_mc) b.push('<button class="btn ghost" style="margin-top:0;padding:10px 6px;border-color:#7a9ec4;color:#bcd6ee" onclick="openUrl(\''+_mc+'\')">📝 今日を閉じる</button>');
   if(!b.length) return '';
   return '<div class="row emrow" style="margin-top:9px;gap:6px;flex-wrap:wrap">'+b.join("")+'</div>'
        + '<p style="color:#8ea3b8;font-size:12px;line-height:1.7;margin:4px 0 0">押すと、いまのセットを控えてそちらを始めます。<b>終わる・やめると、自動でこの続きに戻ります。</b></p>';
@@ -7211,6 +7258,11 @@ function appOptions(cur, auto){
     if(k===cur) known = true;
     h += '<option value="'+k+'"'+(k===cur?' selected':'')+'>'+APPS[k].icon+' '+APPS[k].name+'</option>';
   }
+  /* v83: 4列目 close（Quick Memo の 🚃 今日を閉じる）。設定にコマンドIDがあるときだけ出す。 */
+  if(mealUri(MEAL.cmdClose)){
+    if(cur==="close") known = true;
+    h += '<option value="close"'+(cur==="close"?' selected':'')+'>📝 今日を閉じる（Quick Memo）</option>';
+  }
   if(cur && !known) h += '<option value="'+esc(cur)+'" selected>'+esc(cur)+'</option>';
   return h;
 }
@@ -7907,12 +7959,16 @@ if(DB.sleepActive){ view = "sleepWatch"; sleepTickStart(); }
      Template_Meal_log.md が登録されているかを確認できなかったため。
      既定で無反応なら、設定から正しいコマンドIDに直せる。 */
 var MEALKEY = "bmc_meal_links_v1";
-var MEAL = { cmdLog:"templater-obsidian:00_System/Templates/Template_Meal_log.md", cmdBook:"" };
+var MEAL = { cmdLog:"templater-obsidian:00_System/Templates/Template_Meal_log.md", cmdBook:"",
+  /* v83（2026-10-29・指示_2026-10-28_2）: 📝 今日を閉じる（Quick Memo の問い4つ）。
+     Obsidian運用管理が Template_Close_Today.md を作ったので、コマンドIDを既定値で入れてある。 */
+  cmdClose:"templater-obsidian:00_System/Templates/Template_Close_Today.md" };
 try{
   var _mo = JSON.parse(localStorage.getItem(MEALKEY));
   if(_mo && typeof _mo==="object"){
     if(typeof _mo.cmdLog==="string") MEAL.cmdLog = _mo.cmdLog;
     if(typeof _mo.cmdBook==="string") MEAL.cmdBook = _mo.cmdBook;
+    if(typeof _mo.cmdClose==="string") MEAL.cmdClose = _mo.cmdClose;   /* v83 */
   }
 }catch(e){}
 function mealSave(){ try{ localStorage.setItem(MEALKEY, JSON.stringify(MEAL)); }catch(e){} }
@@ -7932,14 +7988,19 @@ function mealCards(){
   /* v71: .emgrid の中に入るので1行だけ。説明はこの下の注記にまとめてある。 */
   if(a) h += '<a class="setb" style="border-color:#c4a06a;background:#211e18" href="'+a+'">🍰 予約する</a>';
   if(b) h += '<a class="setb" style="border-color:#a08fb9;background:#1d1a21" href="'+b+'">🍽️ 食事を記録</a>';
+  /* v83（指示_2026-10-28_2・仕様書_2026-10-28 §8）: 🌊・🍵・🍰・🍽️ と同じ並びに 📝 今日を閉じる。
+     どのセットを走らせていても、何も走らせていなくても1タップで Quick Memo の問いへ。 */
+  var c = mealUri(MEAL.cmdClose);
+  if(c) h += '<a class="setb" style="border-color:#7a9ec4;background:#191e24" href="'+c+'">📝 今日を閉じる</a>';
   return h;
 }
 function mealLinks(){
-  var a = mealUri(MEAL.cmdBook), b = mealUri(MEAL.cmdLog);
-  if(!a && !b) return "";
+  var a = mealUri(MEAL.cmdBook), b = mealUri(MEAL.cmdLog), c = mealUri(MEAL.cmdClose);   /* v83 */
+  if(!a && !b && !c) return "";
   var h = '<div class="row" style="margin-top:8px">';
   if(a) h += '<a class="btn ghost" style="margin-top:0;text-align:center;text-decoration:none" href="'+a+'">🍰 予約する</a>';
   if(b) h += '<a class="btn ghost" style="margin-top:0;text-align:center;text-decoration:none" href="'+b+'">🍽️ 食事を記録する</a>';
+  if(c) h += '<a class="btn ghost" style="margin-top:0;text-align:center;text-decoration:none" href="'+c+'">📝 今日を閉じる</a>';   /* v83 */
   h += '</div>';
   if(!a) h += '<div class="note">🍰 予約の入口はまだ用意されていません（Obsidian運用管理が作り次第、設定でコマンドIDを入れると出ます）。</div>';
   return h;
@@ -8041,6 +8102,7 @@ function fbGrabCfg(){
   /* v66: 🍰 の行き先も同じタイミングで写して保存する */
   var a = document.getElementById("ml_log");  if(a) MEAL.cmdLog  = a.value.trim();
   var b = document.getElementById("ml_book"); if(b) MEAL.cmdBook = b.value.trim();
+  var c = document.getElementById("ml_close"); if(c) MEAL.cmdClose = c.value.trim();   /* v83 */
   if(a || b) mealSave();
 }
 function fbToast(msg){
@@ -8235,6 +8297,9 @@ function fbRender(){
          + '<input class="fbinp" id="ml_log" type="text" placeholder="templater-obsidian:00_System/Templates/Template_Meal_log.md" value="'+fbEsc(MEAL.cmdLog)+'">'
          + '<label style="display:block;margin-top:10px">🍰 予約のコマンドID</label>'
          + '<input class="fbinp" id="ml_book" type="text" placeholder="空のまま＝🍰のリンクを出さない" value="'+fbEsc(MEAL.cmdBook)+'">'
+         /* v83: 📝 今日を閉じる */
+         + '<label style="display:block;margin-top:10px">📝 今日を閉じる のコマンドID</label>'
+         + '<input class="fbinp" id="ml_close" type="text" placeholder="空のまま＝📝のボタンを出さない" value="'+fbEsc(MEAL.cmdClose)+'">'
          + '<p class="note">⏸ 呼ばれた中・⏸ 中断中（＝時計が止まっているところ）だけに出るリンクの行き先です。'
          + '空にするとそのリンクは出ません。押しても何も起きないときは、ObsidianのTemplaterで'
          + 'そのテンプレートがホットキーに登録されているか確かめてください。</p>'
