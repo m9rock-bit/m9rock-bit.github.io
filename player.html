@@ -14,6 +14,9 @@
   ★設計の要点（変えるときは理由も一緒に残してください）
   1. 流すのは「登録した動画」だけ。動画が終わったら YouTube のおすすめへ行かせず、アプリが次の登録動画へ進める。
   2. 決めた分数（playMin）を過ぎたら、いまの動画が終わったところで止める（途中で切らない）。
+     ★v5（2026-10-30・ご要望「15分で止まるように。動画の途中でも」）で変更：決めた分数に来たら、動画の途中でもその場で止める。
+       止めた位置（秒）を動画ごとに it.pos に残し、次に流すときはその位置から始める（最後まで聴いたら pos は消す）。
+       お休みの時間帯に途中で入ったときは、従来どおり「いまの動画の終わりで止める」（ご要望は分数の件だけのため変えていない）。
      止めた時刻からクールダウン（coolMin）のあいだは流せない。時刻は保存するので、アプリを閉じ直しても続く。
   3. 聴ける時間帯（windows）が1つ以上あるときは、その外では流さない（仕様書 Q3＝ア）。
      時間帯の途中で時刻が外へ出たら、いまの動画の終わりで止める（2と同じ扱い）。
@@ -94,7 +97,7 @@ label{display:block;font-size:13px;color:#a9b4c6;margin:12px 0 5px}
 <div class="wrap" id="app"></div>
 <div id="toast"></div>
 <script>
-var APPVER = "決めた動画だけ v4 ・ 2026-10-30";
+var APPVER = "決めた動画だけ v5 ・ 2026-10-30";
 var KEY = "bmc_player_v1";
 var WD = ["日","月","火","水","木","金","土"];
 
@@ -267,7 +270,7 @@ function blockReason(){
 }
 
 /* ---------- 再生 ---------- */
-var view = "home", ifr = null, cur = null, ticker = null, wake = null, stopAfter = false, pState = -1, heard = false;
+var view = "home", ifr = null, cur = null, ticker = null, wake = null, stopAfter = false, pState = -1, heard = false, curT = 0;  /* v5: curT＝いま流している動画の位置（秒） */
 var YTO = "https://www.youtube-nocookie.com";
 function sessAcc(){ var s = DB.st.sess; return s ? s.acc : 0; }
 function limitSec(){ return DB.set.playMin * 60; }
@@ -284,13 +287,16 @@ function start(){
   wakeOn();
   if(!ticker) ticker = setInterval(tick, 1000);
 }
+/* v5: 途中で止めた動画は、その位置から始める */
+function posOf(id){ var it = DB.list.filter(function(x){ return x.id===id; })[0]; return (it && +it.pos>0) ? Math.floor(+it.pos) : 0; }
 function embedSrc(id){
   var o = (location.origin && location.origin !== "null") ? "&origin="+encodeURIComponent(location.origin) : "";
-  return YTO+"/embed/"+id+"?enablejsapi=1&autoplay=1&playsinline=1&rel=0&modestbranding=1"+o;
+  var ps = posOf(id), st = ps ? "&start="+ps : "";
+  return YTO+"/embed/"+id+"?enablejsapi=1&autoplay=1&playsinline=1&rel=0&modestbranding=1"+st+o;
 }
 function mkPlayer(){
   var box = document.getElementById("yt"); if(!box || !cur) return;
-  heard = false; pState = -1;
+  heard = false; pState = -1; curT = posOf(cur);
   box.innerHTML = '<iframe id="ytf" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen src="'+embedSrc(cur)+'"></iframe>';
   ifr = document.getElementById("ytf");
   ifr.addEventListener("load", listenLoop);
@@ -307,6 +313,7 @@ window.addEventListener("message", function(e){
   var d; try{ d = typeof e.data==="string" ? JSON.parse(e.data) : e.data; }catch(x){ return; }
   if(!d || typeof d!=="object") return;
   heard = true;
+  if(d.info && typeof d.info === "object" && typeof d.info.currentTime === "number") curT = d.info.currentTime;   /* v5 */
   if(d.event === "onError"){ toast("この動画は流せませんでした。次へ進みます。"); finishVideo(true); return; }
   var st = null;
   if(d.event === "onStateChange") st = d.info;
@@ -324,13 +331,24 @@ function tick(){
   if(view !== "play") return;
   var s = DB.st.sess; if(!s) return;
   if(pState === 1){ s.acc += 1; s.last = now(); }
-  if(s.acc >= limitSec() || !allowedNow()) stopAfter = true;
+  /* v5: 決めた分数に来たら、動画の途中でもその場で止める（位置は残す）。お休みの時間帯は従来どおり動画の終わりで。 */
+  if(s.acc >= limitSec()){ cutNow(); return; }
+  if(!allowedNow()) stopAfter = true;
   if(s.acc % 15 === 0) save();
   var el = document.getElementById("pinfo"); if(el) el.innerHTML = playInfo();
+}
+/* v5: 決めた分数に来たときの止め方。いまの位置を it.pos に残して終わりにする。 */
+function cutNow(){
+  if(view !== "play") return;
+  var it = DB.list.filter(function(x){ return x.id===cur; })[0];
+  if(it){ if(curT > 5) it.pos = Math.floor(curT); }
+  endSession();
+  toast("決めた "+DB.set.playMin+" 分になったので止めました。続きは次回この位置から。");
 }
 function finishVideo(skipped){
   if(view !== "play") return;
   var it = DB.list.filter(function(x){ return x.id===cur; })[0];
+  if(it) delete it.pos;   /* v5: 最後まで聴いた／飛ばした動画は、次は頭から */
   if(it && !skipped) it.done = true;
   if(it && skipped) { DB.list.splice(DB.list.indexOf(it),1); DB.list.push(it); }
   if(DB.st.sess) DB.st.sess.n = (DB.st.sess.n||0) + (skipped?0:1);
@@ -340,8 +358,8 @@ function finishVideo(skipped){
     endSession(); return;
   }
   cur = queue()[0].id;
-  pState = -1;
-  ytCmd("loadVideoById", [cur]);
+  pState = -1; curT = posOf(cur);
+  ytCmd("loadVideoById", [cur, posOf(cur)]);
   /* 再生中は全体を描き直さない（iframe が消えるため）。見出しだけ差し替える。 */
   var t = document.getElementById("ptitle"); if(t){ var nx = DB.list.filter(function(x){ return x.id===cur; })[0]; t.textContent = "🎧 "+(nx ? nameOf(nx) : ""); }
 }
@@ -455,7 +473,7 @@ function go(v){
 function playInfo(){
   var s = DB.st.sess, acc = s ? s.acc : 0, left = limitSec() - acc;
   return (stopAfter
-      ? "⏹ 時間になりました。<b>この動画が終わったら止まります。</b>"
+      ? "⏹ お休みの時間帯に入りました。<b>この動画が終わったら止まります。</b>"
       : "あと <b>"+mmss(left)+"</b>（決めた "+DB.set.playMin+" 分）")
     + "<br><span class='note'>画面はつけたままにしてください（消すと止まります）。</span>";
 }
@@ -477,7 +495,7 @@ function render(){
     }else{
       var s = DB.st.sess;
       h += "<div class='card'><div class='note' style='margin:0'>次に流れる</div><div style='font-size:15px;margin:4px 0'>"+esc(nameOf(q[0]))+"</div>"
-        +  "<div class='note'>"+(s ? "続きから：あと "+mmss(limitSec()-s.acc) : DB.set.playMin+" 分（決めた時間を過ぎたら、その動画の終わりで止まります）")+"</div></div>"
+        +  "<div class='note'>"+(s ? "続きから：あと "+mmss(limitSec()-s.acc) : DB.set.playMin+" 分（決めた時間になったら、動画の途中でも止まります。続きは次回その位置から）")+"</div></div>"
         +  "<button class='btn' onclick='start()'>▶ 始める</button>";
     }
     h += "<button class='btn ghost' onclick='pasteClip()'>📋 コピーした動画を登録</button>";
