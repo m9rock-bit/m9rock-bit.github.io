@@ -1621,7 +1621,7 @@ function parkBtn(){
 
 /* --- 状態 --- */
 /* v27: 版の表示（ホーム最下部）。中身を変えたら、ここも必ず上げる。 */
-var APPVER = "切り替えルーティン v84 ・ 2026-10-29";
+var APPVER = "切り替えルーティン v86 ・ 2026-11-05";
 var view = "home";
 var curId = null;
 var startAt = 0;
@@ -1629,6 +1629,7 @@ var doneSet = {};
 var curStep = 0;
 var tick = null;
 var armed = null;   /* 削除の1回目を押したセットid（2回押しで削除） */
+var homeSel = null;   /* v85: ホームでセットを選ぶモード（null＝オフ／{id:true}＝選んでいる）。保存しない */
 var runIdx = null;  /* この回の履歴の位置。1回の実行で1件しか増やさないための目印 */
 /* v14: いまの項目を始めた時刻 / この回だけの延長（秒） / この回に足した実績の記録 */
 var stepAt = 0, stepExtra = {}, runTimes = {};
@@ -1789,6 +1790,7 @@ function closeInput(){ inputOpen = null; render(); }
 /* 250msごとの自動再描画。入力欄を開いている間だけ描き直しを止める
    （render() 自体は止めない。ボタンから呼ぶ描き直しは通す）。 */
 function tickRender(){
+  aiCheck();   /* v86: 🤖 AIの返事を確かめるタイマー（集中の時計とは別） */
   /* v22: 実行中は10秒ごとに途中経過を控える（入力欄を開いていても止めない）。
      項目を進めるたびの保存だけだと、1つの項目に長く居るあいだが無防備になる。 */
   if(view==="run" && curId && Date.now()-lastRunSave > 10000) saveRun();
@@ -3178,7 +3180,7 @@ function left(){ var s = setOf(curId); return s ? foldSum(s) - elapsed() : 0; }
 function allDone(){ var s=setOf(curId); for(var i=0;i<s.steps.length;i++){ if(!doneSet[i]) return false; } return true; }
 function newId(){ return "s" + Date.now().toString(36) + Math.floor(Math.random()*900+100); }
 
-function go(v){ armed = null; clearArmed = false; logDelArmed = null; if(v==="edit") editId = null; view = v; render(); }
+function go(v){ homeSel = null; armed = null; clearArmed = false; logDelArmed = null; if(v==="edit") editId = null; view = v; render(); }
 
 /* ===== バックアップ（書き出し・読み込み）　2026-08-15追加 =====================
    記録はこの端末のブラウザの中だけにあります。ここのテキストを控えておけば、
@@ -4778,7 +4780,21 @@ function viewHome(){
     }
   }
   var lst = normalsCur();
+  /* v85（2026-10-31 ご依頼「画面からセットを選択して、アーカイブかタグ変更できるようにしてほしい」）:
+     ホームの一覧でセットを選び、その場で 🗄 アーカイブ／🏷 タブに入れる・外す。
+     選んでいるあいだは、押してもセットは始まらない。データの形は変えていない（archived・tags を書くだけ）。 */
+  h += homeSelBar(lst);
   lst.forEach(function(s){
+    if(homeSel){
+      var on = !!homeSel[s.id];
+      var scn = DB.scenes.filter(function(sc){ return sc.tag && hasTag(s, sc.tag); }).map(function(sc){ return sc.name; });
+      h += '<div class="row" style="gap:6px;margin-bottom:10px">'
+         + '<button class="setb" style="margin-bottom:0'+(on?';border:2px solid #e0a86a':';opacity:.75')+'" onclick="homeSelPick(\''+s.id+'\')">'
+         + (on?'☑️ ':'⬜ ')+esc(s.icon)+' '+esc(s.name)
+         + '<small>'+(scn.length ? '🏷 '+esc(scn.join('・')) : '🏷 どのタブにも入っていません')+'</small></button>'
+         + '</div>';
+      return;
+    }
     /* v38: セットカードの右に 🌗（今日の自分に）。**開始前に押せることが今回の本体**で、
        実行中の画面にしか無かった v34 の 🔋 では、押せない日にとどかなかった。
        ★ボタンは入れ子にできないので、行に分けて横へ並べている（.row>*{flex:1} を
@@ -6127,6 +6143,227 @@ var fromFocus=false, fShift=0;
    fLabels … 区切りごとに、そのとき決めた「やること」
    fAsking … いま「次は何をしますか」の入力待ちか（このあいだ時計は止める） */
 var fCap = 0, fLabels = [], fAsking = false;
+/* ===== v86（2026-11-05・提案_2026-11-05 イ＋提案_2026-10-30_2 ア）=====
+   ① Obsidian のタスクとつなぐ：Task Sorter「🎯 routine へ今日のタスクを送る」がクリップボードに
+      「🎯TASKS {json}」を置く → ここで 📋 取り込む（ホーム画面アプリには #… が届かないため、v47 と同じくクリップボードが主の道）。
+      「その都度、決めて始める」の区切りごとに一覧から選ぶ。実行中に ✅ 終わった／✂️ 分ける／✏️ 名前／📅 日付／📝 メモ。
+      変更は DB.focus.ops に貯め、ブロックの終わりに 📤 で `10_Action/🎯 集中ブロックからの戻し.md` へ追記（advanced-uri）。
+      反映は Task Sorter の「🎯 集中ブロックから戻す」（個人秘書が実装）。★形を変えるときは両方を合わせること。
+   ② 休憩なしで続ける（終わりの画面のいちばん上）。③ 分のボタンを押したらすぐ始まる（入力欄は「一覧に無いときだけ」）。
+   ④ 🤖 AIの返事を確かめるタイマー（5・10・15・30分・1本だけ・押すまで画面の縁が点滅）。 */
+var fTasks = [], fAskSel = -1, ftMsg = "", ftMsgAt = 0;
+var FT_RET_PATH = "10_Action/🎯 集中ブロックからの戻し.md";
+function ftInit(){ if(!DB.focus.tasks) DB.focus.tasks = []; if(!DB.focus.ops) DB.focus.ops = []; }
+function ftImportText(txt){
+  ftInit();
+  var s = String(txt||""), key = "🎯TASKS", i = s.indexOf(key);
+  if(i < 0) return -1;
+  var o = null;
+  try{ o = JSON.parse(s.slice(i + key.length).trim()); }catch(e){ return -1; }
+  if(!o || !Array.isArray(o.tasks)) return -1;
+  DB.focus.tasks = o.tasks.map(function(x){
+    return { p:String(x.p||""), t:String(x.t||""), d:String(x.d||""), k:(x.k==="P"?"P":"W") };
+  }).filter(function(x){ return x.t; });
+  DB.focus.tasksAt = String(o.at||"");
+  save();
+  return DB.focus.tasks.length;
+}
+function ftSay(n){
+  ftMsg = n < 0
+    ? "コピーされた中身がタスクの一覧ではありませんでした。Obsidian の Task Sorter で「🎯 routine へ今日のタスクを送る」を押してから、もう一度どうぞ。"
+    : (n + "件のタスクを取り込みました（" + (DB.focus.tasksAt||"") + " 時点）");
+  ftMsgAt = Date.now(); render();
+}
+function ftPaste(){
+  var t = prompt("Task Sorter でコピーした一覧を、ここに貼り付けてください", "");
+  if(t === null) return;
+  ftSay(ftImportText(t));
+}
+function ftFromClip(){
+  ftInit();
+  try{
+    if(navigator.clipboard && navigator.clipboard.readText){
+      navigator.clipboard.readText().then(function(t){ var n = ftImportText(t); if(n < 0) ftPaste(); else ftSay(n); }, function(){ ftPaste(); });
+      return;
+    }
+  }catch(e){}
+  ftPaste();
+}
+function ftOpenList(){ ftInit(); return DB.focus.tasks.filter(function(x){ return !x.done; }); }
+function ftCur(){ return (fMode==="ask" && !fAsking && fTasks[fSeg]) ? fTasks[fSeg] : null; }
+function ftOp(o){ ftInit(); o.at = Date.now(); DB.focus.ops.push(o); save(); }
+function ftPending(){ ftInit(); return DB.focus.ops.length; }
+function ftYmd(x){ return x.getFullYear()+"-"+("0"+(x.getMonth()+1)).slice(-2)+"-"+("0"+x.getDate()).slice(-2); }
+/* 今日／明日／あさって／曜日（次に来るその曜日）／来週（＝次の月曜）／11/12／2026-11-12 */
+function ftDate(s){
+  s = String(s||"").trim().replace(/\s/g,"");
+  if(!s) return "";
+  var d = new Date(); d.setHours(12,0,0,0);
+  var m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(s);
+  if(m) return m[1]+"-"+("0"+m[2]).slice(-2)+"-"+("0"+m[3]).slice(-2);
+  m = /^(\d{1,2})[\/\.月](\d{1,2})日?$/.exec(s);
+  if(m){
+    var r = new Date(d.getFullYear(), +m[1]-1, +m[2], 12);
+    if(r.getTime() < d.getTime() - 86400000*60) r.setFullYear(r.getFullYear()+1);
+    return ftYmd(r);
+  }
+  if(s==="今日") return ftYmd(d);
+  if(s==="明日"){ d.setDate(d.getDate()+1); return ftYmd(d); }
+  if(s==="あさって" || s==="明後日"){ d.setDate(d.getDate()+2); return ftYmd(d); }
+  if(s==="来週" || s==="来週月曜" || s==="来週の月曜"){ d.setDate(d.getDate() + (((8 - d.getDay()) % 7) || 7)); return ftYmd(d); }
+  var w = "日月火水木金土".indexOf(s.replace(/曜日?$/,""));
+  if(w >= 0 && s.replace(/曜日?$/,"").length === 1){
+    var add = (w - d.getDay() + 7) % 7; if(add === 0) add = 7;
+    d.setDate(d.getDate()+add); return ftYmd(d);
+  }
+  return "";
+}
+function ftClean(n){ return String(n||"").replace(/[\\\/:*?"<>|]/g,"_").trim(); }
+/* その都度モードの区切りを、いまの時点で終える（時間は実際に使った分だけ数える） */
+function ftEndSeg(){
+  if(fMode !== "ask"){ focusSkip(); return; }
+  if(fPaused) fUnpause(true);
+  var prev = fSeg > 0 ? fSegEnd(fSeg-1) : 0;
+  fSegs[fSeg] = Math.max(0, Math.floor(fElapsed() - prev));
+  render();
+}
+function ftAct(kind){
+  var x = ftCur(); if(!x) return;
+  if(kind === "done"){
+    if(!confirm("「"+x.t+"」を完了にしますか？\n（Obsidian へは、ブロックの終わりにまとめて戻します）")) return;
+    ftOp({op:"done", p:x.p, t:x.t}); x.done = true; save();
+    ftMsg = "✅ 「"+x.t+"」を完了にしました"; ftMsgAt = Date.now();
+    ftEndSeg(); return;
+  }
+  if(kind === "split"){
+    var r = prompt("✂️ 「"+x.t+"」を分けた小さいタスクを、「、」か改行で区切って入れてください", "");
+    if(r === null) return;
+    var names = String(r).split(/[\n、,，]/).map(ftClean).filter(function(n){ return n && n !== x.t; });
+    if(!names.length) return;
+    ftOp({op:"split", p:x.p, t:x.t, kids:names});
+    ftInit();
+    var at = DB.focus.tasks.indexOf(x); if(at < 0) at = DB.focus.tasks.length - 1;
+    var today = ftDate("今日");
+    var kids = names.map(function(n){ return { p:"", t:n, d:today, k:x.k, parent:x.t }; });
+    Array.prototype.splice.apply(DB.focus.tasks, [at+1, 0].concat(kids));
+    save();
+    ftMsg = "✂️ "+names.length+"件に分けました。次の区切りで選べます。"; ftMsgAt = Date.now();
+    if(confirm("いまの区切りをここで終えて、分けたタスクから次を選びますか？\n（キャンセル＝このまま続ける）")){ ftEndSeg(); return; }
+    render(); return;
+  }
+  if(kind === "rename"){
+    var nn = prompt("✏️ 新しい名前", x.t);
+    if(nn === null) return;
+    nn = ftClean(nn); if(!nn || nn === x.t) return;
+    ftOp({op:"rename", p:x.p, t:x.t, to:nn});
+    ftInit(); DB.focus.tasks.forEach(function(y){ if(y.parent === x.t) y.parent = nn; });
+    x.t = nn; fLabels[fSeg] = nn; save();
+    ftMsg = "✏️ 「"+nn+"」にしました"; ftMsgAt = Date.now(); render(); return;
+  }
+  if(kind === "due"){
+    var ds = prompt("📅 新しい日付（今日／明日／あさって／金 などの曜日／来週＝次の月曜／11/12／2026-11-12）", "明日");
+    if(ds === null) return;
+    var d = ftDate(ds); if(!d){ alert("日付として読めませんでした: "+ds); return; }
+    ftOp({op:"due", p:x.p, t:x.t, d:d}); x.d = d; save();
+    ftMsg = "📅 「"+x.t+"」を "+d+" にしました"; ftMsgAt = Date.now(); render(); return;
+  }
+  if(kind === "memo"){
+    var mm = prompt("📝 「"+x.t+"」へのメモ（タスクの自分用メモに足します）", "");
+    if(mm === null || !String(mm).trim()) return;
+    ftOp({op:"memo", p:x.p, t:x.t, m:String(mm).trim()});
+    ftMsg = "📝 メモを残しました"; ftMsgAt = Date.now(); render(); return;
+  }
+}
+function ftMsgHtml(){ return (ftMsg && Date.now() - ftMsgAt < 8000) ? '<div class="hint">'+esc(ftMsg)+'</div>' : ''; }
+function ftPanel(){
+  var x = ftCur(), h = ftMsgHtml();
+  if(!x) return h;
+  h += '<div class="sec">このタスクを（Obsidian へはブロックの終わりにまとめて戻します）</div>'
+     + '<div class="row">'
+     + '<button class="btn ghost" style="margin-top:0" onclick="ftAct(\'done\')">✅ 終わった</button>'
+     + '<button class="btn ghost" style="margin-top:0" onclick="ftAct(\'split\')">✂️ 分ける</button>'
+     + '</div><div class="row">'
+     + '<button class="btn ghost" onclick="ftAct(\'rename\')">✏️ 名前</button>'
+     + '<button class="btn ghost" onclick="ftAct(\'due\')">📅 日付</button>'
+     + '<button class="btn ghost" onclick="ftAct(\'memo\')">📝 メモ</button>'
+     + '</div>';
+  if(ftPending()) h += '<p class="note">まだ Obsidian に戻していない変更：'+ftPending()+'件</p>';
+  return h;
+}
+function ftStartCard(){
+  ftInit();
+  var n = ftOpenList().length;
+  var h = '<div class="card"><label>🗂 Obsidian のタスク</label>' + ftMsgHtml();
+  h += '<div style="font-size:13px;line-height:1.6;margin:0 0 6px">' + (n
+      ? '<b>'+n+'件</b>取り込み済み（'+esc(DB.focus.tasksAt||"")+' 時点）。<b>「その都度、決めて始める」</b>で、区切りごとに一覧から選べます。'
+      : 'まだ取り込んでいません。Obsidian の Task Sorter で<b>「🎯 routine へ今日のタスクを送る」</b>を押してから、下のボタンを押してください。') + '</div>';
+  h += '<button class="btn ghost" style="margin-top:0" onclick="ftFromClip()">📋 取り込む（コピーしたもの）</button>';
+  h += ftSendBtn();
+  h += '</div>';
+  return h;
+}
+function ftRetText(){
+  ftInit();
+  var dt = new Date(), hm = ("0"+dt.getHours()).slice(-2)+":"+("0"+dt.getMinutes()).slice(-2);
+  var ops = DB.focus.ops.map(function(o){ var c = {}; for(var k in o){ if(k !== "at") c[k] = o[k]; } return c; });
+  return "\n##### " + ftYmd(dt) + " " + hm + " 🎯 集中ブロックから（" + ops.length + "件）\n```json focus-return\n" + JSON.stringify(ops) + "\n```\n";
+}
+function ftRetUri(){
+  var u = "obsidian://advanced-uri?";
+  if(FB.vault) u += "vault="+encodeURIComponent(FB.vault)+"&";
+  return u + "filepath="+encodeURIComponent(FT_RET_PATH)+"&mode=append&data="+encodeURIComponent(ftRetText());
+}
+function ftSendBtn(){
+  var n = ftPending(); if(!n) return "";
+  return '<a class="btn" id="ftSend" style="display:block;text-align:center;text-decoration:none" href="'+esc(ftRetUri())+'" onclick="ftSent()">📤 Obsidian に戻す（'+n+'件）</a>'
+     + '<p class="note">押すと Obsidian が開き、変更が「🎯 集中ブロックからの戻し」に書き込まれます。<b>そのあと Task Sorter を開くと、いちばん上の「🎯 集中ブロックから戻す」で反映されます。</b></p>';
+}
+/* 送信は <a href> のタップで行う。ここで描き直すと開こうとしているリンクが消えるので、少し待ってから（fbMarkSent と同じ考え方） */
+function ftSent(){
+  ftInit();
+  DB.focus.opsLast = DB.focus.ops.slice(0); DB.focus.ops = []; DB.focus.opsSentAt = Date.now(); save();
+  setTimeout(render, 1500);
+}
+function ftDoneTop(){
+  return '<button class="btn big" onclick="focusContinue()">▶ 休憩なしで続ける</button>'
+       + '<p class="note">いまの回は記録したまま、同じ長さの次の集中ブロックをすぐ始めます。</p>'
+       + ftSendBtn();
+}
+function focusContinue(){
+  var el = document.getElementById("f_memo");
+  if(el){ fMemo = el.value.trim(); if(fIdx !== null && DB.log[fIdx]){ DB.log[fIdx].memo = fMemo; save(); } }
+  var m = fMode || "one", keep = fList.slice(0);
+  focusReset(); fList = keep;
+  focusBegin(m);
+}
+/* 🤖 AIの返事を確かめるタイマー（集中の時計とは別に動く・1本だけ・もう一度押すと選び直し） */
+var aiEnd = 0, aiFired = false, aiPick = false, aiFlashAt = 0;
+function aiSet(m){ try{ unlockAudio(); }catch(e){} aiEnd = Date.now() + m*60000; aiFired = false; aiPick = false; render(); }
+function aiStop(){ aiEnd = 0; aiFired = false; aiPick = false; render(); }
+function aiToggle(){ aiPick = !aiPick; render(); }
+function aiCheck(){
+  if(!aiEnd) return;
+  var now = Date.now();
+  if(!aiFired && now >= aiEnd){
+    aiFired = true; aiFlashAt = now;
+    try{ fChime(false); }catch(e){}
+    try{ flashScreen(); }catch(e){}
+    try{ notifyNow("🤖 AIの返事を確かめる時間です", "集中ブロックの画面で、押して止めてください。"); }catch(e){}
+    render(); return;
+  }
+  if(aiFired && now - aiFlashAt > 2500){ aiFlashAt = now; try{ flashScreen(); }catch(e){} }
+}
+function aiBanner(){
+  if(aiFired) return '<button class="btn big" style="background:#e0a86a;color:#1a1a1a" onclick="aiStop()">🤖 AIの返事を確かめる時間です（押して止める）</button>';
+  if(aiEnd) return '<div class="hint" style="text-align:center">🤖 あと '+Math.max(1, Math.ceil((aiEnd - Date.now())/60000))+'分　<a href="javascript:void(0)" onclick="aiStop()">取り消す</a></div>';
+  return "";
+}
+function aiButton(){
+  var h = '<button class="btn ghost" onclick="aiToggle()">🤖 AIの返事を確かめる'+((aiEnd && !aiFired) ? '（選び直す）' : '')+'</button>';
+  if(aiPick) h += '<div class="row">'+[5,10,15,30].map(function(m){ return '<button class="btn ghost" style="margin-top:0" onclick="aiSet('+m+')">'+m+'分</button>'; }).join('')+'</div>';
+  return h;
+}
+
 /* v12: 休憩の画面から選んで始めたルーティンかどうか。
    これが立っているセットの完了画面には「次の集中ブロックへ」を出す。 */
 var fromBreak=false;
@@ -6603,6 +6840,7 @@ function focusBegin(mode){
   fMode = mode;
   fSlot = fSlotNow();
   fLabels = []; fAsking = false;
+  fTasks = []; fAskSel = -1;   /* v86 */
   if(mode === "ask"){
     /* v15: 区切りは先に決めない。1つずつ、そのときに決める。
        上限（休憩まで）だけ時間帯から決めておく。 */
@@ -6624,24 +6862,32 @@ function focusBegin(mode){
      どちらも前面のアプリを切り替えるので、同時にはできない（セットと同じ扱い）。 */
   else openUrl(focusSpUrl());
 }
-/* v15: 入力された「次にやること」と長さで、次の区切りを始める。 */
-function askStart(){
-  var t = "", m = 0;
-  var e1 = document.getElementById("ask_text"), e2 = document.getElementById("ask_min");
-  if(e1) t = String(e1.value||"").trim();
-  if(e2) m = parseInt(e2.value,10);
-  if(!(m>0)) m = 15;
+/* v86: 分のボタンを押したらすぐ始まる（提案_2026-10-30_2 ②）。一覧で選んだタスクがあればその名前、
+   無ければ入力欄（一覧に無いときだけ）、それも空なら「区切りn」。 */
+function askSel(i){
+  var e1 = document.getElementById("ask_text"), keep = e1 ? e1.value : "";
+  fAskSel = (fAskSel === i) ? -1 : i;
+  render();
+  var e2 = document.getElementById("ask_text"); if(e2) e2.value = keep;
+}
+function askGo(m){
+  var e1 = document.getElementById("ask_text"), t = e1 ? String(e1.value||"").trim() : "";
+  ftInit();
+  var x = (fAskSel >= 0 && DB.focus.tasks[fAskSel] && !DB.focus.tasks[fAskSel].done) ? DB.focus.tasks[fAskSel] : null;
+  if(!(m > 0)) m = 15;
   var sec = Math.min(m*60, Math.max(60, fCap - fElapsed()));   /* 休憩までを超えない */
   fSegs.push(sec);
-  fLabels.push(t || "（決めずに始めた）");
-  fSeg = fSegs.length - 1;
+  fLabels.push(x ? x.t : (t || ("区切り" + fSegs.length)));
+  fTasks[fSegs.length - 1] = x;
+  fSeg = fSegs.length - 1; fAskSel = -1;
   fAsking = false;
   fUnpause(false);        /* 考えていた時間は「ずれ」に数えない */
   fFlash = Date.now();
   render();
 }
-/* いま何分にするかのボタン（入力欄に書き込むだけ） */
-function askMin(m){ var e = document.getElementById("ask_min"); if(e){ e.value = m; } }
+function askStart(){ askGo(15); }
+function askMin(m){ askGo(m); }
+
 /* 自動セットと同じ考え方：経過秒から、いま何番目の区切りにいるべきかを毎回逆算する。
    setTimeoutの連鎖にすると、iOSでバックグラウンドに回った瞬間に止まって戻らない。 */
 function focusTick(){
@@ -6777,6 +7023,7 @@ function focusReset(){
   setTitle("");
   fStart=0; fSegs=[]; fSeg=0; fPaused=false; fPauseAt=0; fDone=false; fIdx=null; fList=[]; fMemo="";
   fromFocus=false; fShift=0; fCap=0; fLabels=[]; fAsking=false;
+  fTasks=[]; fAskSel=-1;   /* v86 */
 }
 function logFocus(){
   var rec = { t:fStart, id:"focus", icon:"🎯",
@@ -6816,6 +7063,7 @@ function viewFocusStart(){
   var sl = fSlotNow(), segs = segsFor(sl);
   var h = '<h1>🎯 集中ブロック</h1>'
     + '<p class="sub">押した瞬間から、休憩までの時間を数えます。<br>途中の区切りは「次へ移る合図」です。仕事の日にも、休日にも使えます。</p>';
+  h += ftStartCard();   /* v86 */
   h += '<div class="card"><div class="big ok" style="font-size:40px">'+durLabel(DB.focus.len[sl]*60)+'</div>'
      + '<div class="bigsub">'+SLOTN[sl]+' ・ 休憩まで</div>'
      + '<div class="row" style="margin-top:10px">'
@@ -6871,6 +7119,7 @@ function viewFocus(){
   var e = fElapsed(), total = fBlockSec(), leftAll = Math.max(0, total - e);
   var segLeft = focusSegLeft(), flash = (Date.now() - fFlash) < 8000;
   var h = '<h1>🎯 集中ブロック（'+SLOTN[fSlotNow()]+'）</h1>';
+  h += aiBanner();   /* v86 */
   /* v15: その都度モードの「次は何をしますか」。ここで時計は止まっている。 */
   if(fAsking){
     var doneN = fSegs.length;
@@ -6880,16 +7129,28 @@ function viewFocus(){
       h += '<div class="hint"><b>ひと区切り終わりました。</b>ここまで： '
          + esc(fLabels.join(" → "))+'</div>';
     }
-    h += '<label>次に何をしますか</label>'
-       + '<input class="inp" type="text" id="ask_text" placeholder="例）洗濯を畳む／本を読む／メールを片づける">'
-       + '<label>どれくらい</label>'
+    /* v86: 次にやるタスクを Obsidian から取り込んだ一覧で選ぶ → 分のボタンですぐ始まる */
+    h += ftMsgHtml();
+    var ftList = ftOpenList(), ftToday = ftDate("今日");
+    h += '<label>次にやるタスク（押して選ぶ）</label>';
+    if(ftList.length){
+      h += ftList.map(function(x){
+        var i = DB.focus.tasks.indexOf(x), on = (i === fAskSel);
+        return '<button class="btn ghost" style="margin-top:6px;text-align:left'+(on?';border:1px solid #e0a86a;color:#e0a86a':'')+'" onclick="askSel('+i+')">'
+          + (on ? '✔ ' : '') + (x.parent ? '↳ ' : '') + (x.k==="P" ? '🏠 ' : '') + esc(x.t)
+          + ((x.d && x.d < ftToday) ? ' <small>🔴'+esc(x.d.slice(5))+'</small>' : '') + '</button>';
+      }).join('');
+    }else{
+      h += '<p class="note">Obsidian のタスクはまだ取り込んでいません。</p>';
+    }
+    h += '<button class="btn ghost" onclick="ftFromClip()">📋 Obsidian のタスクを取り込む（Task Sorter でコピーしたもの）</button>';
+    h += '<input class="inp" type="text" id="ask_text" placeholder="一覧に無いときだけ：やることを1行（空でも始められます）">';
+    h += '<label>どれくらい（押すとすぐ始まります）</label>'
        + '<div class="row" style="margin-bottom:8px">'
-       + [10,15,25,40].map(function(m){ return '<button class="btn ghost" style="margin-top:0" onclick="askMin('+m+')">'+m+'分</button>'; }).join('')
+       + [10,15,25,40].map(function(m){ return '<button class="btn" style="margin-top:0" onclick="askGo('+m+')">'+m+'分</button>'; }).join('')
        + '</div>'
-       + '<div class="stline"><input class="inp stsec" type="number" inputmode="numeric" id="ask_min" value="15"><span class="stunit">分</span>'
-       + '<button class="btn" style="margin-top:0;flex:1" onclick="askStart()">これで始める</button></div>'
-       + '<p class="note">書かずに始めても構いません。<b>1つずつ決めるほうが、動き出しやすいときのための形です。</b><br>'
-       + '休憩までの残りを超える長さを入れても、休憩までで止まります。</p>';
+       + '<p class="note">休憩までの残りを超える長さを選んでも、休憩までで止まります。考えているあいだ、時計は止まっています。</p>';
+    h += aiButton();
     h += '<button class="btn ghost" onclick="focusFinish()">ここで終える</button>';
     h += '<button class="btn link" onclick="focusLeave()">やめて最初に戻る</button>';
     return h;
@@ -6910,6 +7171,7 @@ function viewFocus(){
        + (fLabels.length>1 ? '<p class="note" style="margin:7px 0 0">ここまで： '+esc(fLabels.slice(0,-1).join(" → "))+'</p>' : '')
        + '</div>';
   }
+  h += ftPanel(); h += aiButton();   /* v86 */
   if(fMode==="rotate" && fList.length){
     h += '<div class="card"'+(flash?' style="border-color:#e0a86a"':'')+'>'
        + '<p class="note" style="margin:0">いま</p>'
@@ -6983,6 +7245,7 @@ function viewFocus(){
 function viewFocusDone(){
   var full = fSeg >= fSegs.length;
   var h = '<h1>'+(full ? '休憩です' : 'ここまで')+'</h1>';
+  h += ftDoneTop();   /* v86 */
   h += '<div class="card"><div class="big ok">'+mmss(fElapsed())+'</div>'
      + '<div class="bigsub">'+SLOTN[fSlotNow()]+' ・ 区切り '+Math.min(fSeg,fSegs.length)+' / '+fSegs.length+'</div></div>';
   if(full) h += '<div class="hint">'+durLabel(fBlockSec())+'たちました。<b>ここで一度離れてください。</b>次のブロックは、戻ってきてからまた押せます。</div>';
@@ -7698,6 +7961,63 @@ function unarchiveSet(id){
   var s = setOf(id); if(!s) return;
   s.archived = false;
   armed = null; save(); render();
+}
+/* v85: ホームでセットを選んで、アーカイブ・タブ（タグ）を変える */
+function homeSelBar(lst){
+  if(!homeSel){
+    return '<div class="row" style="justify-content:flex-end;margin:-4px 0 8px">'
+      + '<button class="btn ghost" style="margin-top:0;width:auto;flex:none;padding:6px 12px" onclick="homeSelToggle()">☑️ 選んで アーカイブ・タブ変更</button></div>';
+  }
+  var ids = homeSelIds();
+  var h = '<div class="card" style="border:1px solid #e0a86a;margin-bottom:10px">'
+    + '<b>☑️ 選んだセット '+ids.length+'件</b>'
+    + '<p class="note" style="margin:4px 0 8px">下の一覧を押して選びます（選んでいるあいだは、押してもセットは始まりません）。</p>';
+  if(ids.length){
+    h += '<button class="btn" style="margin-top:0" onclick="homeSelArchive()">🗄 アーカイブする（'+ids.length+'件）</button>';
+    if(DB.scenes.length){
+      h += '<div class="row" style="flex-wrap:wrap;gap:6px;margin-top:8px">'
+        + DB.scenes.map(function(sc){
+            var all = ids.every(function(id){ var s = setOf(id); return s && hasTag(s, sc.tag); });
+            return '<button class="btn ghost" style="margin-top:0;width:auto;flex:none;padding:6px 12px'
+              + (all?';border:1px solid #e0a86a;color:#e0a86a':'')+'" onclick="homeSelTag(\''+sc.id+'\')">'
+              + (all ? '✓ '+esc(sc.name)+'（外す）' : '＋ '+esc(sc.name)+'に入れる')+'</button>';
+          }).join('')
+        + '</div>'
+        + '<p class="note" style="margin:6px 0 0">🏷 ＋ を押すと、選んだセットをそのタブに入れます。✓ を押すと、そのタブから外します。</p>';
+    }
+  }
+  h += '<p class="note" style="margin:6px 0 0">アーカイブは消すのではありません。「セットを編集」→「📦 アーカイブ済みを表示する」から戻せます。</p>'
+    + '<button class="btn ghost" onclick="homeSelToggle()">選ぶのをやめる</button></div>';
+  return h;
+}
+function homeSelToggle(){ homeSel = homeSel ? null : {}; render(); }
+function homeSelPick(id){
+  if(!homeSel) return;
+  if(homeSel[id]) delete homeSel[id]; else homeSel[id] = true;
+  render();
+}
+function homeSelIds(){
+  if(!homeSel) return [];
+  return Object.keys(homeSel).filter(function(id){ var s = setOf(id); return homeSel[id] && s && !s.archived; });
+}
+function homeSelArchive(){
+  var ids = homeSelIds(); if(!ids.length) return;
+  var n = 0;
+  ids.forEach(function(id){ var s = setOf(id); if(!s || s.rescue) return; s.archived = true; n++; });
+  homeSel = {}; armed = null; save(); render();
+  alertLess('🗄 '+n+'件をアーカイブしました。「セットを編集」→「📦 アーカイブ済みを表示する」から戻せます。');
+}
+function homeSelTag(sceneId){
+  var sc = DB.scenes.filter(function(x){ return x.id===sceneId; })[0]; if(!sc || !sc.tag) return;
+  var ids = homeSelIds(); if(!ids.length) return;
+  var all = ids.every(function(id){ var s = setOf(id); return s && hasTag(s, sc.tag); });
+  ids.forEach(function(id){
+    var st = setOf(id); if(!st) return;
+    var a = tagsOf(st), i = a.indexOf(sc.tag);
+    if(all){ if(i>=0) a.splice(i,1); } else if(i<0){ a.push(sc.tag); }
+    st.tags = a.join(", ");
+  });
+  save(); render();
 }
 function alertLess(msg){
   /* ダイアログを出さずにメッセージを見せる（iOSでダイアログが画面を塞ぐのを避ける） */
