@@ -1621,7 +1621,7 @@ function parkBtn(){
 
 /* --- 状態 --- */
 /* v27: 版の表示（ホーム最下部）。中身を変えたら、ここも必ず上げる。 */
-var APPVER = "切り替えルーティン v86 ・ 2026-11-05";
+var APPVER = "切り替えルーティン v87 ・ 2026-11-05";
 var view = "home";
 var curId = null;
 var startAt = 0;
@@ -6227,13 +6227,17 @@ function ftEndSeg(){
   fSegs[fSeg] = Math.max(0, Math.floor(fElapsed() - prev));
   render();
 }
-function ftAct(kind){
-  var x = ftCur(); if(!x) return;
+function ftAct(kind){ ftActX(ftCur(), kind, true); }
+/* v87: 終わりの画面からも同じ操作（inBlock=false のときは区切りを終えない） */
+function ftActI(i, kind){ ftInit(); var x = DB.focus.tasks[i]; if(x) ftActX(x, kind, false); }
+function ftActX(x, kind, inBlock){
+  if(!x) return;
   if(kind === "done"){
     if(!confirm("「"+x.t+"」を完了にしますか？\n（Obsidian へは、ブロックの終わりにまとめて戻します）")) return;
     ftOp({op:"done", p:x.p, t:x.t}); x.done = true; save();
     ftMsg = "✅ 「"+x.t+"」を完了にしました"; ftMsgAt = Date.now();
-    ftEndSeg(); return;
+    if(inBlock) ftEndSeg(); else render();
+    return;
   }
   if(kind === "split"){
     var r = prompt("✂️ 「"+x.t+"」を分けた小さいタスクを、「、」か改行で区切って入れてください", "");
@@ -6248,7 +6252,7 @@ function ftAct(kind){
     Array.prototype.splice.apply(DB.focus.tasks, [at+1, 0].concat(kids));
     save();
     ftMsg = "✂️ "+names.length+"件に分けました。次の区切りで選べます。"; ftMsgAt = Date.now();
-    if(confirm("いまの区切りをここで終えて、分けたタスクから次を選びますか？\n（キャンセル＝このまま続ける）")){ ftEndSeg(); return; }
+    if(inBlock && confirm("いまの区切りをここで終えて、分けたタスクから次を選びますか？\n（キャンセル＝このまま続ける）")){ ftEndSeg(); return; }
     render(); return;
   }
   if(kind === "rename"){
@@ -6327,8 +6331,40 @@ function ftSent(){
 function ftDoneTop(){
   return '<button class="btn big" onclick="focusContinue()">▶ 休憩なしで続ける</button>'
        + '<p class="note">いまの回は記録したまま、同じ長さの次の集中ブロックをすぐ始めます。</p>'
+       + ftDoneTasks()
        + ftSendBtn();
 }
+/* v87: このブロックで選んだタスク（＋そこから ✂️ で分けた子）。✅ 完了／✂️ 切り分け を出す */
+function ftBlockTasks(){
+  var seen = [];
+  fTasks.forEach(function(x){ if(x && seen.indexOf(x) < 0) seen.push(x); });
+  ftInit();
+  DB.focus.tasks.forEach(function(y){
+    if(y.parent && seen.indexOf(y) < 0 && seen.some(function(s){ return s.t === y.parent; })) seen.push(y);
+  });
+  return seen;
+}
+function ftDoneTasks(){
+  var L = ftBlockTasks(); if(!L.length) return "";
+  var h = '<div class="sec">このブロックのタスク</div>';
+  L.forEach(function(x){
+    var i = DB.focus.tasks.indexOf(x);
+    h += '<div class="card" style="padding:10px 12px"><div style="font-weight:700;line-height:1.5;margin-bottom:6px">'
+       + (x.parent ? '↳ ' : '') + esc(x.t) + (x.done ? ' <small style="font-weight:400">✅ 完了にしました</small>' : '') + '</div>';
+    if(!x.done && i >= 0){
+      h += '<div class="row">'
+         + '<button class="btn ghost" style="margin-top:0" onclick="ftActI('+i+',\'done\')">✅ 完了</button>'
+         + '<button class="btn ghost" style="margin-top:0" onclick="ftActI('+i+',\'split\')">✂️ 切り分け</button>'
+         + '</div>';
+    }
+    h += '</div>';
+  });
+  return h + ftMsgHtml();
+}
+/* v87（ご依頼「休憩に移るときに出るセットも、特定のタグにしたものだけを表示できるように」）:
+   終わりの画面でタブ（タグ）を選ぶと、そのタグのセットだけを出す。選んだものは DB.focus.breakTag に残し、次回も同じ。 */
+var brkTagsCur = [];
+function breakTagSet(i){ DB.focus.breakTag = (i < 0) ? "" : (brkTagsCur[i] || ""); save(); render(); }
 function focusContinue(){
   var el = document.getElementById("f_memo");
   if(el){ fMemo = el.value.trim(); if(fIdx !== null && DB.log[fIdx]){ DB.log[fIdx].memo = fMemo; save(); } }
@@ -7250,9 +7286,8 @@ function viewFocusDone(){
      + '<div class="bigsub">'+SLOTN[fSlotNow()]+' ・ 区切り '+Math.min(fSeg,fSegs.length)+' / '+fSegs.length+'</div></div>';
   if(full) h += '<div class="hint">'+durLabel(fBlockSec())+'たちました。<b>ここで一度離れてください。</b>次のブロックは、戻ってきてからまた押せます。</div>';
   else h += '<div class="hint">途中で終えました。<b>0か1かではありません。</b>次の合図でまた押せます。</div>';
-  h += '<label>このブロックで出せたもの（任意・1行）</label>'
-     + '<input class="inp" type="text" id="f_memo" value="'+esc(fMemo)+'" placeholder="例）企画書の骨子まで" onchange="focusMemo()">'
-     + '<p class="note">空のままで構いません。書いたものは記録の中にだけ残ります（Obsidianには入りません）。</p>';
+  /* v87（2026-11-05 ご依頼「このブロックで出せたもの、は削除。代わりにタスクから完了・切り分けを出して」）:
+     1行メモの欄は外した（記録の memo は空のまま。過去の記録の memo は消していない）。代わりに、このブロックで扱ったタスクを並べる。 */
   /* v12: 休憩に移るルーティンを、このアプリの中のセットから選ぶ。
      🛟（崩れたとき用）は「崩れた」ボタンの飛び先なので、ここには並べない。 */
   var cands = normals();
@@ -7269,8 +7304,21 @@ function viewFocusDone(){
     var qIds = quick.map(function(x){ return x.id; });
     cands = cands.filter(function(x){ return qIds.indexOf(x.id) < 0; });
   }
+  /* v87: タグで絞る */
+  brkTagsCur = [];
+  cands.forEach(function(x){ tagsOf(x).forEach(function(t){ if(brkTagsCur.indexOf(t) < 0) brkTagsCur.push(t); }); });
+  var btag = DB.focus.breakTag || "";
+  if(btag && brkTagsCur.indexOf(btag) < 0) btag = "";
+  if(brkTagsCur.length){
+    h += '<div class="sec">休憩に移る</div><div class="row" style="flex-wrap:wrap;gap:6px">'
+       + '<button class="btn ghost" style="margin-top:0;flex:0 0 auto;padding:6px 12px'+(!btag?';border:1px solid #e0a86a;color:#e0a86a':'')+'" onclick="breakTagSet(-1)">すべて</button>'
+       + brkTagsCur.map(function(t, i){ var on = (t === btag);
+           return '<button class="btn ghost" style="margin-top:0;flex:0 0 auto;padding:6px 12px'+(on?';border:1px solid #e0a86a;color:#e0a86a':'')+'" onclick="breakTagSet('+i+')">'+esc(t)+'</button>'; }).join('')
+       + '</div>';
+    if(btag) cands = cands.filter(function(x){ return hasTag(x, btag); });
+  }
   if(cands.length){
-    h += '<div class="sec">休憩に移る</div>';
+    if(!brkTagsCur.length) h += '<div class="sec">休憩に移る</div>';
     var lastId = DB.focus.lastBreak;
     var ordered = cands.filter(function(x){ return x.id===lastId; })
                        .concat(cands.filter(function(x){ return x.id!==lastId; }));
