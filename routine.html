@@ -1621,7 +1621,7 @@ function parkBtn(){
 
 /* --- 状態 --- */
 /* v27: 版の表示（ホーム最下部）。中身を変えたら、ここも必ず上げる。 */
-var APPVER = "切り替えルーティン v88 ・ 2026-11-09";
+var APPVER = "切り替えルーティン v89 ・ 2026-11-10";
 var view = "home";
 var curId = null;
 var startAt = 0;
@@ -6154,6 +6154,30 @@ var fCap = 0, fLabels = [], fAsking = false;
    ④ 🤖 AIの返事を確かめるタイマー（5・10・15・30分・1本だけ・押すまで画面の縁が点滅）。 */
 var fTasks = [], fAskSel = -1, ftMsg = "", ftMsgAt = 0;
 var fPlanned = false;   /* v88: 「枠を決めて、計画して始める」で始めたブロックか */
+/* v89（指示_2026-11-10・🤖 AIへ 10:38）: その都度・計画のモードで、区切りの時間が来ても勝手に次へ進まない。
+   fOver   … いま「⏩ 延長して続ける／✂️ ここで切り分ける」の確認待ちか（このあいだ時計は止めず、いまのタスクの延長として数える）
+   fClosed … 区切りごとに「自分で締めた」印（締めた区切りは確認を出さずに次へ／次を聞く） */
+var fOver = false, fClosed = [];
+function fTakeFromNext(sec){
+  var left = Math.max(0, sec);
+  for(var k = fSeg+1; k < fSegs.length && left > 0; k++){ var can = Math.max(0, (fSegs[k]||0) - 60), d = Math.min(can, left); fSegs[k] -= d; left -= d; }
+  return sec - left;
+}
+/* ⏩ 延長して続ける：いまの区切りを「いま＋m分」までにする。計画つきなら、延びた分は後ろのタスクから差し引く（各1分は残す）。休憩までは超えない */
+function overExt(m){
+  if(!fOver) return;
+  var e = fElapsed(), prev = fSeg > 0 ? fSegEnd(fSeg-1) : 0, before = fSegs[fSeg] || 0;
+  var len = Math.min((e - prev) + m*60, Math.max(60, fCap - prev));
+  fSegs[fSeg] = len;
+  var add = len - before, took = fPlanned ? fTakeFromNext(add) : 0;
+  fOver = false; fFlash = Date.now();
+  ftMsg = "⏩ 「" + (fLabels[fSeg]||"") + "」を " + m + "分延長しました"
+    + (fPlanned && fSeg+1 < fSegs.length ? (took >= add - 30 ? "（延びた分は後ろのタスクから差し引きました）" : "（後ろのタスクから引ききれない分は、休憩までで止まります）") : "");
+  ftMsgAt = Date.now(); render();
+}
+/* ✂️ ここで切り分ける：いまの経過で区切りを締めて、計画の次へ（無ければ「次は何を」）。延長して使った分は後ろのタスクから差し引く */
+function overCut(){ if(fOver) ftEndSeg(); }
+
 var FT_RET_PATH = "10_Action/🎯 集中ブロックからの戻し.md";
 function ftInit(){ if(!DB.focus.tasks) DB.focus.tasks = []; if(!DB.focus.ops) DB.focus.ops = []; }
 function ftImportText(txt){
@@ -6230,6 +6254,15 @@ function ftEndSeg(){
   fSegs[fSeg] = Math.max(0, Math.floor(fElapsed() - prev));
   /* v88（提案_2026-11-09 ④）: 早く終わった分は、計画の次のタスクに足す。最後なら枠の「余り」に残り、いつもの「次は何を」で選べる */
   var saved = Math.max(0, planned - fSegs[fSeg]);
+  /* v89: 締めた印を付け、確認待ちを解く。延長して使った分（予定より長くかかった分）は後ろのタスクから差し引く */
+  fClosed[fSeg] = true; fOver = false;
+  var over = Math.max(0, fSegs[fSeg] - planned);
+  if(fPlanned && over >= 30 && fSeg + 1 < fSegs.length){
+    fTakeFromNext(over);
+    ftMsg = "✂️ ここで切り分けました（延長した " + Math.round(over/60) + "分は、後ろのタスクから差し引きました）"; ftMsgAt = Date.now();
+  }else if(over >= 30){
+    ftMsg = "✂️ ここで切り分けました（" + Math.round(over/60) + "分延長しました）"; ftMsgAt = Date.now();
+  }
   if(fPlanned && saved >= 30 && fSeg + 1 < fSegs.length){
     fSegs[fSeg+1] += saved;
     ftMsg = "⏱ 早く終わった " + Math.round(saved/60) + "分を、次の「" + (fLabels[fSeg+1]||"") + "」に足しました"; ftMsgAt = Date.now();
@@ -6948,6 +6981,7 @@ function focusBegin(mode, plan){
   fSlot = fSlotNow();
   fLabels = []; fAsking = false;
   fTasks = []; fAskSel = -1;   /* v86 */
+  fOver = false; fClosed = [];   /* v89 */
   if(mode === "ask"){
     /* v15: 区切りは先に決めない。1つずつ、そのときに決める。
        上限（休憩まで）だけ時間帯から決めておく。 */
@@ -6993,7 +7027,7 @@ function askGo(m){
   fLabels.push(x ? x.t : (t || ("区切り" + fSegs.length)));
   fTasks[fSegs.length - 1] = x;
   fSeg = fSegs.length - 1; fAskSel = -1;
-  fAsking = false;
+  fAsking = false; fOver = false;   /* v89 */
   fUnpause(false);        /* 考えていた時間は「ずれ」に数えない */
   fFlash = Date.now();
   render();
@@ -7006,6 +7040,18 @@ function askMin(m){ askGo(m); }
 function focusTick(){
   if(fPaused || fDone || fAsking) return;
   var e = fElapsed(), cum = 0, idx = -1;
+  /* v89: その都度・計画のモードは、区切りの時間が来ても自分では次へ進まない。
+     「⏩ 延長して続ける／✂️ ここで切り分ける」を聞き、答えるまではいまのタスクの延長として数える（時計は止めない）。
+     休憩まで（fCap）に届いたら、いつもどおりブロックを終える。 */
+  if(fMode==="ask" && fSeg < fSegs.length && !fClosed[fSeg] && e >= fSegEnd(fSeg) && e < fCap){
+    if(!fOver){
+      fOver = true; fFlash = Date.now();
+      fChime(false); flashScreen();
+      notifyNow("⏰ 区切りの時間です",
+        "「" + (fLabels[fSeg]||"いまの区切り") + "」を延長して続けるか、ここで切り分けるか決めてください（決めるまでは延長として数えます）");
+    }
+    return;
+  }
   for(var i=0;i<fSegs.length;i++){ cum += fSegs[i]; if(e < cum){ idx = i; break; } }
   /* v15: その都度モードは、区切りが終わるたびに止めて次を聞く。
      上限（休憩まで）に届いたときだけ、ふつうに終わる。 */
@@ -7048,6 +7094,7 @@ function setTitle(t){ try{ document.title = t ? t : TITLE0; }catch(e){} }
 function focusTitle(){
   if(!fStart || fDone){ setTitle(""); return; }
   if(fAsking){ setTitle("▶ 次を決める — 集中ブロック"); return; }
+  if(fOver){ setTitle("⏰ 延長 +" + mmss(Math.max(0, fElapsed() - fSegEnd(fSeg))) + " — 延長か切り分けか"); return; }   /* v89 */
   if((Date.now() - fFlash) < 8000){ setTitle("▶ 切り替え！ — 集中ブロック"); return; }
   setTitle(mmss(fLeftAll()) + (fPaused ? " ⏸" : "") + " — 休憩まで");
 }
@@ -7141,6 +7188,7 @@ function focusReset(){
   fromFocus=false; fShift=0; fCap=0; fLabels=[]; fAsking=false;
   fTasks=[]; fAskSel=-1;   /* v86 */
   fPlanned=false;          /* v88 */
+  fOver=false; fClosed=[];  /* v89 */
 }
 function logFocus(){
   var rec = { t:fStart, id:"focus", icon:"🎯",
@@ -7407,6 +7455,24 @@ function viewFocus(){
           ? '<p class="note" style="margin:0">次は <b>'+esc(fLabels[fSeg+1]||"")+'</b>（'+Math.round((fSegs[fSeg+1]||0)/60)+'分）。早く終わったら ✅ か「次の区切りへ」：余った分は次に足します。</p>'
           : '<p class="note" style="margin:0">終わったら、次に何をするかをまた聞きます。</p>')
        + (fLabels.length>1 ? '<p class="note" style="margin:7px 0 0">ここまで： '+esc(fLabels.slice(0,-1).join(" → "))+'</p>' : '')
+       + '</div>';
+  }
+  /* v89: 区切りの時間が来たら、ここで「延長して続ける／切り分ける」を決める。決めるまでは次へ進まない */
+  if(fMode==="ask" && fOver){
+    var ov = Math.max(0, e - fSegEnd(fSeg)), curX = fTasks[fSeg];
+    h += '<div class="card" style="border-color:#e0a86a;background:#211d18">'
+       + '<div style="font-size:13px;color:#e0a86a;margin:0">⏰ 予定の時間が来ました</div>'
+       + '<div style="font-size:17px;font-weight:700;margin:3px 0 6px;line-height:1.5">「'+esc(fLabels[fSeg]||"いまの区切り")+'」</div>'
+       + '<div class="big" style="font-size:34px">+'+mmss(ov)+'</div>'
+       + '<div class="bigsub">延長中（決めるまで、このタスクの時間として数えています。次へは進みません）</div>'
+       + '<label>⏩ 延長して続ける</label>'
+       + '<div class="row" style="margin-bottom:6px">'
+       + [5,10,15,25].map(function(m){ return '<button class="btn" style="margin-top:0" onclick="overExt('+m+')">+'+m+'分</button>'; }).join('')
+       + '</div>'
+       + '<button class="btn big" onclick="overCut()">✂️ ここで切り分けて'+(fPlanned && fSeg+1 < fSegs.length ? '「'+esc(fLabels[fSeg+1]||"")+'」へ' : '次を選ぶ')+'</button>'
+       + (curX ? '<div class="row" style="margin-top:6px"><button class="btn ghost" style="margin-top:0" onclick="ftAct(\'done\')">✅ 終わった</button>'
+               + '<button class="btn ghost" style="margin-top:0" onclick="ftAct(\'split\')">✂️ 残りを小さく分ける</button></div>' : '')
+       + (fPlanned ? '<p class="note" style="margin:7px 0 0">延長した分は、後ろのタスクの時間から差し引きます。休憩までの残りは変わりません。</p>' : '')
        + '</div>';
   }
   h += ftPanel(); h += aiButton();   /* v86 */
