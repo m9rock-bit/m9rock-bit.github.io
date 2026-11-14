@@ -356,7 +356,7 @@ const CARDIO_DEF={
 const RATES=["かるすぎる","ちょうどよい","きつすぎる"];
 /* v9（2026-09-05）: 版の表示（ホーム最下部）。開いて1秒で新旧を見分けるため。
    中身を変えたら、ここも必ず上げる。 */
-const APPVER="B.M.C. ジム v31 ・ 2026-10-27";
+const APPVER="B.M.C. ジム v33 ・ 2026-11-14";
 const NORM=30;                    /* グラフの換算基準（30分あたり） */
 const HARDS=["余裕","ちょうどよい","きつい"];
 
@@ -1467,12 +1467,14 @@ function cLoop(){
 
    ★通知の音は消音スイッチに従う（画面の読み上げは従わない）。
      消音にして走る日は、この合図は鳴らない。 */
-function cGuideText(plan){
+function cGuideText(plan, from){
   /* 区間 i の長さぶん待って、区間 i+1 の内容を案内する。最後は走り終わり。
-     いちばん最初の区間は、アプリの画面を見て始めるので案内しない。 */
+     いちばん最初の区間は、アプリの画面を見て始めるので案内しない。
+     v33: from={i,left} を渡すと、いまの区間の残り秒から始める（掛け直し用）。本文の形は変えていない。 */
   var p=plan||[], out=[], gk=kindOf(cRun||curProg());   /* v26 */
-  for(var i=0;i<p.length;i++){
-    var sec=Math.max(1, Math.round((+p[i].min||0)*60));
+  var i0=from?from.i:0;
+  for(var i=i0;i<p.length;i++){
+    var sec=Math.max(1, Math.round((from&&i===i0) ? from.left : (+p[i].min||0)*60));
     var nx=p[i+1];
     out.push(sec+"|"+(nx ? (isBike(gk) ? ("レベル"+lvTxt(nx.sp)+" 回転数"+Math.round(+nx.inc||0)) : ("傾斜"+n1(nx.inc)+" 速度"+n1(nx.sp))) : "走り終わりです"));
   }
@@ -1491,10 +1493,74 @@ function cGuideArm(plan){
     return true;
   }catch(e){ return false; }
 }
+/* v33: 掛け直し。★必ず指で押した操作の中から呼ぶ（画面がショートカットAppへ飛ぶ）。
+   ショートカット側が「最初に入力をファイルへ保存→待つたびにファイルと自分の入力を比べ、違えば止まる」形に
+   直してある前提（設定の「ショートカットを掛け直しに対応させた」＝cSet().guideRe）。直していないと古い案内も鳴り続けて二重になる。 */
+function cGuideRearm(){
+  if(!cRun || !cSet().guide || !cSet().guideRe) return false;
+  var q=cPos(); if(q.done) return false;
+  var nm=String(cSet().scName||"").trim(); if(!nm) return false;
+  var txt=cGuideText(cRun.plan, {i:q.i, left:q.left});
+  if(!txt) return false;
+  cRun.reArmAt=Date.now(); cSaveRun();
+  try{ location.href="shortcuts://run-shortcut?name="+encodeURIComponent(nm)+"&input=text&text="+encodeURIComponent(txt); return true; }
+  catch(e){ return false; }
+}
+/* ===== v33: 間違えて「終わった（記録する）」を押したときの再開 =====
+   ・cFinish の時点の cRun を丸ごと控える（finAt＝押した時刻）。戻ると「押した時点で止まった」状態にする
+     （押してから戻るまでは時間に入れない）。▶ 再開で時計が動き、案内も残り時間から掛け直す（cPause）。
+   ・保存したあとも30分以内なら有酸素のホームから戻れる（DB.settings.cardio.lastBak）。その記録は取り消す。
+     ★自動送信で記録ハブがすでに送っていたら、日次ノートの短い行は残る（アプリからは消せない）ので、その旨を出す。 */
+function cResume(bak){
+  if(!bak) return;
+  cRun=cClone(bak);
+  if(cRun.segW) delete cRun.segW.end;
+  if(cRun.chimed) delete cRun.chimed.end;
+  if(!cRun.paused){ cRun.paused=true; cRun.pauseAt=bak.finAt||Date.now(); }
+  cRun.resumed=true; delete cRun.finAt;
+  cSaveRun();
+  if(navigator.wakeLock&&navigator.wakeLock.request){
+    navigator.wakeLock.request("screen").then(function(w){cWake=w}).catch(function(){});
+  }
+  cLoop(); go("crun");
+}
+function cinBack(){
+  if(!cBuf || !cBuf.bak) return;
+  var b=cBuf.bak; cBuf=null; cResume(b);
+}
+var cUndoArmed=false;
+function cLastBak(){
+  var L=cSet().lastBak; if(!L || !L.bak) return null;
+  if(Date.now()-(L.savedAt||0) > 30*60*1000) return null;
+  if(!(DB.cardio||[]).some(function(c){ return c && c.date===L.date; })) return null;
+  return L;
+}
+function cHubSent(id){
+  try{ var o=JSON.parse(localStorage.getItem("bmc_log_hub_v1")||"{}"); return Array.isArray(o.sent) && o.sent.indexOf(id)>=0; }catch(e){ return false; }
+}
+function cUndoSave(){
+  var L=cLastBak(); if(!L) return;
+  if(!cUndoArmed){ cUndoArmed=true; render(); return; }
+  cUndoArmed=false;
+  DB.cardio=(DB.cardio||[]).filter(function(c){ return !(c && c.date===L.date); });
+  var b=L.bak; delete cSet().lastBak; save();
+  cResume(b);
+}
+function cUndoCard(){
+  var L=cLastBak(); if(!L) return "";
+  var t=new Date(L.savedAt), hm=t.getHours()+":"+String(t.getMinutes()).padStart(2,"0");
+  var sent=cHubSent("c"+L.date);
+  return `<div class="card" style="border-color:#3a5a7a">
+    <button class="btn ${cUndoArmed?"":"ghost"}" style="margin-top:0" onclick="cUndoSave()">${cUndoArmed?"もう一度押すと、この記録を取り消して戻ります":"▶ 直前の回（"+hm+" 保存）に戻る"}</button>
+    <p class="note" style="margin:6px 0 0">間違えて終えたときだけ使ってください。押した時点で止まった状態で走行画面に戻ります（保存から30分まで）。
+    ${sent?`<br>⚠️ <strong>この回はもうObsidianへ送ってあります。</strong>戻ってからもう一度保存すると、日次ノートに短い行と新しい行の2本が残ります。<strong>短いほうの「有酸素」の行（と区間の行）を日次ノートで消してください。</strong>`:""}</p>
+  </div>`;
+}
 function cStart(){
   /* 区間の切り替え音・終了音は setInterval から鳴らすので、
      iOSでは押した瞬間に音を開通させておかないと無音になる（同日のv6と同じ理由）。 */
   unlockAudio();
+  delete cSet().lastBak;   /* v33: 新しく走り出したら、前の回へ戻る口は閉じる */
   cRun={start:Date.now(), plan:cClone(cPlan()), blocks:cClone(cBlocks()),
         progId:(curProg()||{}).id, progName:(curProg()||{}).name||"",
         kind:kindOf(curProg()),   /* v26 */
@@ -1591,6 +1657,7 @@ function cPause(){
     cRun.lost += d;
     cRun.pAcc = (+cRun.pAcc||0) + d;   /* v15: 実時間から抜くぶん */
     cRun.paused=false;
+    if(cRun.resumed){ cRun.resumed=false; cSaveRun(); render(); cGuideRearm(); return; }   /* v33 */
   }
   else { cRun.pauseAt=Date.now(); cRun.paused=true; }
   cSaveRun(); render();
@@ -1615,8 +1682,53 @@ function cAdj(field, dir){
   var v=kClamp(field, (+s[field]||0)+step*dir, rk);
   var was=+s[field]||0;                      /* v15: 変える前の値 */
   s[field]=Math.round(v*10)/10;
-  if(s[field]!==was) cLog({i:q.i, lb:s.lb||"", f:field, from:was, to:s[field]});
+  if(s[field]!==was){ cLog({i:q.i, lb:s.lb||"", f:field, from:was, to:s[field]}); cProp(q.i, field, s[field]-was); }
   cSaveRun(); render();
+}
+/* ===== v33（2026-11-14・チャット「セットの中で傾斜や速度を変えたら、残りのセットも変更後の設定に。毎回調整するのがおっくう」）=====
+   仕様書: claude_personal/specialists/B.M.C/仕様書_2026-11-14_2_有酸素の変更を残りのセットと次回にも反映.md
+   ・変えた幅（delta）を「同じ種類の残りの区間」に足す（同じ値にそろえるのではない＝プログラムの上り下がりの形を保つ）。
+     セット(work)→このあとのセット全部（別ブロックも）／インターバル→同じブロックの同じ区切り名（速い・ゆっくり）だけ／
+     ウォームアップ・クールダウン・途中で足した区間（"追加"）→自分だけ（＝いままでと同じ）。
+   ・反映は cRun.plan だけ（既定は記録画面の「次回もこの設定で」で書き戻す）。edits には auto:true の印で残す。
+   ・直後に1行と「この区間だけにする」（cRun.lastProp を戻す）。 */
+function cSegBase(lb){ return String(lb||"").replace(/\s+\d+\/\d+$/,""); }
+function cSameKind(a,b){
+  if(!a||!b) return false;
+  if(a.lb==="追加" || b.lb==="追加") return false;
+  if(a.bt==="work") return b.bt==="work";
+  if(a.bt==="interval") return b.bt==="interval" && b.b===a.b && cSegBase(b.lb)===cSegBase(a.lb);
+  return false;
+}
+function cProp(i, field, delta){
+  if(!cRun || !delta) return;
+  delta=Math.round(delta*10)/10; if(!delta) return;
+  var p=cRun.plan, a=p[i], rk=kindOf(cRun), items=[];
+  for(var j=i+1;j<p.length;j++){
+    if(!cSameKind(a,p[j])) continue;
+    var was=+p[j][field]||0, nv=Math.round(kClamp(field, was+delta, rk)*10)/10;
+    if(nv===was) continue;
+    p[j][field]=nv; items.push({j:j, from:was});
+    cLog({i:j, lb:p[j].lb||"", f:field, from:was, to:nv, auto:true});
+  }
+  cRun.lastProp = items.length ? {i:i, f:field, d:delta, items:items, t:Date.now()} : null;
+}
+function cPropUndo(){
+  if(!cRun || !cRun.lastProp) return;
+  var L=cRun.lastProp, p=cRun.plan;
+  L.items.forEach(function(it){
+    var s=p[it.j]; if(!s) return;
+    var was=+s[L.f]||0; s[L.f]=it.from;
+    cLog({i:it.j, lb:s.lb||"", f:L.f, from:was, to:it.from, auto:true, undo:true});
+  });
+  cRun.lastProp=null; cSaveRun(); render();
+}
+function cPropLine(){
+  var L=cRun&&cRun.lastProp; if(!L) return "";
+  if(Date.now()-L.t>30000) return "";
+  var nm=(L.f==="sp") ? (isBike()?"負荷レベル":"速度") : (isBike()?"目標回転数":"傾斜");
+  return `<div class="card" style="padding:9px 12px;border-color:#3a5a7a"><p class="note" style="margin:0">残りの同じ区間 ${L.items.length} つにも ${nm} ${L.d>0?"+":""}${n1(L.d)} を反映しました。</p>
+    <button class="btn ghost" style="margin-top:6px;padding:7px" onclick="cPropUndo()">この区間だけにする</button></div>`;
 }
 /* ===== v14（2026-09-08 ご記入・2026-09-09 実装）======================
    ②「実施中に新しい区間を足したい」③「速度・傾斜を直接入れたい」の2つ。
@@ -1676,7 +1788,7 @@ function cPadSave(kind){
     v=kClamp(kind, v, kindOf(cRun));   /* v26 */
     var was=+s[kind]||0;                      /* v15: 変える前の値 */
     s[kind]=Math.round(v*10)/10;
-    if(s[kind]!==was) cLog({i:q.i, lb:s.lb||"", f:kind, from:was, to:s[kind]});
+    if(s[kind]!==was){ cLog({i:q.i, lb:s.lb||"", f:kind, from:was, to:s[kind]}); cProp(q.i, kind, s[kind]-was); }   /* v33 */
     cSaveRun(); cPadClose(); render(); return;
   }
   var mn=g("min"), sp=g("sp"), ic=g("inc");
@@ -1729,11 +1841,13 @@ function cFinish(){
   if(min===0 && sec===0){ min=1; }
   /* v15: 最後の区間の終わりにも印を付けてから畳む（終了ボタンで抜けた回も
      いちばん後ろの区間の長さが出るようにするため）。 */
+  var bak=null;
+  if(cRun){ bak=cClone(cRun); bak.finAt=Date.now(); }   /* v33: 押す前の状態（end の印を付ける前）を控える */
   if(cRun){ if(!cRun.segW) cRun.segW={"s0":0}; if(cRun.segW.end==null) cRun.segW.end=cWall(); }
   var seed=cRun?{min:min, sec:sec, plan:cClone(cRun.plan), blocks:cClone(cRun.blocks),
                  progId:cRun.progId, progName:cRun.progName, rates:cClone(cRun.rates||{}),
                  plan0:cClone(cRun.plan0||cRun.plan), edits:cClone(cRun.edits||[]),
-                 segW:cClone(cRun.segW||{}), kind:kindOf(cRun)}
+                 segW:cClone(cRun.segW||{}), kind:kindOf(cRun), bak:bak}
                :{min:min, sec:sec, plan:cClone(cPlan()), blocks:cClone(cBlocks()),
                  progId:(curProg()||{}).id, progName:(curProg()||{}).name||"", rates:{},
                  plan0:null, edits:[], segW:null, kind:kindOf(curProg())};
@@ -1806,6 +1920,9 @@ function viewCRun(){
     </div>`}
   </div>
   </div>
+  ${q.done?"":cPropLine()}
+  ${(!q.done && !cRun.paused && cSet().guide && cSet().guideRe)?`<button class="btn ghost" style="margin-top:0" onclick="cGuideRearm()">🔔 案内をいまから掛け直す</button>`:""}
+  ${(cRun.resumed && cRun.paused)?`<div class="card" style="padding:9px 12px;border-color:#3a5a7a"><p class="note" style="margin:0"><strong>押した時点で止めて戻りました。</strong>「再開」を押すと続きから動き出します${(cSet().guide&&cSet().guideRe)?"（案内も残り時間から掛け直します）":""}。</p></div>`:""}
   ${dn.length?`<div class="card" style="padding:12px 14px;border-color:#3a4152">
     <div class="bigsub" style="margin-bottom:6px">終わったブロックの手ごたえ<span style="opacity:.65">（いつ押しても構いません。時計は止まりません）</span></div>
     ${dn.map(function(bi){
@@ -1848,7 +1965,7 @@ function cInOpen(seed){
         edits:(seed&&seed.edits)?seed.edits:[],
         segW:(seed&&seed.segW)?seed.segW:null,
         kind:(seed&&seed.kind)||kindOf(curProg()), hr:"", mets:"", kg:String(bodyKg()),   /* v26・v27 */
-        dist:"", kcal:"", memo:""};
+        dist:"", kcal:"", memo:"", bak:(seed&&seed.bak)||null};   /* v33 */
   go("cin");
 }
 /* v27: 推定カロリーの表示（入力中は描き直さず、この欄だけ書き換える＝打ちかけの数字を消さない） */
@@ -1913,6 +2030,8 @@ function cinSave(){
     if(!isNaN(mt)&&mt>0){ rec.mets=Math.round(mt*10)/10;
       var est=bikeKcal(rec.mets, rec.kg||bodyKg(), recMin(rec)); if(est!=null) rec.kcalEst=est; } }
   DB.cardio.push(rec);
+  cNextApply();   /* v33: 「次回もこの設定で」 */
+  if(cBuf.bak) cSet().lastBak={date:rec.date, savedAt:Date.now(), bak:cBuf.bak};   /* v33 */
   save(); cBuf=null; cHold={};
   if(autoHub()) return;   /* v25: 有酸素を保存したら、そのまま記録ハブで自動送信 */
   go("cardio");
@@ -1930,10 +2049,56 @@ function cardioToday(){
   return (DB.cardio||[]).some(function(c){ return c && c.date>=t; });
 }
 function autoSendGo(){ DB.settings.autoSend = !(DB.settings.autoSend!==false); save(); render(); }
+/* v33: 「次回もこの設定で」。走り終えた時点の最後の値と、走り出したときのプログラム（cBuf.blocks）を比べる。
+   セットのブロックは最後の区間の値、インターバルは区切りごと（速い・ゆっくり）の最後の回の値。"追加"は見ない。 */
+function cNextDiffs(){
+  if(!cBuf || !cBuf.plan || !cBuf.blocks) return [];
+  var p=cBuf.plan, out=[];
+  cBuf.blocks.forEach(function(b,bi){
+    var tgts = (b.type==="interval") ? (b.segs||[]).map(function(sg,si){ return {o:sg, si:si, base:cSegBase(sg.lb)}; }) : [{o:b, si:-1, base:null}];
+    tgts.forEach(function(t){
+      var last=null;
+      p.forEach(function(s){ if(s.b===bi && s.lb!=="追加" && (t.base===null || cSegBase(s.lb)===t.base)) last=s; });
+      if(!last) return;
+      ["sp","inc"].forEach(function(f){
+        var a=+t.o[f]||0, z=+last[f]||0;
+        if(Math.round(a*10)!==Math.round(z*10)) out.push({bi:bi, si:t.si, f:f, from:a, to:z, nm:blockName(b,bi)+(t.si>=0?"・"+(t.o.lb||("区切り"+(t.si+1))):"")});
+      });
+    });
+  });
+  return out;
+}
+function cNextCard(){
+  var D=cNextDiffs(); if(!D.length) return "";
+  var g=cProgs().filter(function(x){ return x.id===cBuf.progId; })[0];
+  if(!g) return "";
+  var bk=isBike(kindOf(cBuf));
+  return `<div class="sec">次回もこの設定で</div>
+  <div class="card">
+    ${D.map(function(d,k){
+      var nm=(d.f==="sp") ? (bk?"負荷レベル":"速度") : (bk?"目標回転数":"傾斜");
+      return `<label style="display:flex;align-items:center;gap:10px;font-size:14px;margin-top:6px">
+        <input id="c_nx_${k}" type="checkbox" checked style="width:20px;height:20px"> ${esc(d.nm)}　${nm} ${n1(d.from)} → <strong>${n1(d.to)}</strong></label>`;
+    }).join("")}
+    <p class="note" style="margin:8px 0 0">チェックした分だけ、「${esc(g.name||"")}」の既定を書き換えます（保存を押したとき）。<strong>外せば今日だけの変更</strong>のままです。ほかのプログラム・過去の記録は変わりません。</p>
+  </div>`;
+}
+function cNextApply(){
+  var D=cNextDiffs(); if(!D.length) return;
+  var g=cProgs().filter(function(x){ return x.id===cBuf.progId; })[0]; if(!g || !g.blocks) return;
+  D.forEach(function(d,k){
+    var el=document.getElementById("c_nx_"+k); if(el && !el.checked) return;
+    var b=g.blocks[d.bi]; if(!b) return;
+    var o=(d.si>=0) ? (b.segs||[])[d.si] : b; if(!o) return;
+    o[d.f]=d.to;
+  });
+}
 function viewCIn(){
   if(!cBuf) return viewCardio();
   var p=cBuf.plan;
   return `
+  ${cBuf.bak?`<button class="btn ghost" style="margin-top:0;border-color:#3a5a7a" onclick="cinBack()">▶ 間違えて押した：走行に戻る</button>
+  <p class="note" style="margin:4px 0 10px">押した時点で止まった状態で戻ります。押してから戻るまでの時間は入りません。</p>`:""}
   <h1>今日の有酸素を記録</h1>
   <p class="sub">${machTxt()}の表示をそのまま写してください。<strong>Garminの数字と合っていなくて構いません。</strong>毎回同じ物差しで並べば、伸びは見えます。</p>
   <div class="card">
@@ -1989,6 +2154,7 @@ function viewCIn(){
       : `途中で速度や傾斜を変えた日は、実際の値に直してから保存してください。`}<strong>次回の提案はこの値を見ます。</strong><br>（「設定を直す」は<strong>プログラムそのもの</strong>を直すボタンです。今日の回だけを直すものではありません。）</p>
   </div>
   ${cActualCard(cBuf)}
+  ${cNextCard()}
   <button class="btn" onclick="cinSave()">保存する</button>
   <button class="btn link" onclick="cBuf=null;go('cardio')">やめる</button>`;
 }
@@ -2162,6 +2328,11 @@ function viewCPlan(){
     <br><strong>アプリ自身の音では、離席中は鳴らせません。</strong>iOSが裏に回った瞬間に再生を止めるためです（実機で確認済み）。
     <br>📌 <strong>通知の音は消音スイッチに従います。</strong>消音にして走る日は鳴りません（画面の読み上げは消音でも喋るので、読書が聞こえても合図が鳴るとは限りません）。
     <br>⚠️ <strong>走行中に区間を足す・飛ばす・止めると、案内はずれます。</strong>走り出した案内はアプリ側から止められないため、掛け直すボタンは作っていません。</p>
+    <label style="display:flex;align-items:center;gap:10px;font-size:14.5px;margin-top:10px">
+      <input id="cp_gr" type="checkbox" style="width:22px;height:22px" ${cSet().guideRe?"checked":""}>
+      ショートカットを「掛け直し」に対応させた（v33）
+    </label>
+    <p class="note">オンにすると、走行画面に「🔔 案内をいまから掛け直す」が出て、間違えて終えたあとの再開でも残り時間から掛け直します。<strong>ショートカット側を直す前にオンにすると、古い案内も鳴り続けて二重になります。</strong>直し方は仕様書_2026-11-14_2 §6-2。</p>
     <label>ショートカットの名前</label>
     <input id="cp_sc" type="text" value="${esc(cSet().scName||"")}" placeholder="有酸素ガイド">
     <p class="note">ショートカットApp側の名前と<strong>1字でも違うと動きません。</strong>中身の作り方は「仕様書_2026-09-21」§11にあります。</p>
@@ -2193,6 +2364,7 @@ function cpSaveAll(){
   if(!isNaN(c)&&c>=0) cSet().incCap=c;
   /* v21: 離席中の案内。チェックは数字ではないので g() を通さない。 */
   var gd=document.getElementById("cp_gd"); if(gd) cSet().guide=!!gd.checked;
+  var gr=document.getElementById("cp_gr"); if(gr) cSet().guideRe=!!gr.checked;   /* v33 */
   var sc=document.getElementById("cp_sc");
   if(sc){ var v=String(sc.value||"").trim(); if(v) cSet().scName=v.slice(0,40); }
   save(); go(cRet);
@@ -2578,6 +2750,7 @@ function viewCardio(){
   return `
   <h1>有酸素（${machTxt()}）</h1>
   <p class="sub">${isBike()?"<strong>目標は「目安の回転数で、話せるくらいの強さのまま時間いっぱいこぎ切ること」</strong>です。カロリーは機械のMETsから推定します。<br>":"<strong>目標は距離ではなく「今日この速度・傾斜で走り切ること」</strong>です（距離は速度×時間で決まるので、直接は動かせないためです）。<br>"}<strong>時間の長さに決まりはありません。</strong>グラフだけは、長さのちがう回を並べるために30分あたりへ換算しています。</p>
+  ${cUndoCard()}
   ${cardioCard(true)}
   <button class="btn ghost" onclick="go('home')">筋トレの画面に戻る</button>`;
 }
@@ -2592,7 +2765,7 @@ function isTyping(){ return !!cPad || view==="backup" || view==="edlist" || view
     /* v22（2026-10-08）: ★入力欄・貼り付け欄を置く画面を足したら、必ずこの一覧にも足すこと。
        routine.html では同じ踏み方を4回していて、貼った文字が250msの描き直しで消える。 */
     || view==="gimp" || view==="gimpc" || view==="gtext" || view==="gspec" || view==="impmenu"
-    || view==="uprog"; }   /* v23: 名前の入力欄があるため */
+    || view==="uprog" || view==="wtext" || view==="wimp"; }   /* v32 */   /* v23: 名前の入力欄があるため */
 
 /* ===== バックアップ（書き出し・読み込み）　2026-08-15追加 =====================
    記録はこの端末のブラウザの中だけにあります。ここのテキストを控えておけば、
@@ -3263,6 +3436,11 @@ function render(){
        : (view==="cin" && cBuf) ? kindOf(cBuf)
        : ((view==="cimpc" && cImpBuf) ? kindOf(cImpBuf) : kindOf(curProg()));
   }catch(e){ CK="tread"; }
+  if(view==="warm" && DB.wrun) return void(A.innerHTML=viewWarm());   /* v32 */
+  if(view==="wprompt" && wPend!=null && !DB.active) return void(A.innerHTML=viewWPrompt());   /* v32 */
+  if(view==="wset")   return void(A.innerHTML=viewWSet());     /* v32 */
+  if(view==="wtext")  return void(A.innerHTML=viewWText());    /* v32 */
+  if(view==="wimp")   return void(A.innerHTML=viewWImp());     /* v32 */
   if(view==="impmenu") return void(A.innerHTML=viewImpMenu());   /* v22 */
   if(view==="gimp")   return void(A.innerHTML=viewGImp());      /* v22 */
   if(view==="gimpc")  return void(A.innerHTML=viewGImpC());     /* v22 */
@@ -3437,6 +3615,7 @@ function viewHome(){
   <button class="btn ghost" onclick="go('log')">これまでの記録（${d.length}回）</button>
   <a class="btn ghost" href="log.html" style="display:block;text-decoration:none">📤 記録を送る（記録ハブ）</a>
   <button class="btn ghost" onclick="autoSendGo()">運動が終わったら自動で送る：${DB.settings.autoSend!==false?"オン":"オフ"}（押すと切り替え）</button>
+  <button class="btn ghost" onclick="wsGo()">🔥 筋トレ前のほぐしの中身（見る・取り込む）</button>
   <button class="btn ghost" onclick="bkGo()">💾 バックアップ（書き出し・読み込み）</button>
   ${showProgress() ? "" : `<p class="note">重さを上げるルール（3セットとも上限回数を2回続けたら1段上げる）は、<strong>9/1から</strong>案内します。それまでは記録だけ残ります。</p>`}
   <p class="note" style="text-align:center;opacity:.45;margin-top:14px">${APPVER}</p>`;
@@ -3457,7 +3636,7 @@ function viewWork(){
   }).join("");
   return `
   <h1>${esc(routineLabel(s.routine))} を実施中</h1>
-  <p class="sub">${mdw(s.date)} ／ <b>${envLabel(env)}</b> ／ 記録済み ${s.sets.length} セット</p>
+  <p class="sub">${mdw(s.date)} ／ <b>${envLabel(env)}</b> ／ 記録済み ${s.sets.length} セット${s.warm?" ／ "+warmTxt(s.warm):""}</p>
   ${/* v17（2026-09-19 ご依頼 G-b）: 実施中に場所を直せるようにした。
        ご記入は「自宅でやった回数がジムに出てしまっている」。現物を読むと、
        前回値・重さアップの判定は v4 から **同じ環境同士でしか比べていない**。
@@ -3632,7 +3811,8 @@ function viewLog(){
       const head=mdw(s.date)+" "+(isUP(s.routine) ? routineLabel(s.routine) : "ルーティン"+s.routine)
         +(senv!=="gym" ? "・"+envLabel(senv) : "")
         +(typeof s.sec==="number" ? " ／ "+mmss(s.sec) : "")
-        +(typeof s.rest==="number" ? "（休憩"+s.rest+"秒）" : "");
+        +(typeof s.rest==="number" ? "（休憩"+s.rest+"秒）" : "")
+        +(s.warm ? " ／ "+warmTxt(s.warm) : "");   /* v32 */
       /* v17（2026-09-19 ご依頼 G-b）: 過去の回の場所も直せるようにした。
          「自宅でやった回数がジムに出てしまっている」の実体は、**始めるときに
          場所を選び損ねた回が gym として残っていること**だった（分ける仕組み自体は
@@ -3658,11 +3838,268 @@ function viewLog(){
 }
 
 /* ===================== 操作 ===================== */
+/* ===== v32（2026-11-14・チャットでのご依頼「筋トレ前の筋肉ほぐしなどのストレッチを実施する機能」）=====
+   仕様書: claude_personal/specialists/B.M.C/仕様書_2026-11-14_gymに筋トレ前のほぐしを足す.md
+   ・筋トレを始めるときに「🔥 ほぐしから（約8分）／飛ばして筋トレへ」を選ぶ。
+   ・前半＝ローラー・ボール（悩み3つ：お尻の外側・肩の左右差・合蹠）＝毎回同じ（slot "common"）。
+     後半＝動的ストレッチ。A/B/C で切り替え。それ以外（自宅・取り込んだプログラム）は A の後半。
+   ・終わると自動で筋トレへ。★筋トレの所要時間（s.sec）は、ほぐしが終わってから数える
+     （過去の回と見比べられるように）。ほぐしの時間は s.warm.sec に別に持つ。
+   ・記録: DB.active.warm＝{k,sec,done,total} または {k,skip:true}。DB.sessions にそのまま入る。
+   ・中身の差し替え: DB.settings.warmProgs[slot]（取り込んだときだけ作る。既定はコード側 WARM_DEF）。
+     書式は stretch.html の取り込みフォーマット v1 の行（種目名 | 秒数 | 左右 | やり方 | できないときは）。
+   ・★記録ハブ（log.html）へ送る行はまだ変えていない（claude.md §1-1：Obsidian運用管理と形を合わせてから）。
+   ・実行中の状態は DB.wrun。再読み込みしても続きから（2時間を過ぎていたら捨てる）。 */
+const WARM_SLOTS=[{k:"common",n:"前半（ローラー・ボール／毎回）"},{k:"A",n:"後半 A用"},{k:"B",n:"後半 B用"},{k:"C",n:"後半 C用"}];
+const WARM_DEF={
+common:[
+ {n:"お尻の外側（ボール）",s:30,side:"右",how:"マットに座り、ボールをお尻の外側（ポケットの少し上）に当てる。ボール側の足首を反対の膝に乗せると深く入る。痛気持ちいい所で止めて小さく揺らす。",ease:"脚を組まずに乗るだけ。手を床について体重を軽くする。"},
+ {n:"お尻の外側（ボール）",s:30,side:"左",how:"反対側も同じ。",ease:"手を床について体重を軽くする。"},
+ {n:"太もも外側の付け根（ローラー）",s:20,side:"右",how:"横向きでローラーを腰骨の少し下・前寄りに当てる。上の脚を前について支え、5cmほど小さく転がす。",ease:"上の脚と両手で体重を逃がす。痛ければ場所をずらす。"},
+ {n:"太もも外側の付け根（ローラー）",s:20,side:"左",how:"反対側も同じ。",ease:"上の脚と両手で体重を逃がす。"},
+ {n:"内もも（ローラー）",s:30,side:"右",how:"うつ伏せで片膝を横に曲げ、内ももの膝寄りをローラーに乗せる。膝寄りから付け根へゆっくり転がす。合蹠で膝が浮く原因の場所。",ease:"肘をついて体重を軽く。転がさず乗せて止めるだけでもよい。"},
+ {n:"内もも（ローラー）",s:30,side:"左",how:"反対側も同じ。",ease:"乗せて止めるだけでもよい。"},
+ {n:"脇の下〜背中の外側（ローラー）★長め",s:30,side:"左",how:"横向きで、下の腕を頭の上へまっすぐ伸ばし、脇の少し下をローラーに乗せて小さく転がす。左手が上のときに届かない側。",ease:"上の手を床について体重を逃がす。"},
+ {n:"脇の下〜背中の外側（ローラー）",s:20,side:"右",how:"反対側も同じ（短め）。",ease:"上の手を床について体重を逃がす。"},
+ {n:"肩の後ろ（ボール）★長め",s:30,side:"右",how:"壁と肩甲骨の外側（脇の後ろ）の間にボールを挟み、膝を少し曲げ伸ばしして上下に転がす。右手が下のときに届かない側。",ease:"壁に寄りかかる力を弱める。"},
+ {n:"肩の後ろ（ボール）",s:20,side:"左",how:"反対側も同じ（短め）。",ease:"壁に寄りかかる力を弱める。"}
+],
+A:[
+ {n:"90/90 ヒップスイッチ",s:60,side:null,how:"床に座り両膝を90度に曲げて片側に倒す→反対側へ。ゆっくり10往復。お尻の外側と股関節の内まわし・外まわしを両方使う。",ease:"手を後ろについて支える。倒す幅を半分にしてよい。"},
+ {n:"バタフライ",s:30,side:null,how:"座って足裏を合わせ、膝をゆっくり上下にゆらす。弾ませず、脚の重みで落とす。",ease:"かかとを体から遠くに置く。"},
+ {n:"ワールドグレイテストストレッチ",s:30,side:"右",how:"大きく前に踏み込み、前脚の内側に両手をつく。前脚側の手を天井へ開いて胸を回す。3回。",ease:"後ろ膝を床につける。回すのは肘を天井に向ける程度でよい。"},
+ {n:"ワールドグレイテストストレッチ",s:30,side:"左",how:"反対側も同じ。",ease:"後ろ膝を床につける。"},
+ {n:"浅めのスプリットスクワット（自重）",s:30,side:"右足が前",how:"脚を前後に開き、上体をまっすぐにしたまま浅く5〜8回しゃがむ。体重は前足に。ブルガリアンの予行。",ease:"何かにつかまる。しゃがむ深さを半分に。"},
+ {n:"浅めのスプリットスクワット（自重）",s:30,side:"左足が前",how:"反対側も同じ。",ease:"何かにつかまる。"},
+ {n:"肘の曲げ伸ばし＋手首まわし",s:20,side:null,how:"肘を脇につけて曲げ伸ばし10回、手首を内外に5回ずつ。プッシュダウンの予行。",ease:"小さくてよい。"}
+],
+B:[
+ {n:"90/90 ヒップスイッチ",s:60,side:null,how:"床に座り両膝を90度に曲げて片側に倒す→反対側へ。ゆっくり10往復。",ease:"手を後ろについて支える。倒す幅を半分に。"},
+ {n:"バタフライ",s:30,side:null,how:"座って足裏を合わせ、膝をゆっくり上下にゆらす。弾ませない。",ease:"かかとを体から遠くに置く。"},
+ {n:"壁スライド",s:30,side:null,how:"壁に背中と腕をつけ、腕を上下にスライド10回。肩の可動域の準備。",ease:"壁につかず、その場で万歳の上げ下げ。"},
+ {n:"体の横をゆらして伸ばす",s:20,side:"左腕を上",how:"片腕を頭の上へ伸ばし、反対側へ体を倒して戻す。ゆっくり5回。脇から背中の外側が伸びる。ラットプルダウンの予行。",ease:"手を頭に添えて肘を上へ向けるだけ。"},
+ {n:"体の横をゆらして伸ばす",s:20,side:"右腕を上",how:"反対側も同じ。",ease:"手を頭に添える。"},
+ {n:"立位ヒップサークル",s:15,side:"右",how:"膝を腰の高さに上げ、外→後ろへ大きくまわす。8回。",ease:"壁に手をつく。円を小さく。"},
+ {n:"立位ヒップサークル",s:15,side:"左",how:"反対側も同じ。",ease:"壁に手をつく。"},
+ {n:"浅めのワイドスクワット",s:30,side:null,how:"足を肩幅の1.5倍に開き、つま先を外へ。ゆっくり5〜8回浅くしゃがむ。内もも・外ももの予行。",ease:"何かにつかまる。浅く。"}
+],
+C:[
+ {n:"90/90 ヒップスイッチ",s:60,side:null,how:"床に座り両膝を90度に曲げて片側に倒す→反対側へ。ゆっくり10往復。",ease:"手を後ろについて支える。倒す幅を半分に。"},
+ {n:"バタフライ",s:30,side:null,how:"座って足裏を合わせ、膝をゆっくり上下にゆらす。弾ませない。",ease:"かかとを体から遠くに置く。"},
+ {n:"壁で胸を開く",s:20,side:"右",how:"壁の横に立ち、肩の高さで手のひらを壁につける。体を壁と反対へゆっくり回して戻す。5回。チェストプレスの予行。",ease:"肘を曲げて手の位置を下げる。"},
+ {n:"壁で胸を開く",s:20,side:"左",how:"反対側も同じ。",ease:"手の位置を下げる。"},
+ {n:"寝て肩の内まわし",s:20,side:"右",how:"横向きに寝て下の腕を肩の高さで前に出し、肘を90度に。手のひらを床の方へゆっくり倒して戻す。5回。反動はつけない。右手が下のときに届かない側。",ease:"倒す幅を小さく。"},
+ {n:"寝て肩の内まわし",s:20,side:"左",how:"反対側も同じ。",ease:"倒す幅を小さく。"},
+ {n:"ヒップヒンジ（自重）",s:30,side:null,how:"手を腰に当て、膝を軽く曲げたままお尻を後ろへ引いて上体を倒し、戻る。背中は丸めない。8回。ルーマニアンデッドリフトの予行。",ease:"壁の前に立ち、お尻を壁に当てる距離から始める。"},
+ {n:"インチワーム",s:30,side:null,how:"立って前屈し、手で前へ歩いて腕立ての形まで→手で戻って立つ。3回。",ease:"膝を曲げてよい。腕立ての形まで行かなくてよい。"}
+]};
+const WARM_NOTE="しびれ・鋭い痛みが出たら場所をずらす。骨の上と腰（背骨の下のほう）は転がさない。痛気持ちいいまで。反動はつけない。";
+function warmSlot(k){
+  var o=(DB.settings.warmProgs||{})[k];
+  return (o && o.length) ? o : WARM_DEF[k];
+}
+function warmKey(r){ return (r==="A"||r==="B"||r==="C") ? r : "X"; }
+function warmList(r){
+  var k=warmKey(r), back=warmSlot(k==="X"?"A":k);
+  return warmSlot("common").map(function(x){ return Object.assign({ph:"前半"},x); })
+    .concat(back.map(function(x){ return Object.assign({ph:"後半"},x); }));
+}
+function warmSum(L){ return L.reduce(function(a,x){ return a+(+x.s||0); },0); }
+function warmTxt(w){
+  if(!w) return "";
+  if(w.skip) return "🔥 ほぐし 飛ばした";
+  return "🔥 ほぐし "+mmss(w.sec||0)+"（"+w.done+"/"+w.total+"）";
+}
+
+var wPend=null, wTimer=null;
+/* ホーム・取り込んだプログラムの「始める」はここに来る（旧 startSession の中身は startSessionNow） */
 function startSession(r){
+  unlockAudio();
+  if(DB.active){ go("work"); return; }
+  wPend=r; go("wprompt");
+}
+function warmSkip(){ var r=wPend; wPend=null; startSessionNow(r,{k:warmKey(r),skip:true}); }
+function warmBegin(){
+  unlockAudio();
+  var r=wPend; wPend=null;
+  var L=warmList(r), now=Date.now();
+  DB.wrun={r:r,k:warmKey(r),list:L,i:0,paused:false,endAt:now+L[0].s*1000,left:0,acc:0,seg:now,start:now};
+  save(); warmLoop(); go("warm");
+}
+function wRunMs(){ var w=DB.wrun; if(!w) return 0; return w.acc+(w.paused?0:(Date.now()-w.seg)); }
+function wLeft(){ var w=DB.wrun; if(!w) return 0; return w.paused ? w.left : Math.max(0,Math.ceil((w.endAt-Date.now())/1000)); }
+function warmLoop(){
+  if(wTimer) clearInterval(wTimer);
+  wTimer=setInterval(function(){
+    var w=DB.wrun; if(!w){ clearInterval(wTimer); wTimer=null; return; }
+    if(!w.paused && Date.now()>=w.endAt){ chimeDone(); warmGoto(w.i+1); return; }
+    if(view==="warm") render();
+  },250);
+}
+function warmGoto(i){
+  var w=DB.wrun; if(!w) return;
+  if(i>=w.list.length) return warmFinish(true);
+  if(i<0) i=0;
+  w.i=i;
+  if(w.paused) w.left=w.list[i].s; else w.endAt=Date.now()+w.list[i].s*1000;
+  save(); render();
+}
+function warmPause(){
+  var w=DB.wrun; if(!w) return;
+  var now=Date.now();
+  if(w.paused){ w.paused=false; w.seg=now; w.endAt=now+w.left*1000; }
+  else { w.left=Math.max(1,Math.ceil((w.endAt-now)/1000)); w.acc+=now-w.seg; w.paused=true; }
+  save(); render();
+}
+function warmFinish(complete){
+  var w=DB.wrun; if(!w) return;
+  var sec=Math.round(wRunMs()/1000);
+  var rec={k:w.k,sec:sec,done:(complete?w.list.length:w.i),total:w.list.length};
+  var r=w.r;
+  DB.wrun=null; if(wTimer) clearInterval(wTimer); wTimer=null;
+  startSessionNow(r,rec);
+}
+function warmQuitHome(){
+  if(!confirm("ほぐしも筋トレもやめて、ホームへ戻りますか？（記録は残りません）")) return;
+  DB.wrun=null; if(wTimer) clearInterval(wTimer); wTimer=null; save(); go("home");
+}
+
+function viewWPrompt(){
+  var r=wPend;
+  if(r==null){ return viewHome(); }
+  var L=warmList(r), k=warmKey(r);
+  var nF=L.filter(function(x){return x.ph==="前半";}), nB=L.filter(function(x){return x.ph==="後半";});
+  return `
+  <h1>${esc(routineLabel(r))} を始める前に</h1>
+  <div class="card">
+    <div class="sec" style="margin:0 0 6px">🔥 筋トレ前のほぐし</div>
+    <div class="big" style="font-size:40px;margin:2px 0">${mmss(warmSum(L))}</div>
+    <div class="bigsub">前半 ローラー・ボール ${nF.length}種目（${mmss(warmSum(nF))}）＋ 後半 動的ストレッチ ${k==="X"?"A用":k+"用"} ${nB.length}種目（${mmss(warmSum(nB))}）</div>
+    <button class="btn" onclick="warmBegin()">🔥 ほぐしから始める</button>
+    <button class="btn ghost" onclick="warmSkip()">飛ばして筋トレへ</button>
+    <p class="note">終わるとそのまま筋トレの画面へ移ります。<strong>筋トレの所要時間はほぐしが終わってから数えます。</strong>道具：フォームローラー・ボール・マット。</p>
+    <p class="note">${esc(WARM_NOTE)}</p>
+  </div>
+  <button class="btn ghost" onclick="wPend=null;go('home')">戻る</button>`;
+}
+
+function viewWarm(){
+  var w=DB.wrun, L=w.list, x=L[w.i], nx=L[w.i+1], left=wLeft();
+  var pct=Math.round(100*(1-left/Math.max(1,x.s)));
+  return `
+  <h1>🔥 ほぐし ${w.i+1}/${L.length}</h1>
+  <p class="sub">${esc(x.ph)}${x.ph==="前半"?"（ローラー・ボール）":"（動的ストレッチ）"} ／ ${esc(routineLabel(w.r))} の前 ／ 経過 ${mmss(Math.round(wRunMs()/1000))}</p>
+  <div class="card">
+    <h2 style="margin:0 0 4px">${esc(x.n)}</h2>
+    ${x.side?`<div class="pill" style="display:inline-block;margin-bottom:6px">${esc(x.side)}</div>`:""}
+    <div class="big" style="font-size:64px;margin:4px 0">${left}<span style="font-size:20px">秒</span></div>
+    <div style="height:6px;background:#262d3a;border-radius:3px;overflow:hidden;margin:2px 0 10px"><div style="height:6px;width:${pct}%;background:#6fa8ff"></div></div>
+    <p style="margin:0 0 6px;line-height:1.6">${esc(x.how)}</p>
+    ${x.ease?`<details><summary class="note" style="cursor:pointer">できないときは</summary><p class="note">${esc(x.ease)}</p></details>`:""}
+    ${w.paused?`<p class="note"><strong>⏸ 止めています</strong></p>`:""}
+    <div class="row">
+      <button class="btn ghost" style="margin-top:6px" onclick="warmGoto(${w.i-1})">◀ 戻る</button>
+      <button class="btn ${w.paused?'':'ghost'}" style="margin-top:6px" onclick="warmPause()">${w.paused?"▶ 再開":"⏸ 止める"}</button>
+      <button class="btn ghost" style="margin-top:6px" onclick="warmGoto(${w.i+1})">次へ ▶</button>
+    </div>
+  </div>
+  ${nx?`<p class="note">次：${esc(nx.n)}${nx.side?"（"+esc(nx.side)+"）":""} ${nx.s}秒</p>`:`<p class="note">これが最後です。終わると筋トレの画面へ移ります。</p>`}
+  <p class="note">${esc(WARM_NOTE)}</p>
+  <button class="btn ghost" onclick="warmFinish(false)">ここでやめて筋トレへ（${w.i}/${L.length} で記録）</button>
+  <button class="btn ghost" style="opacity:.7" onclick="warmQuitHome()">ほぐしも筋トレもやめる</button>`;
+}
+
+/* --- 中身の差し替え（stretch の取り込みフォーマット v1 の行） --- */
+var wsSlot=null, wsBuf="", wsMsg="", wsArmed=null;
+function warmToText(k){
+  var nm=(WARM_SLOTS.filter(function(s){return s.k===k;})[0]||{}).n||k;
+  return "プログラム名: 🔥ほぐし "+nm+"\n---\n"+warmSlot(k).map(function(x){
+    return [x.n, x.s, x.side||"-", x.how||"", x.ease||""].join(" | ");
+  }).join("\n");
+}
+function parseSecTxt(t){
+  t=String(t||"").trim(); var m;
+  if((m=t.match(/^(\d+)\s*分\s*(\d+)?\s*秒?$/))) return (+m[1])*60+(+(m[2]||0));
+  if((m=t.match(/^(\d+)\s*秒?$/))) return +m[1];
+  return NaN;
+}
+function warmParse(txt){
+  var out=[], bad=[];
+  String(txt||"").split(/\r?\n/).forEach(function(line,ix){
+    var l=line.trim();
+    if(!l || /^---/.test(l) || /^(プログラム名|タグ|説明|注意)\s*[:：]/.test(l)) return;
+    if(l.indexOf("|")<0){ bad.push(ix+1); return; }
+    var c=l.split("|").map(function(s){return s.trim();});
+    var s=parseSecTxt(c[1]);
+    if(!c[0] || !(s>0)){ bad.push(ix+1); return; }
+    var side=(c[2]&&c[2]!=="-"&&c[2]!=="－"&&c[2]!=="なし")?c[2]:null;
+    out.push({n:c[0],s:s,side:side,how:c[3]||"",ease:c[4]||""});
+  });
+  return {list:out,bad:bad};
+}
+function wsGo(){ wsSlot=null; wsMsg=""; wsArmed=null; go("wset"); }
+function wsText(k){ wsSlot=k; wsBuf=warmToText(k); go("wtext"); }
+function wsImp(k){ wsSlot=k; wsBuf=""; wsMsg=""; go("wimp"); }
+function wsDoImp(){
+  var t=(document.getElementById("ws_in")||{}).value||"";
+  var p=warmParse(t);
+  if(!p.list.length){ wsMsg="取り込める行がありませんでした（「種目名 | 秒数 | 左右 | やり方 | できないときは」の形）。"; render(); return; }
+  DB.settings.warmProgs=DB.settings.warmProgs||{};
+  DB.settings.warmProgs[wsSlot]=p.list; save();
+  wsMsg="取り込みました："+p.list.length+"種目・"+mmss(warmSum(p.list))+(p.bad.length?"（読めなかった行："+p.bad.join("・")+"行目）":"");
+  go("wset");
+}
+function wsReset(k){
+  if(wsArmed!==k){ wsArmed=k; render(); return; }
+  wsArmed=null;
+  if(DB.settings.warmProgs) delete DB.settings.warmProgs[k];
+  save(); wsMsg="既定に戻しました。"; render();
+}
+function viewWSet(){
+  var own=DB.settings.warmProgs||{};
+  return `
+  <h1>🔥 ほぐしの中身</h1>
+  <p class="sub">前半はどの日も同じ。後半はその日のルーティン（A/B/C）で切り替わります。自宅・取り込んだプログラムの日は「前半＋後半A用」。</p>
+  ${wsMsg?`<div class="card"><p class="note" style="margin:0">${esc(wsMsg)}</p></div>`:""}
+  ${WARM_SLOTS.map(function(s){
+    var L=warmSlot(s.k);
+    return `<div class="card">
+      <div class="t"><h2>${esc(s.n)}</h2><span class="pill">${L.length}種目・${mmss(warmSum(L))}</span></div>
+      <p class="note">${own[s.k]&&own[s.k].length?"取り込んだ中身を使っています":"既定の中身"}：${L.map(function(x){return esc(x.n)+(x.side?"（"+esc(x.side)+"）":"");}).join("・")}</p>
+      <div class="row">
+        <button class="btn ghost" style="margin-top:4px" onclick="wsText('${s.k}')">テキストを見る</button>
+        <button class="btn ghost" style="margin-top:4px" onclick="wsImp('${s.k}')">取り込む</button>
+        ${own[s.k]&&own[s.k].length?`<button class="btn ghost" style="margin-top:4px" onclick="wsReset('${s.k}')">${wsArmed===s.k?"もう一度押すと戻します":"既定に戻す"}</button>`:""}
+      </div>
+    </div>`;
+  }).join("")}
+  <p class="note">直し方：「テキストを見る」→コピーしてAIに直してもらう（または自分で直す）→「取り込む」に貼る。<strong>取り込むと、その枠の中身が丸ごと入れ替わります。</strong>過去の記録は変わりません。</p>
+  <button class="btn ghost" onclick="go('home')">戻る</button>`;
+}
+function viewWText(){
+  return `
+  <h1>🔥 テキスト（${esc(wsSlot)}）</h1>
+  <p class="sub">1行1種目：<code>種目名 | 秒数 | 左右 | やり方 | できないときは</code>（左右が無いものは <code>-</code>）。stretch の取り込みフォーマットと同じ形です。</p>
+  <textarea id="ws_out" style="width:100%;min-height:260px;font-size:13px;background:#0f131a;color:#e6e9ef;border:1px solid #262d3a;border-radius:10px;padding:8px" readonly>${esc(wsBuf)}</textarea>
+  <button class="btn" onclick="(function(){var t=document.getElementById('ws_out');t.select();try{navigator.clipboard.writeText(t.value);}catch(e){try{document.execCommand('copy');}catch(e2){}}})()">コピー</button>
+  <button class="btn ghost" onclick="go('wset')">戻る</button>`;
+}
+function viewWImp(){
+  return `
+  <h1>🔥 取り込む（${esc(wsSlot)}）</h1>
+  <p class="sub">貼り付けた中身で、この枠を丸ごと入れ替えます。1行1種目：<code>種目名 | 秒数 | 左右 | やり方 | できないときは</code></p>
+  ${wsMsg?`<p class="note">${esc(wsMsg)}</p>`:""}
+  <textarea id="ws_in" style="width:100%;min-height:220px;font-size:13px;background:#0f131a;color:#e6e9ef;border:1px solid #262d3a;border-radius:10px;padding:8px"></textarea>
+  <button class="btn" onclick="wsDoImp()">取り込む</button>
+  <button class="btn ghost" onclick="go('wset')">戻る</button>`;
+}
+
+function startSessionNow(r,warm){
   /* v4: セッション開始時点の環境をそのまま記録に固定する（途中で環境設定を変えても、
      この回の記録・前回値の比較には影響しない）。 */
   unlockAudio();   /* v6 (2026-09-03): いちばん最初のタップで音を開通させる */
   DB.active={date:Date.now(),routine:r,sets:[],marked:false,env:curEnv()};
+  if(warm) DB.active.warm=warm;   /* v32: ほぐしの記録 */
   save(); tmpW=null; tmpR=null; tmpB=null; startSessionClock(); go("work");
 }
 function setEnv(env){
@@ -3775,6 +4212,11 @@ if(DB.crun && DB.crun.start){
   if(cElapsed()>_lim){ cRun=null; DB.crun=null; save(); }
   else { cLoop(); view="crun"; }
 }
+/* v32: ほぐしの途中で再読み込みされたら続きから。2時間を過ぎていたら捨てる。 */
+if(DB.wrun){
+  if(DB.active || !DB.wrun.list || Date.now()-(DB.wrun.start||0)>2*3600*1000){ DB.wrun=null; save(); }
+  else { warmLoop(); view="warm"; }
+}
 
 /* ===== 「気になった」記録　2026-09-06追加 ====================================
    目的: iPhoneで使っている最中に気づいたUI/UXの違和感を、文章を書かずに
@@ -3874,7 +4316,8 @@ function fbCtx(){
     backup:"バックアップ", bands:"バンドの設定", edlist:"種目の編集", edex:"種目の編集",
     cardio:"有酸素", crun:"有酸素の実行中", cin:"有酸素の入力", cplan:"有酸素のプラン",
     cpick:"有酸素の選択", cimp:"有酸素の取り込み", ctext:"有酸素の書式",
-    cspec:"有酸素の仕様", cgraph:"有酸素のグラフ"};
+    cspec:"有酸素の仕様", cgraph:"有酸素のグラフ",
+    warm:"ほぐしの実行中", wprompt:"ほぐしの確認", wset:"ほぐしの中身", wtext:"ほぐしのテキスト", wimp:"ほぐしの取り込み"};
   var s = NM[v] || v;
   try{ if(DB.active && DB.active.routine) s += "（ルーティン"+DB.active.routine+"）"; }catch(e){}
   try{ if(curId){ var e0 = ex(curId); if(e0 && e0.name) s += "／"+e0.name; } }catch(e){}
@@ -3884,7 +4327,7 @@ function fbCtx(){
 /* 実行中は送らせない（前面のアプリが切り替わるため）。 */
 function fbCanSend(){
   try{ if(DB.active) return false; }catch(e){}
-  try{ if(view==="crun") return false; }catch(e){}
+  try{ if(view==="crun" || DB.wrun) return false; }catch(e){}
   return true;
 }
 
