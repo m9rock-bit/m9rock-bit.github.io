@@ -901,15 +901,18 @@ var DB = { v:19, sets:null, chime:true, voice:true, third:true, noteOpen:false, 
        （ご指定「振り返りは触らない」。ホームから外すだけ）。 */
   showWeek:false };
 try{
-  if(!Array.isArray(DB.sc)) DB.sc = [];   /* v97: 🕞 セルフコンディションの記録（★読み戻しにも足してある） */
+  if(!Array.isArray(DB.sc)) DB.sc = [];
+  if(!Array.isArray(DB.plans)) DB.plans = [];   /* v99: ✂️ で決めた「いつ・最初の5分」（★読み戻しにも足してある） */   /* v97: 🕞 セルフコンディションの記録（★読み戻しにも足してある） */
   var raw = localStorage.getItem(KEY);
   if(raw){
     var p = JSON.parse(raw);
     if(Array.isArray(p.sc)) DB.sc = p.sc;   /* v97 */
+    if(Array.isArray(p.plans)) DB.plans = p.plans;   /* v99 */
     if(typeof p.chime==="boolean") DB.chime = p.chime;
     if(typeof p.voice==="boolean") DB.voice = p.voice;
     if(typeof p.spotifyUrl==="string") DB.spotifyUrl = p.spotifyUrl;
     if(p.scName) DB.scName = p.scName;
+    if(typeof p.taskSendCmd==="string") DB.taskSendCmd = p.taskSendCmd;   /* v100: Task Sorter の「routine へ送る」を1タップで動かすコマンドID */
     if(typeof p.notifySc==="string") DB.notifySc = p.notifySc;   /* v76 */
     if(typeof p.notifyListSc==="string") DB.notifyListSc = p.notifyListSc;   /* v79 */
     if(typeof p.openAt==="number") DB.openAt = p.openAt;         /* v77: #open= で最後に始めた時刻 */
@@ -1653,7 +1656,7 @@ function parkBtn(){
 
 /* --- 状態 --- */
 /* v27: 版の表示（ホーム最下部）。中身を変えたら、ここも必ず上げる。 */
-var APPVER = "切り替えルーティン v98 ・ 2026-11-20";
+var APPVER = "切り替えルーティン v100 ・ 2026-11-20";
 var view = "home";
 var curId = null;
 var startAt = 0;
@@ -4613,6 +4616,11 @@ function render(){
   else if(view==="bl") h = viewBl();   /* v44 */
   else if(view==="scale") h = viewScale();
   else if(view==="backup") h = viewBackup();
+  if(view==="home" || view==="run") h = planBanner() + h;   /* v99: ✂️ で決めた「最初の5分」をその日に出す */
+  if(view==="home" || view==="run"){   /* v100: 午前のうちに（朝の仕事準備の実行中にも出す）今日の一覧を取り込んでいなければ1行だけ出す（✂️・🎯 で使う） */
+    var _f = (typeof lnFresh==="function") ? lnFresh() : null;
+    if(_f && _f.stale && new Date().getHours() < 12) h = '<p style="margin:0 0 8px;color:#e8c99a;font-size:12.5px;line-height:1.7">📋 今日のタスク一覧はまだ取り込んでいません（✂️ 今日の線・🎯 で使います）　<a class="btn link" style="padding:0;width:auto;display:inline;font-size:12.5px" href="'+esc(lnSendUri())+'">Obsidianでコピー</a>　<button class="btn link" style="padding:0;width:auto;display:inline;font-size:12.5px" onclick="ftFromClip()">📋 取り込む</button></p>' + h;
+  }
   document.getElementById("app").innerHTML = h;
   foldNotes();   /* v40 */
   fbLeaveBusy();   /* v59 */
@@ -5084,6 +5092,9 @@ function viewHome(){
     var base = location.origin + location.pathname;
     var row = function(lb, k){ return '<div style="margin:5px 0"><span style="font-size:13px">'+lb+'</span>'
       + '<input class="inp" type="text" readonly value="'+esc(base+'#open='+k)+'" onclick="this.select()" style="font-size:12px"></div>'; };
+    h += '<div class="card"><label>📋 Task Sorter の「routine へ送る」コマンドID（v100・✂️ 今日の線を引く で使う）</label>'
+       + '<input class="inp" type="text" id="tscmd" value="'+esc(DB.taskSendCmd||"")+'" onchange="DB.taskSendCmd=this.value.trim();save()">'
+       + '<p class="note">入れておくと、✂️ の「1. Obsidian で一覧をコピー」が1タップで一覧をコピーします（例：templater-obsidian:00_System/Templates/○○.md）。空のときは Obsidian を開くだけです。</p></div>';
     h += '<div class="card"><label>📲 ほかのアプリを開いたら、ここへ移る（ショートカットのオートメーション）</label>'
        + row('🌊 見たい（YouTube・動画アプリに）', 'watch')
        + row('🌊 食べたい（デリバリー・コンビニアプリに）', 'eat')
@@ -6340,9 +6351,10 @@ function ftImportText(txt){
   try{ o = JSON.parse(s.slice(i + key.length).trim()); }catch(e){ return -1; }
   if(!o || !Array.isArray(o.tasks)) return -1;
   DB.focus.tasks = o.tasks.map(function(x){
-    return { p:String(x.p||""), t:String(x.t||""), d:String(x.d||""), k:(x.k==="P"?"P":"W") };
+    return { p:String(x.p||""), t:String(x.t||""), d:String(x.d||""), k:(x.k==="P"?"P":"W"), w:String(x.w||"") };   /* v100: w＝"week"（明日〜7日）／"next"（来週の月曜）／空＝今日まで */
   }).filter(function(x){ return x.t; });
   DB.focus.tasksAt = String(o.at||"");
+  DB.focus.tasksImp = Date.now();   /* v100: 取り込んだ時刻を routine 側で持つ（✂️ で一覧の鮮度を出すため） */
   save();
   return DB.focus.tasks.length;
 }
@@ -9366,6 +9378,7 @@ function scKeep(){
   var c = scVal("sc_cause"); if(c !== null) scCur.cause = c.trim();
   var d = scVal("sc_dig");   if(d !== null) scCur.dig = d.replace(/\s+$/,"");
   var a = scVal("sc_ask");   if(a !== null){ scRt().ask = a; }   /* v98 */
+  lnKeep();   /* v99 */
 }
 /* v98: ⓪ 食べたい衝動の強さ（0〜10）。ここで記録を作る（いちばん最初に押すものなので）。 */
 function scPickUrge(n){
@@ -9461,10 +9474,13 @@ function viewSc(){
   }else if(scStep === "next"){
     h += sub('いま：'+esc(c.st)+(c.cause ? '<br>原因：'+esc(c.cause) : ''));
     h += hd('③ 次の1つ');
+    var _ln = '<button class="setb" style="margin-bottom:8px;border-color:#c49a6a" onclick="lnGo()">✂️ 今日の線を引く<small>今日やり切るものを'+lnCap()+'つまで → 残りは「いつ・最初の5分」を決めて渡す'+(new Date().getDay()===5?'（金曜：月曜の最初の5分も）':'')+'</small></button>';
+    if(new Date().getHours() >= 15) h += _ln;   /* v99: 15時からはいちばん上 */
     if(setOf("breath478")) h += '<button class="setb" style="margin-bottom:8px" onclick="scNext(\'breath\')">🌬️ 呼吸法<small>一覧から選んで、音と声で進みます</small></button>';
     if(breatherSet())      h += '<button class="setb" style="margin-bottom:8px" onclick="scNext(\'rest\')">🍵 ひと息<small>約7分。最後に次にやることを1つだけ決めます</small></button>';
     if(setOf("moveplace")) h += '<button class="setb" style="margin-bottom:8px" onclick="scNext(\'move\')">🚶 場所を変える<small>別の部屋・近くのカフェ・席を離れる</small></button>';
     h += '<button class="setb" style="margin-bottom:8px" onclick="scNext(\'focus\')">🎯 集中ブロック<small>'+(c.cause ? '題名に「'+esc(scFirstLine(c.cause))+'」を入れて始めます' : 'その都度決める形で始めます')+'</small></button>';
+    if(new Date().getHours() < 15) h += _ln;
     h += '<button class="setb" style="margin-bottom:8px" onclick="scNext(\'dig\')">✍️ 深掘り<small>頭の中を全部書き出す → いちばん重いものに印</small></button>';
     h += '<button class="btn ghost" onclick="scClose()">記録だけして閉じる</button>';
     h += '<button class="btn link" style="padding:7px" onclick="scTo(\'cause\')">← 原因に戻る</button>';
@@ -9489,6 +9505,7 @@ function viewSc(){
     h += '<button class="btn link" style="padding:7px" onclick="scTo(\'dig\')">← 書き出しに戻る</button>';
   }
   else if(scStep === "send") h = viewScSend(h);   /* v98 */
+  else if(scStep.indexOf("ln") === 0) h = viewLn(h);   /* v99 */
   h += '<button class="btn link" style="padding:7px;opacity:.7" onclick="scClose()">✖ やめる（ここまでは残ります）</button>';
   return h;
 }
@@ -9626,7 +9643,209 @@ function viewScSend(h){
   h += '<button class="btn link" style="padding:7px" onclick="scTo(\'mark\')">← 印に戻る</button>';
   return h;
 }
-document.addEventListener("visibilitychange", function(){ if(!document.hidden && view==="sc" && scStep==="send") render(); });
+document.addEventListener("visibilitychange", function(){ if(!document.hidden && view==="sc" && (scStep==="send" || scStep.indexOf("ln")===0)) render(); });   /* v100: ✂️ の取り込みから戻ったときも */
+
+
+/* ===================== v99（2026-11-20 ご指示）: ✂️ 今日の線を引く =====
+   夕方の衝動の背景＝「やることが山積み・今日はどこまで終わらせるか・金曜なら来週は大丈夫か」。
+   根拠: 未完了の目標は頭に割り込み続けるが、具体的な計画（いつ・どこで・どう）を立てると割り込みが消える
+         （Masicampo & Baumeister 2011, JPSP）。終業時の計画は仕事からの切り離しを助ける（Smit 2016, JOOP）。
+         気がかりは「計画に変える」を優先し、できないものだけ確認の時刻へ先送り（worry postponement・効果は小さめ）。
+   ★① 今日やり切る：17時前は最大3つ・17時以降は最大2つ（ご指示）。選べる上限を超えさせない。
+   ★② 残りで気になる1つ：タスクから選べる（集中ブロックと同じ「Task Sorter で 🎯 routine へ送る」の一覧）＋書いてもよい。
+     「いつ」と「最初の5分で何をする」を決める。
+   ★③ 金曜だけ：月曜の朝いちばんのタスクと、その最初の5分。
+   ★④ 来週の気がかり（任意）：計画にできる → ②と同じ形／できない → 月曜の確認時刻だけ置く。
+   ★出口：決めたものは DB.plans に入り、その日（と時刻）になったら routine のホームと実行中の画面の上に出る
+     （月曜の朝は電車で routine の「朝の仕事準備」を開くため＝ご回答 2026-11-20）。
+   ★記録は DB.sc[].ln。 */
+var lnPick = "";   /* いまタスクを入れる先（"rest" | "mon" | "worry"） */
+function lnCap(){ return new Date().getHours() >= 17 ? 2 : 3; }
+function lnTasks(){ try{ return ftOpenList(); }catch(e){ return []; } }
+function lnTasksToday(){ return lnTasks().filter(function(x){ return !x.w; }); }   /* v100: ① は今日までの分だけ */
+var LN_WTAG = { week:"（今週）", next:"（来週）" };
+/* v100: 一覧の鮮度。前の日以前（または不明）なら stale（ご決定＝ア：今日の一覧は時刻の表示だけ） */
+var lnFreshSkip = 0;
+function lnFresh(){
+  var imp = (DB.focus && DB.focus.tasksImp) || 0, n = lnTasks().length;
+  if(!imp) return { stale:true, label:(n ? "取り込んだ日時が分かりません（v99以前の取り込み）" : "まだ取り込んでいません") };
+  var d = new Date(imp), now = new Date(), same = lnD(d) === lnD(now);
+  var hm = ("0"+d.getHours()).slice(-2)+":"+("0"+d.getMinutes()).slice(-2);
+  var ago = Math.floor((now.getTime()-imp)/60000), agoL = ago < 60 ? ago+"分前" : Math.floor(ago/60)+"時間前";
+  return { stale:!same, label: same ? "今日 "+hm+" に取り込んだ一覧（"+agoL+"・"+n+"件）" : (d.getMonth()+1)+"/"+d.getDate()+" "+hm+" の一覧です（前の日のもの）" };
+}
+function lnSendUri(){ return DB.taskSendCmd ? mealUri(DB.taskSendCmd) : "obsidian://open?vault="+encodeURIComponent(FB.vault||"My Valut"); }
+function lnFreshCard(){
+  var f = lnFresh();
+  if(!f.stale || lnFreshSkip === (scCur && scCur.t)) return '<p style="margin:0 0 6px;color:#8ea3b8;font-size:12px">📋 '+esc(f.label)+'　<button class="btn link" style="padding:0;width:auto;display:inline;font-size:12px" onclick="scKeep();save();ftFromClip()">取り込み直す</button></p>';
+  return '<div style="border:1px solid #c49a6a;border-radius:10px;padding:8px 10px;margin:0 0 10px;background:#1f1a14">'
+    + '<div style="font-size:13px;color:#e0a86a;margin-bottom:4px">📋 '+esc(f.label)+'</div>'
+    + '<div style="font-size:12.5px;color:#cfd8e3;line-height:1.7;margin-bottom:6px">いまのタスクで線を引くなら、先に一覧を新しくします。'+(DB.taskSendCmd ? '' : '<br>（Obsidian が開いたら Task Sorter の「🎯 routine へ今日のタスクを送る」を押して、ここへ戻ってください）')+'</div>'
+    + '<a class="btn" style="display:block;text-align:center;text-decoration:none;margin-top:0" href="'+esc(lnSendUri())+'">1. Obsidian で一覧をコピー</a>'
+    + '<button class="btn" style="margin-top:6px" onclick="scKeep();save();ftFromClip()">2. 📋 取り込む</button>'
+    + '<button class="btn link" style="padding:7px" onclick="lnFreshSkip=(scCur&&scCur.t);render()">このまま進む（書いて足す）</button>'
+    + '</div>';
+}
+function lnD(d){ return d.getFullYear()+"-"+("0"+(d.getMonth()+1)).slice(-2)+"-"+("0"+d.getDate()).slice(-2); }
+function lnNextWork(from){ var d = new Date(from||Date.now()); d.setHours(12,0,0,0); do{ d.setDate(d.getDate()+1); }while(d.getDay()===0 || d.getDay()===6); return lnD(d); }
+function lnNextMon(){ var d = new Date(); d.setHours(12,0,0,0); do{ d.setDate(d.getDate()+1); }while(d.getDay()!==1); return lnD(d); }
+function lnWhenDate(k){ if(k==="tomorrow"){ var d=new Date(); d.setHours(12,0,0,0); d.setDate(d.getDate()+1); return lnD(d); } if(k==="mon") return lnNextMon(); return lnNextWork(); }
+var LN_WHEN = [["work","次の出勤日"],["tomorrow","明日"],["mon","来週の月曜"]];
+function lnObj(){ if(!scCur) return null; if(!scCur.ln) scCur.ln = { today:[], rest:{t:"",when:"work",f5:""}, mon:{t:"",f5:""}, worry:{t:"",plan:null,when:"mon",f5:"",at:"09:00"}, saved:false }; return scCur.ln; }
+function lnKeep(){
+  var o = lnObj(); if(!o) return;
+  var v;
+  if((v = scVal("ln_rest_t")) !== null) o.rest.t = v.trim();
+  if((v = scVal("ln_rest_f5")) !== null) o.rest.f5 = v.trim();
+  if((v = scVal("ln_mon_t")) !== null) o.mon.t = v.trim();
+  if((v = scVal("ln_mon_f5")) !== null) o.mon.f5 = v.trim();
+  if((v = scVal("ln_w_t")) !== null) o.worry.t = v.trim();
+  if((v = scVal("ln_w_f5")) !== null) o.worry.f5 = v.trim();
+}
+function lnGo(){ scKeep(); lnObj(); if(scCur) scCur.next = "✂️ 今日の線を引く"; save(); scStep = "ln1"; render(); }
+function lnTo(st){ scKeep(); if(st!=="next") lnCommit(); save(); scStep = st; render(); }
+function lnToggleToday(t){
+  scKeep(); var o = lnObj(), i = o.today.indexOf(t);
+  if(i >= 0) o.today.splice(i,1);
+  else if(o.today.length < lnCap()) o.today.push(t);
+  else { fbToast("今日は"+lnCap()+"つまでにしています。どれかを外してから選んでください。"); return; }
+  save(); render();
+}
+function lnAddToday(){
+  scKeep(); var v = scVal("ln_add"); v = v ? v.trim() : ""; if(!v) return;
+  var o = lnObj(); if(o.today.indexOf(v) >= 0) return;
+  if(o.today.length >= lnCap()){ fbToast("今日は"+lnCap()+"つまでにしています。"); return; }
+  o.today.push(v); save(); render();
+}
+function lnUse(where, t){ scKeep(); var o = lnObj(); o[where].t = t; save(); render(); }
+function lnWhen(where, k){ scKeep(); lnObj()[where].when = k; save(); render(); }
+function lnWorryPlan(b){ scKeep(); lnObj().worry.plan = b; save(); render(); }
+function lnWorryAt(t){ scKeep(); lnObj().worry.at = t; save(); render(); }
+/* 決めたものを DB.plans へ（同じ回は1度だけ。やり直しは上書き） */
+function lnCommit(){
+  scKeep(); var o = lnObj(); if(!o || !scCur) return;
+  var src = scCur.t || Date.now();
+  DB.plans = DB.plans.filter(function(x){ return x.src !== src; });
+  var add = function(x){ x.src = src; x.made = Date.now(); x.done = false; DB.plans.push(x); };
+  if(o.rest.t) add({ kind:"rest", due:lnWhenDate(o.rest.when), at:"", task:o.rest.t, f5:o.rest.f5 });
+  if(new Date(src).getDay()===5 && o.mon.t) add({ kind:"mon", due:lnNextMon(), at:"", task:o.mon.t, f5:o.mon.f5 });
+  if(o.worry.t){
+    if(o.worry.plan === true) add({ kind:"worry", due:lnWhenDate(o.worry.when), at:"", task:o.worry.t, f5:o.worry.f5 });
+    else add({ kind:"check", due:lnNextMon(), at:o.worry.at||"09:00", task:o.worry.t, f5:"" });
+  }
+  if(DB.plans.length > 200) DB.plans = DB.plans.slice(-200);
+  o.saved = true; save();
+}
+function lnText(){
+  var o = lnObj(); if(!o) return "";
+  var d = new Date(), out = "##### "+fbYmd(d)+" - ✂️ 今日の線（"+fbHm(d)+"）\n";
+  if(o.today.length) out += "- 今日やり切る: "+o.today.join("／")+"\n";
+  if(o.rest.t) out += "- "+lnWhenDate(o.rest.when)+" に: "+o.rest.t+(o.rest.f5 ? "（最初の5分: "+o.rest.f5+"）" : "")+"\n";
+  if(o.mon.t) out += "- 月曜の朝いちばん: "+o.mon.t+(o.mon.f5 ? "（最初の5分: "+o.mon.f5+"）" : "")+"\n";
+  if(o.worry.t) out += "- 気がかり: "+o.worry.t+(o.worry.plan===true ? "（"+lnWhenDate(o.worry.when)+" 最初の5分: "+(o.worry.f5||"")+"）" : "（月曜 "+(o.worry.at||"09:00")+" に確認する）")+"\n";
+  return out+"\n";
+}
+function lnWorkUri(){
+  return "obsidian://advanced-uri?vault="+encodeURIComponent(FB.vault||"My Valut")
+    + "&filepath="+encodeURIComponent(SC_QM)+"&heading="+encodeURIComponent("💻 WORK")
+    + "&mode=prepend&data="+encodeURIComponent(lnText());
+}
+function lnFocus(t){ lnCommit(); scCur = null; scStep = "state"; if(fStart && !fDone){ focusBack(); return; } scPrefill = t||""; fSlot = slotAt(Date.now()); fList = []; fMemo = ""; focusBegin("ask"); }
+function lnSentWork(){ var o = lnObj(); if(o) o.sentWork = Date.now(); save(); return true; }
+function viewLn(h){
+  var o = lnObj(); if(!o) return h;
+  var hd = function(t){ return '<p style="margin:14px 0 6px;font-weight:600;line-height:1.5">'+t+'</p>'; };
+  var sub = function(t){ return '<p style="margin:0 0 8px;color:#8ea3b8;font-size:12.5px;line-height:1.75">'+t+'</p>'; };
+  var chip = function(on, label, fn){ return '<button class="btn ghost" style="margin-top:0;width:auto;flex:0 0 auto;padding:6px 10px'+(on?';border:1px solid #e0a86a;color:#e0a86a':'')+'" onclick="'+fn+'">'+label+'</button>'; };
+  var q = function(x){ return esc(String(x).replace(/\\/g,"\\\\").replace(/'/g,"\\'")); };
+  var T = lnTasks(), fri = new Date((scCur && scCur.t) || Date.now()).getDay() === 5;
+  var taskChips = function(where, exclude){
+    var a = T.filter(function(x){ return (exclude||[]).indexOf(x.t) < 0; });
+    if(!a.length) return sub('タスクの一覧がまだありません。<button class="btn link" style="padding:0;width:auto;display:inline" onclick="scKeep();save();ftFromClip()">📋 Task Sorter の一覧を取り込む</button>（「🎯 routine へ今日のタスクを送る」を押してから）。書いてもかまいません。');
+    if(where === "mon") a = a.slice().sort(function(x,y){ var r={next:0,week:1}; return (r[x.w]!=null?r[x.w]:2)-(r[y.w]!=null?r[y.w]:2); });   /* v100: 月曜は来週の分を先に */
+    return '<div class="row" style="flex-wrap:wrap;gap:6px;margin:0 0 8px">'+a.map(function(x){ return chip(o[where] && o[where].t===x.t, esc(x.t)+(LN_WTAG[x.w]||""), "lnUse('"+where+"','"+q(x.t)+"')"); }).join('')+'</div>';
+  };
+  var whenChips = function(where){ return '<div class="row" style="flex-wrap:wrap;gap:6px;margin:4px 0 8px">'+LN_WHEN.map(function(w){ return chip(o[where].when===w[0], w[1]+'（'+lnWhenDate(w[0]).slice(5).replace("-","/")+'）', "lnWhen('"+where+"','"+w[0]+"')"); }).join('')+'</div>'; };
+  var tm = (typeof ftMsg!=="undefined" && ftMsg && Date.now()-ftMsgAt < 60000) ? sub(esc(ftMsg)) : "";
+  h += '<p style="margin:0 0 4px;color:#e0a86a;font-size:13px">✂️ 今日の線を引く　「今日は一つだけ。残りは明日の自分に渡す」</p>';
+  if(scStep === "ln1"){
+    T = lnTasksToday();   /* v100 */
+    h += lnFreshCard();
+    h += hd('① 今日やり切るもの（'+lnCap()+'つまで）');
+    h += sub(new Date().getHours()>=17 ? '17時を過ぎたので2つまで。' : '17時前なので3つまで（17時からは2つ）。');
+    h += tm;
+    if(T.length){
+      h += '<div class="row" style="flex-wrap:wrap;gap:6px;margin:0 0 8px">'+T.map(function(x){ return chip(o.today.indexOf(x.t)>=0, (o.today.indexOf(x.t)>=0?'● ':'')+esc(x.t), "lnToggleToday('"+q(x.t)+"')"); }).join('')+'</div>';
+    }else h += sub('タスクの一覧がまだありません。<button class="btn link" style="padding:0;width:auto;display:inline" onclick="scKeep();save();ftFromClip()">📋 Task Sorter の一覧を取り込む</button>');
+    o.today.filter(function(t){ return !T.some(function(x){ return x.t===t; }); }).forEach(function(t){ h += '<div class="row" style="gap:6px;margin:0 0 6px">'+chip(true, '● '+esc(t), "lnToggleToday('"+q(t)+"')")+'</div>'; });
+    h += '<div class="row" style="gap:6px"><input class="inp" type="text" id="ln_add" placeholder="一覧に無いものを書く" style="flex:1"><button class="btn ghost" style="margin-top:0;width:auto;flex:0 0 auto" onclick="lnAddToday()">＋</button></div>';
+    h += '<button class="btn" onclick="lnTo(\'ln2\')">次へ（残りを渡す）</button>';
+    h += '<button class="btn link" style="padding:7px" onclick="lnTo(\'next\')">← 次の1つに戻る</button>';
+  }else if(scStep === "ln2"){
+    h += hd('② 残りで、いちばん気になっているものを1つ');
+    h += sub('決めるのは「いつ」と「最初の5分で何をするか」だけ。具体的に決めると、終わっていなくても頭から離れやすくなります。');
+    h += tm + taskChips("rest", o.today);
+    h += '<input class="inp" type="text" id="ln_rest_t" value="'+esc(o.rest.t)+'" placeholder="タスク（選ぶか書く）">';
+    h += whenChips("rest");
+    h += '<input class="inp" type="text" id="ln_rest_f5" value="'+esc(o.rest.f5)+'" placeholder="最初の5分で何をする？（例：資料の目次を書く）">';
+    h += '<button class="btn" onclick="lnTo(\''+(fri?'ln3':'ln4')+'\')">次へ</button>';
+    h += '<button class="btn link" style="padding:7px" onclick="lnTo(\'ln1\')">← ①に戻る</button>';
+  }else if(scStep === "ln3"){
+    h += hd('③ 金曜日：月曜の朝いちばんに取りかかるもの');
+    h += sub('月曜（'+lnNextMon().slice(5).replace("-","/")+'）の朝、routine を開くと上に出ます。');
+    h += tm + taskChips("mon", []);
+    h += '<input class="inp" type="text" id="ln_mon_t" value="'+esc(o.mon.t)+'" placeholder="月曜の朝いちばんのタスク">';
+    h += '<input class="inp" type="text" id="ln_mon_f5" value="'+esc(o.mon.f5)+'" placeholder="その最初の5分で何をする？（例：PCを開いたら提案資料の目次を書く）">';
+    h += '<button class="btn" onclick="lnTo(\'ln4\')">次へ</button>';
+    h += '<button class="btn link" style="padding:7px" onclick="lnTo(\'ln2\')">← ②に戻る</button>';
+  }else if(scStep === "ln4"){
+    h += hd('④ 来週の気がかり（あれば・なくてOK）');
+    h += '<input class="inp" type="text" id="ln_w_t" value="'+esc(o.worry.t)+'" placeholder="気になっていること">';
+    h += sub('計画にできますか？（いつ・最初の5分が決められる）');
+    h += '<div class="row" style="gap:6px;margin:0 0 8px">'+chip(o.worry.plan===true,'できる',"lnWorryPlan(true)")+chip(o.worry.plan===false,'いまはできない',"lnWorryPlan(false)")+'</div>';
+    if(o.worry.plan === true){
+      h += whenChips("worry");
+      h += '<input class="inp" type="text" id="ln_w_f5" value="'+esc(o.worry.f5)+'" placeholder="最初の5分で何をする？">';
+    }else if(o.worry.plan === false){
+      h += sub('考えるのは月曜のこの時刻に回します（その時刻に routine の上に出ます）。');
+      h += '<div class="row" style="flex-wrap:wrap;gap:6px;margin:0 0 8px">'+["09:00","12:30","16:30"].map(function(t){ return chip(o.worry.at===t, '月曜 '+t, "lnWorryAt('"+t+"')"); }).join('')+'</div>';
+    }
+    h += '<button class="btn" onclick="lnCommit();lnTo(\'ln5\')">決めた</button>';
+    h += '<button class="btn link" style="padding:7px" onclick="lnTo(\''+(fri?'ln3':'ln2')+'\')">← 戻る</button>';
+  }else if(scStep === "ln5"){
+    h += hd('決めたこと');
+    var lines = lnText().split("\n").slice(1).filter(Boolean);
+    h += lines.length ? '<div style="font-size:13.5px;line-height:1.8;margin:0 0 8px">'+lines.map(esc).join('<br>')+'</div>' : sub('（何も決めていません）');
+    h += sub('「いつ」を決めたものは、その日に routine のホームと実行中の画面の上に出ます。');
+    o.today.forEach(function(t){ h += '<button class="btn" onclick="lnFocus(\''+q(t)+'\')">🎯 「'+esc(t.slice(0,24))+'」で集中ブロック</button>'; });
+    if(lines.length) h += '<a class="btn ghost" style="display:block;text-align:center;text-decoration:none;margin-top:8px" href="'+esc(lnWorkUri())+'" onclick="return lnSentWork()">'+(o.sentWork?'✅ 残した（もう一度）':'💻 Quick Memo の WORK にも残す')+'</a>';
+    h += '<button class="btn ghost" onclick="scClose()">閉じる</button>';
+  }
+  return h;
+}
+/* その日に出す（ホーム・実行中の画面の上） */
+function plansDue(){
+  var now = new Date(), today = lnD(now), hm = ("0"+now.getHours()).slice(-2)+":"+("0"+now.getMinutes()).slice(-2);
+  return (DB.plans||[]).filter(function(x){ return x && !x.done && x.due && x.due <= today && (!x.at || x.due < today || hm >= x.at); });
+}
+function planDone(i){ var a = plansDue(); if(a[i]){ a[i].done = true; a[i].doneAt = Date.now(); save(); render(); } }
+function planLater(i){ var a = plansDue(); if(a[i]){ a[i].due = lnNextWork(); a[i].at = ""; save(); render(); } }
+function planFocus(i){ var a = plansDue(); var x = a[i]; if(!x) return; x.done = true; x.doneAt = Date.now(); save(); if(fStart && !fDone){ focusBack(); return; } scPrefill = x.task + (x.f5 ? "：最初の5分＝"+x.f5 : ""); fSlot = slotAt(Date.now()); fList = []; fMemo = ""; focusBegin("ask"); }
+function planBanner(){
+  var a = plansDue(); if(!a.length) return "";
+  var LB = { rest:"📌 今日の最初の5分", mon:"📌 月曜の朝いちばん", worry:"📌 決めておいたこと", check:"🗓 確認する時間" };
+  var h = '<div style="border:1px solid #c49a6a;border-radius:10px;padding:8px 10px;margin:0 0 10px;background:#1f1a14">';
+  a.forEach(function(x, i){
+    h += '<div style="margin:2px 0 6px"><div style="font-size:12px;color:#e0a86a">'+LB[x.kind]+'（'+(new Date(x.made).getMonth()+1)+'/'+new Date(x.made).getDate()+' に決めた）</div>'
+       + '<div style="font-size:14px;line-height:1.6">'+esc(x.task)+(x.f5 ? '<br><span style="color:#cfd8e3">最初の5分：'+esc(x.f5)+'</span>' : '')+(x.kind==="check" ? '<br><span style="color:#8ea3b8;font-size:12px">いま考えてよい時間です。計画にできたら「🎯」へ。</span>' : '')+'</div>'
+       + '<div class="row" style="flex-wrap:wrap;gap:6px;margin-top:4px">'
+       + '<button class="btn ghost" style="margin-top:0;width:auto;flex:0 0 auto;padding:5px 10px" onclick="planDone('+i+')">✅ やった</button>'
+       + '<button class="btn ghost" style="margin-top:0;width:auto;flex:0 0 auto;padding:5px 10px" onclick="planFocus('+i+')">🎯 集中ブロック</button>'
+       + '<button class="btn ghost" style="margin-top:0;width:auto;flex:0 0 auto;padding:5px 10px" onclick="planLater('+i+')">次の出勤日へ</button>'
+       + '</div></div>';
+  });
+  return h + '</div>';
+}
 
 /* v44: ショートカットから #list=… で渡された内容を取り込む。
    取り込んだらハッシュを消す（再読み込みで二重に取り込まないため）。 */
