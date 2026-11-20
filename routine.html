@@ -1653,7 +1653,7 @@ function parkBtn(){
 
 /* --- 状態 --- */
 /* v27: 版の表示（ホーム最下部）。中身を変えたら、ここも必ず上げる。 */
-var APPVER = "切り替えルーティン v97 ・ 2026-11-20";
+var APPVER = "切り替えルーティン v98 ・ 2026-11-20";
 var view = "home";
 var curId = null;
 var startAt = 0;
@@ -9357,14 +9357,27 @@ function scWaveNo(){
   return DB.sc.filter(function(x){ return x && x.t >= d0; }).length;
 }
 function scGo(from){
-  scCur = { t:0, st:"", cause:"", next:"", dig:"", mark:"", wave:0, from:from||"" };
-  scStep = "state"; view = "sc"; render();
+  scCur = { t:0, urge:null, st:"", cause:"", next:"", dig:"", mark:"", wave:0, from:from||"" };
+  scStep = "urge"; view = "sc"; render();   /* v98: まず衝動の強さを観察する（ご指示 2026-11-20 11:14） */
 }
 function scVal(id){ var el = document.getElementById(id); return el ? String(el.value||"") : null; }
 function scKeep(){
   if(!scCur) return;
   var c = scVal("sc_cause"); if(c !== null) scCur.cause = c.trim();
   var d = scVal("sc_dig");   if(d !== null) scCur.dig = d.replace(/\s+$/,"");
+  var a = scVal("sc_ask");   if(a !== null){ scRt().ask = a; }   /* v98 */
+}
+/* v98: ⓪ 食べたい衝動の強さ（0〜10）。ここで記録を作る（いちばん最初に押すものなので）。 */
+function scPickUrge(n){
+  if(!scCur) scGo("");
+  scCur.urge = n;
+  if(!scCur.t){
+    scCur.t = Date.now();
+    DB.sc.push(scCur);
+    if(DB.sc.length > 600) DB.sc = DB.sc.slice(-600);
+    scCur.wave = scWaveNo();
+  }
+  save(); scStep = "state"; render();
 }
 function scPickState(i){
   if(!scCur) scGo("");
@@ -9422,14 +9435,21 @@ function viewSc(){
   var h = '<h1>🕞 セルフコンディション</h1>';
   var hd = function(t){ return '<p style="margin:14px 0 6px;font-weight:600;line-height:1.5">'+t+'</p>'; };
   var sub = function(t){ return '<p style="margin:0 0 8px;color:#8ea3b8;font-size:12.5px;line-height:1.75">'+t+'</p>'; };
-  if(scStep === "state"){
-    h += sub('食べもののことは聞きません。点数もつけません。');
+  if(scStep === "urge"){
+    h += hd('⓪ 食べたい衝動は、いまどのくらい？');
+    h += sub('当てるものではありません。いまの感じを眺めて、近い数字を1つ。0＝ない／5＝はっきりある／10＝いちばん強い。');
+    h += '<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:6px;margin:0 0 8px">';
+    for(var u=0; u<=10; u++) h += '<button class="btn ghost" style="margin-top:0;padding:12px 0;font-size:17px" onclick="scPickUrge('+u+')">'+u+'</button>';
+    h += '</div>';
+  }else if(scStep === "state"){
+    h += sub((c.urge!=null ? '食べたい衝動：'+c.urge+'　・　' : '')+'点数はつけません。');
     h += hd('① いま、どんな状態？（1つ）');
     SC_STATES.forEach(function(x, i){
       h += '<button class="setb" style="margin-bottom:8px" onclick="scPickState('+i+')">'+esc(x)+'</button>';
     });
+    h += '<button class="btn link" style="padding:7px" onclick="scTo(\'urge\')">← 衝動の強さに戻る</button>';
   }else if(scStep === "cause"){
-    h += sub('いま：'+esc(c.st)+(c.wave ? '　・　今日 '+c.wave+' 回目' : ''));
+    h += sub('いま：'+esc(c.st)+(c.urge!=null ? '　・　衝動 '+c.urge : '')+(c.wave ? '　・　今日 '+c.wave+' 回目' : ''));
     h += hd('② 何がそうさせていそう？（一言）');
     h += sub('下のことばは押すと欄に入ります。合わなければ自分の言葉で。空でも次へ進めます。');
     h += '<div class="row" style="flex-wrap:wrap;gap:6px;margin:0 0 8px">'
@@ -9463,14 +9483,150 @@ function viewSc(){
       var on = (c.mark === x);
       h += '<button class="setb" style="margin-bottom:6px'+(on?';border-color:#e0a86a;color:#e0a86a':'')+'" onclick="scMark('+i+')">'+(on?'● ':'')+esc(x)+'</button>';
     });
+    if(a.length) h += '<button class="btn" style="background:#3a5a78" onclick="scTo(\'send\')">📤 書き出しを送る・残す（AIへ・仕事・メモ・会社のClaude）</button>';   /* v98 */
     if(c.mark) h += '<button class="btn" onclick="scNext(\'digfocus\')">🎯 「'+esc(c.mark.slice(0,30))+'」で集中ブロックを始める</button>';
     h += '<button class="btn ghost" onclick="scClose()">ここで閉じる</button>';
     h += '<button class="btn link" style="padding:7px" onclick="scTo(\'dig\')">← 書き出しに戻る</button>';
   }
-  if(scStep !== "state") h += '';
+  else if(scStep === "send") h = viewScSend(h);   /* v98 */
   h += '<button class="btn link" style="padding:7px;opacity:.7" onclick="scClose()">✖ やめる（ここまでは残ります）</button>';
   return h;
 }
+
+
+/* ===================== v98（2026-11-20 ご指示）: 書き出しの送り先 =====
+   ご指示「書き出した後に AIへにお願いすること／仕事の WORK に残すこと／日次ノートのメモに残すこと／
+   タスクとして Inbox に入れることに分かれたい。追加で仕事用の Claude に投げるもの」
+   「書き出したもので分けるか、全部まとめて送るかは選べるように」。
+   ★送り先（SC_DEST）:
+     ai   🤖 AIへ     … 日次ノート `## 🤖 AIへ` に「##### YY-MM-DD HH:MM」＋本文（朝の巡回が依頼として拾う）
+     work 💻 WORK     … `10_Action/Quick Memo.md` の `## 💻 WORK` の先頭に「##### YY-MM-DD - 🕞 書き出し」
+     memo 💭 メモ     … 日次ノート `## 💭 メモ` の末尾に「- **HH:MM** …」
+     co   🏢 会社のClaude … 頼みたいことを自分で書き、文を組み立ててコピー（会社の Claude へ直接は届けられない）
+     task 📥 タスク   … **準備中**（タスクノートの形を個人秘書の運用カルテと合わせてから。ご了承 2026-11-20）
+   ★送信は <a href> のタップ（記録ハブと同じ約束）。押した瞬間に画面を作り直さない。戻ってきたとき（visibilitychange）に描き直す。
+   ★Obsidian を開くたびにタップが1回要る（iOS の制約）。送り先ごとに1つずつボタンが出る。
+   ★🏢 の「頼みたいこと」は自由記述。DB.sc[].rt.ask に残し、依頼が増えたら選択肢にするかを B.M.C. が見直す（仕様書 §9）。 */
+var SC_DEST = [
+  { k:"ai",   ic:"🤖", lb:"AIへお願い",       sub:"日次ノートの 🤖 AIへ" },
+  { k:"work", ic:"💻", lb:"仕事のメモ",       sub:"Quick Memo の 💻 WORK" },
+  { k:"memo", ic:"💭", lb:"自分のメモ",       sub:"日次ノートの 💭 メモ" },
+  { k:"co",   ic:"🏢", lb:"会社のClaudeへ",   sub:"文を組み立ててコピー" },
+  { k:"task", ic:"📥", lb:"タスク（準備中）", sub:"Inbox へ。形を合わせてから出します", off:true }
+];
+var SC_QM = "10_Action/Quick Memo.md";
+function scDest(k){ for(var i=0;i<SC_DEST.length;i++) if(SC_DEST[i].k===k) return SC_DEST[i]; return null; }
+function scRt(){
+  if(!scCur) return { mode:"all", all:"", per:{}, sent:{}, ask:"" };
+  if(!scCur.rt) scCur.rt = { mode:"all", all:"", per:{}, sent:{}, ask:"" };
+  return scCur.rt;
+}
+function scLines(){ return String(scCur && scCur.dig || "").split(/\n/).map(function(x){ return x.replace(/^\s*[-・*]\s*/,"").trim(); }).filter(Boolean); }
+function scRtMode(m){ scKeep(); scRt().mode = m; save(); render(); }
+function scRtAll(k){ scKeep(); var r = scRt(); r.all = (r.all===k ? "" : k); save(); render(); }
+function scRtPer(i, k){ scKeep(); var r = scRt(); r.per[i] = (r.per[i]===k ? "" : k); save(); render(); }
+/* 送り先ごとの行 */
+function scGroup(k){
+  var r = scRt(), L = scLines();
+  if(r.mode === "all") return (r.all === k) ? L : [];
+  return L.filter(function(x, i){ return r.per[i] === k; });
+}
+function scCtxLine(){
+  var c = scCur || {};
+  return "🕞 セルフコンディションから（状態: "+String(c.st||"").replace(/^\S+\s/,"")+(c.cause ? "／原因: "+c.cause : "")+"）";
+}
+function scText(k){
+  var L = scGroup(k); if(!L.length) return "";
+  var t = scCur.t || Date.now(), d = new Date(t), ymd = fbYmd(d), hm = fbHm(new Date());
+  var mk = function(x){ return (scCur.mark && x === scCur.mark.replace(/^\s*[-・*]\s*/,"").trim()) ? x+"（いちばん重い）" : x; };
+  if(k === "ai")   return "##### "+ymd+" "+hm+"\n"+scCtxLine()+"\n"+L.map(function(x){ return "- "+mk(x); }).join("\n")+"\n";
+  if(k === "work") return "##### "+ymd+" - 🕞 書き出し（"+hm+"）\n"+L.map(function(x){ return "- "+mk(x); }).join("\n")+"\n\n";
+  if(k === "memo") return "- **"+hm+"** "+scCtxLine()+"\n"+L.map(function(x){ return "    - "+mk(x); }).join("\n")+"\n";
+  if(k === "co"){
+    var r = scRt(), c = scCur;
+    return "いま、頭の中が少し混み合っています。整理を手伝ってください。\n\n"
+      + "■ いまの状態: "+String(c.st||"").replace(/^\S+\s/,"")+"\n"
+      + (c.cause ? "■ 原因になっていそうなこと: "+c.cause+"\n" : "")
+      + "■ 頭の中の書き出し:\n"+L.map(function(x){ return "- "+mk(x); }).join("\n")+"\n\n"
+      + "■ お願いしたいこと:\n"+(String(r.ask||"").trim() || "（ここに書く）")+"\n";
+  }
+  return "";
+}
+function scUri(k){
+  var text = scText(k); if(!text) return "";
+  var path, head, mode = "append";
+  if(k === "ai"){   path = fbNotePath(scCur.t || Date.now()); head = "🤖 AIへ"; }
+  else if(k === "memo"){ path = fbNotePath(scCur.t || Date.now()); head = "💭 メモ"; }
+  else if(k === "work"){ path = SC_QM; head = "💻 WORK"; mode = "prepend"; }
+  else return "";
+  return "obsidian://advanced-uri?vault="+encodeURIComponent(FB.vault||"My Valut")
+    + "&filepath="+encodeURIComponent(path)+"&heading="+encodeURIComponent(head)
+    + "&mode="+mode+"&data="+encodeURIComponent(text);
+}
+/* リンクを押したとき：印だけ付ける（画面は作り直さない） */
+function scSent(k){ var r = scRt(); r.sent[k] = Date.now(); save(); return true; }
+function scCopyCo(){
+  scKeep(); save();
+  var t = scText("co"), ok = false;
+  var ta = document.getElementById("sc_co_out"); if(ta) ta.value = t;
+  try{ if(ta){ ta.focus(); ta.select(); ta.setSelectionRange(0, 999999); ok = document.execCommand("copy"); } }catch(e){}
+  var done = function(){ scRt().sent.co = Date.now(); save(); fbToast("コピーしました。会社の Claude に貼ってください。"); };
+  if(ok) done();
+  else if(navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).then(done, function(){ fbToast("コピーできませんでした。下の枠を長押し →「すべてを選択」→「コピー」でも同じです。"); });
+  else fbToast("コピーできませんでした。下の枠を長押し →「すべてを選択」→「コピー」でも同じです。");
+}
+function viewScSend(h){
+  var r = scRt(), L = scLines(), c = scCur || {};
+  var hd = function(t){ return '<p style="margin:14px 0 6px;font-weight:600;line-height:1.5">'+t+'</p>'; };
+  var sub = function(t){ return '<p style="margin:0 0 8px;color:#8ea3b8;font-size:12.5px;line-height:1.75">'+t+'</p>'; };
+  var chip = function(on, label, fn, off){
+    return '<button class="btn ghost" style="margin-top:0;width:auto;flex:0 0 auto;padding:6px 10px'
+      + (on ? ';border:1px solid #e0a86a;color:#e0a86a' : '') + (off ? ';opacity:.4' : '')
+      + '" '+(off ? 'disabled' : 'onclick="'+fn+'"')+'>'+label+'</button>';
+  };
+  h += hd('📤 書き出しを送る・残す');
+  h += '<div class="row" style="gap:6px;margin:0 0 8px">'
+     + chip(r.mode==="all", 'まとめて送る', "scRtMode('all')")
+     + chip(r.mode==="per", '1行ずつ分ける', "scRtMode('per')") + '</div>';
+  if(r.mode === "all"){
+    h += sub('全部（'+L.length+'行）を1か所へ。');
+    SC_DEST.forEach(function(d){
+      h += '<button class="setb" style="margin-bottom:6px'+(r.all===d.k?';border-color:#e0a86a;color:#e0a86a':'')+(d.off?';opacity:.45':'')+'" '
+         + (d.off ? 'disabled' : 'onclick="scRtAll(\''+d.k+'\')"')+'>'+(r.all===d.k?'● ':'')+d.ic+' '+esc(d.lb)+'<small>'+esc(d.sub)+'</small></button>';
+    });
+  }else{
+    h += sub('行ごとに送り先を1つ選びます。選ばなかった行は送りません（記録には残ります）。');
+    L.forEach(function(x, i){
+      h += '<div style="border:1px solid #2b3647;border-radius:8px;padding:8px;margin:0 0 6px">'
+         + '<div style="font-size:14px;line-height:1.5;margin-bottom:6px">'+esc(x)+'</div>'
+         + '<div class="row" style="flex-wrap:wrap;gap:6px">'
+         + SC_DEST.map(function(d){ return chip(r.per[i]===d.k, d.ic+' '+esc(d.lb.replace("（準備中）","")), "scRtPer("+i+",'"+d.k+"')", d.off); }).join('')
+         + '</div></div>';
+    });
+  }
+  /* 送るボタン（送り先ごと） */
+  var any = false;
+  ["ai","work","memo"].forEach(function(k){
+    var n = scGroup(k).length; if(!n) return; any = true;
+    var d = scDest(k), u = scUri(k), done = r.sent[k];
+    h += '<a class="btn" style="display:block;text-align:center;text-decoration:none;margin-top:8px'+(done?';background:#2c3a2c':'')+'" href="'+esc(u)+'" onclick="return scSent(\''+k+'\')">'
+       + (done ? '✅ 送った（もう一度送る）：' : '送る：')+d.ic+' '+esc(d.lb)+'（'+n+'行）</a>';
+  });
+  if(scGroup("co").length){
+    any = true;
+    h += hd('🏢 会社のClaudeに頼みたいこと');
+    h += '<textarea class="inp" id="sc_ask" rows="3" style="width:100%" placeholder="例：優先順位をつけて、今日やる1つを決めたい">'+esc(r.ask||"")+'</textarea>';
+    h += '<button class="btn" style="margin-top:6px'+(r.sent.co?';background:#2c3a2c':'')+'" onclick="scCopyCo()">'+(r.sent.co?'✅ コピーした（もう一度コピー）':'📋 文を組み立ててコピー')+'</button>';
+    h += '<textarea class="inp" id="sc_co_out" rows="5" readonly style="width:100%;font-size:12px;opacity:.8;margin-top:6px">'+esc(scText("co"))+'</textarea>';
+  }
+  if(!any) h += sub('送り先を選ぶと、ここに送るボタンが出ます。');
+  else h += sub('Obsidian が開くたびに1回タップが要ります。送ったら戻ってきて、次のボタンを押してください。');
+  if(c.mark) h += '<button class="btn ghost" onclick="scNext(\'digfocus\')">🎯 「'+esc(c.mark.slice(0,30))+'」で集中ブロックを始める</button>';
+  h += '<button class="btn ghost" onclick="scClose()">閉じる</button>';
+  h += '<button class="btn link" style="padding:7px" onclick="scTo(\'mark\')">← 印に戻る</button>';
+  return h;
+}
+document.addEventListener("visibilitychange", function(){ if(!document.hidden && view==="sc" && scStep==="send") render(); });
 
 /* v44: ショートカットから #list=… で渡された内容を取り込む。
    取り込んだらハッシュを消す（再読み込みで二重に取り込まないため）。 */

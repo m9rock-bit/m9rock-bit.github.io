@@ -91,7 +91,7 @@ h1{font-size:21px;margin:2px 0 4px}
 var HKEY = "bmc_log_hub_v1";
 var RKEY = "bmc_routine_v1";
 var GKEY = "bmc_gym_v1";
-var APPVER = "B.M.C. 記録ハブ v16 ・ 2026-11-20";
+var APPVER = "B.M.C. 記録ハブ v17 ・ 2026-11-20";
 
 var H = {
   vault: "My Valut",
@@ -300,6 +300,13 @@ function parseStep(str){
   return { sec: parseInt(p[0],10)||60, text:(p[1]||"").trim(), say:(p[2]||"").trim() };
 }
 
+/* v17 (2026-11-20 routine v98): セルフコンディションの書き出しをどこへ送ったか（送ったものだけ）。 */
+function scRoute(x){
+  var r = x && x.rt; if(!r || !r.sent) return "";
+  var N = { ai:"🤖 AIへ", work:"💻 WORK", memo:"💭 メモ", co:"🏢 会社のClaude", task:"📥 タスク" };
+  var a = Object.keys(r.sent).filter(function(k){ return r.sent[k]; }).map(function(k){ return N[k] || k; });
+  return a.length ? " ／ 送り先: "+a.join("・") : "";
+}
 /* ---------- ① 実施ログ ---------- */
 function collect(){
   var out = [], since = sinceMs();
@@ -348,11 +355,12 @@ function collect(){
     /* v16 (2026-11-20 routine v97): 🕞 セルフコンディション（DB.sc）。8列＋#ID の形は変えない。
        名前＝状態／結果＝「今日n回目・次の1つ」／メモ＝原因（＋深掘りの書き出し・いちばん重いもの）。#ID は "c"+t。 */
     (r.sc||[]).forEach(function(x){
-      if(!x || !x.t || !x.st) return;
-      var res = (x.wave ? "今日"+x.wave+"回目" : "") + (x.next ? (x.wave ? "・" : "")+x.next : "");
+      if(!x || !x.t || (!x.st && x.urge==null)) return;
+      var res = [ (x.urge!=null && x.urge!=="" ? "衝動"+x.urge : ""), (x.wave ? "今日"+x.wave+"回目" : ""), (x.next||"") ].filter(Boolean).join("・");   /* v17: 衝動の強さを先頭に */
       var memo = (x.cause||"")
         + (x.dig ? (x.cause ? " ／ " : "")+"書き出し: "+String(x.dig).split(/\n/).map(function(l){return l.trim();}).filter(Boolean).join("・") : "")
-        + (x.mark ? " ／ いちばん重い: "+x.mark : "");
+        + (x.mark ? " ／ いちばん重い: "+x.mark : "")
+        + scRoute(x);   /* v17: routine v98 の送り先 */
       add("c"+x.t, x.t, line(x.t, "routine", "セルフコンディション", x.st, res, "", memo, "c"+x.t));
     });
     (r.notes||[]).forEach(function(x){
