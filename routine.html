@@ -1656,7 +1656,7 @@ function parkBtn(){
 
 /* --- 状態 --- */
 /* v27: 版の表示（ホーム最下部）。中身を変えたら、ここも必ず上げる。 */
-var APPVER = "切り替えルーティン v104 ・ 2026-11-20";
+var APPVER = "切り替えルーティン v105 ・ 2026-11-20";
 var view = "home";
 var curId = null;
 var startAt = 0;
@@ -5095,8 +5095,8 @@ function viewHome(){
     var row = function(lb, k){ return '<div style="margin:5px 0"><span style="font-size:13px">'+lb+'</span>'
       + '<input class="inp" type="text" readonly value="'+esc(base+'#open='+k)+'" onclick="this.select()" style="font-size:12px"></div>'; };
     h += '<div class="card"><label>📋 Task Sorter の「routine へ送る」コマンドID（v100・✂️ 今日の線を引く で使う）</label>'
-       + '<input class="inp" type="text" id="tscmd" value="'+esc(DB.taskSendCmd||"")+'" onchange="DB.taskSendCmd=this.value.trim();save()">'
-       + '<p class="note">入れておくと、✂️ の「1. Obsidian で一覧をコピー」が1タップで一覧をコピーします（例：templater-obsidian:00_System/Templates/○○.md）。空のときは Obsidian を開くだけです。</p></div>';
+       + '<input class="inp" type="text" id="tscmd" value="'+esc(taskCmd())+'" onchange="DB.taskSendCmd=this.value.trim();save()">'
+       + '<p class="note">v105 から既定で入っています（Template_Focus_Send）。押しても一覧がコピーされないときは、Obsidian の Templater の設定「Template hotkeys」に Template_Focus_Send.md を足してください。空にすると Obsidian を開くだけになります。</p></div>';
     h += '<div class="card"><label>📲 ほかのアプリを開いたら、ここへ移る（ショートカットのオートメーション）</label>'
        + row('🌊 見たい（YouTube・動画アプリに）', 'watch')
        + row('🌊 食べたい（デリバリー・コンビニアプリに）', 'eat')
@@ -9532,7 +9532,7 @@ var SC_DEST = [
   { k:"work", ic:"💻", lb:"仕事のメモ",       sub:"Quick Memo の 💻 WORK" },
   { k:"memo", ic:"💭", lb:"自分のメモ",       sub:"日次ノートの 💭 メモ" },
   { k:"co",   ic:"🏢", lb:"会社のClaudeへ",   sub:"文を組み立ててコピー" },
-  { k:"task", ic:"📥", lb:"タスク（準備中）", sub:"Inbox へ。形を合わせてから出します", off:true }
+  { k:"task", ic:"📥", lb:"タスク", sub:"Inbox へ（仕事／Private を選ぶ・1行＝1タップ）" }   /* v105: 形は指示_2026-11-20_2（個人秘書） */
 ];
 var SC_QM = "10_Action/Quick Memo.md";
 function scDest(k){ for(var i=0;i<SC_DEST.length;i++) if(SC_DEST[i].k===k) return SC_DEST[i]; return null; }
@@ -9614,6 +9614,7 @@ function viewScSend(h){
       h += '<button class="setb" style="margin-bottom:6px'+(r.all===d.k?';border-color:#e0a86a;color:#e0a86a':'')+(d.off?';opacity:.45':'')+'" '
          + (d.off ? 'disabled' : 'onclick="scRtAll(\''+d.k+'\')"')+'>'+(r.all===d.k?'● ':'')+d.ic+' '+esc(d.lb)+'<small>'+esc(d.sub)+'</small></button>';
     });
+    if(r.all === "task") h += scKindChips(-1);   /* v105 */
   }else{
     h += sub('行ごとに送り先を1つ選びます。選ばなかった行は送りません（記録には残ります）。');
     L.forEach(function(x, i){
@@ -9621,7 +9622,7 @@ function viewScSend(h){
          + '<div style="font-size:14px;line-height:1.5;margin-bottom:6px">'+esc(x)+'</div>'
          + '<div class="row" style="flex-wrap:wrap;gap:6px">'
          + SC_DEST.map(function(d){ return chip(r.per[i]===d.k, d.ic+' '+esc(d.lb.replace("（準備中）","")), "scRtPer("+i+",'"+d.k+"')", d.off); }).join('')
-         + '</div></div>';
+         + '</div>' + (r.per[i]==="task" ? scKindChips(i) : '') + '</div>';
     });
   }
   /* 送るボタン（送り先ごと） */
@@ -9632,6 +9633,18 @@ function viewScSend(h){
     h += '<a class="btn" style="display:block;text-align:center;text-decoration:none;margin-top:8px'+(done?';background:#2c3a2c':'')+'" href="'+esc(u)+'" onclick="return scSent(\''+k+'\')">'
        + (done ? '✅ 送った（もう一度送る）：' : '送る：')+d.ic+' '+esc(d.lb)+'（'+n+'行）</a>';
   });
+  /* v105: 📥 タスク（1行＝1タップ） */
+  if(scGroup("task").length){
+    any = true;
+    h += hd('📥 タスクとして Inbox へ（1行ずつ）');
+    L.forEach(function(x, i){
+      var on = (r.mode==="all") ? (r.all==="task") : (r.per[i]==="task"); if(!on) return;
+      var kd = scKind(i), u = kd ? scTaskUri(x, kd) : "", done = r.sentTask && r.sentTask[i];
+      if(!kd){ h += sub('「'+esc(x)+'」：仕事／Private を選んでください'); return; }
+      h += '<a class="btn" style="display:block;text-align:center;text-decoration:none;margin-top:6px'+(done?';background:#2c3a2c':'')+'" href="'+esc(u)+'" onclick="return scSentTask('+i+')">'
+         + (done ? '✅ 作った（もう一度）：' : '📥 作る：')+esc(x)+'<small style="display:block;opacity:.75">'+(kd==="W" ? '💼 仕事' : '🏠 Private・'+esc(kd))+'</small></a>';
+    });
+  }
   if(scGroup("co").length){
     any = true;
     h += hd('🏢 会社のClaudeに頼みたいこと');
@@ -9677,13 +9690,15 @@ function lnFresh(){
   var ago = Math.floor((now.getTime()-imp)/60000), agoL = ago < 60 ? ago+"分前" : Math.floor(ago/60)+"時間前";
   return { stale:!same, label: same ? "今日 "+hm+" に取り込んだ一覧（"+agoL+"・"+n+"件）" : (d.getMonth()+1)+"/"+d.getDate()+" "+hm+" の一覧です（前の日のもの）" };
 }
-function lnSendUri(){ return DB.taskSendCmd ? mealUri(DB.taskSendCmd) : "obsidian://open?vault="+encodeURIComponent(FB.vault||"My Valut"); }
+var TASK_SEND_DEF = "templater-obsidian:00_System/Templates/Template_Focus_Send.md";   /* v105: 個人秘書が用意（指示_2026-11-20_3） */
+function taskCmd(){ return (typeof DB.taskSendCmd === "string") ? DB.taskSendCmd : TASK_SEND_DEF; }
+function lnSendUri(){ var c = taskCmd(); return c ? mealUri(c) : "obsidian://open?vault="+encodeURIComponent(FB.vault||"My Valut"); }
 function lnFreshCard(){
   var f = lnFresh();
   if(!f.stale || lnFreshSkip === (scCur && scCur.t)) return '<p style="margin:0 0 6px;color:#8ea3b8;font-size:12px">📋 '+esc(f.label)+'　<button class="btn link" style="padding:0;width:auto;display:inline;font-size:12px" onclick="scKeep();save();ftFromClip()">取り込み直す</button></p>';
   return '<div style="border:1px solid #c49a6a;border-radius:10px;padding:8px 10px;margin:0 0 10px;background:#1f1a14">'
     + '<div style="font-size:13px;color:#e0a86a;margin-bottom:4px">📋 '+esc(f.label)+'</div>'
-    + '<div style="font-size:12.5px;color:#cfd8e3;line-height:1.7;margin-bottom:6px">いまのタスクで線を引くなら、先に一覧を新しくします。'+(DB.taskSendCmd ? '' : '<br>（Obsidian が開いたら Task Sorter の「🎯 routine へ今日のタスクを送る」を押して、ここへ戻ってください）')+'</div>'
+    + '<div style="font-size:12.5px;color:#cfd8e3;line-height:1.7;margin-bottom:6px">いまのタスクで線を引くなら、先に一覧を新しくします。'+(taskCmd() ? '<br>（Obsidian が開いて一覧がコピーされます。「コピーしました」が出たら、ここへ戻って 2 を押してください）' : '<br>（Obsidian が開いたら Task Sorter の「🎯 routine へ今日のタスクを送る」を押して、ここへ戻ってください）')+'</div>'
     + '<a class="btn" style="display:block;text-align:center;text-decoration:none;margin-top:0" href="'+esc(lnSendUri())+'">1. Obsidian で一覧をコピー</a>'
     + '<button class="btn" style="margin-top:6px" onclick="scKeep();save();ftFromClip()">2. 📋 取り込む</button>'
     + '<button class="btn link" style="padding:7px" onclick="lnFreshSkip=(scCur&&scCur.t);render()">このまま進む（書いて足す）</button>'
@@ -9931,7 +9946,7 @@ function scRecText(x){
   var out = "- "+hm+" 🕞 "+parts.join("｜").replace(/\n/g," ")+"\n";
   var L = String(x.dig||"").split(/\n/).map(function(l){ return l.trim(); }).filter(Boolean);
   if(L.length) out += "    - 書き出し: "+L.join("・")+(x.mark ? "（いちばん重い: "+x.mark+"）" : "")+"\n";
-  if(x.rt && x.rt.sent){ var N={ai:"🤖 AIへ",work:"💻 WORK",memo:"💭 メモ",co:"🏢 会社のClaude"}; var a=Object.keys(x.rt.sent).filter(function(k){return x.rt.sent[k];}).map(function(k){return N[k]||k;}); if(a.length) out += "    - 送り先: "+a.join("・")+"\n"; }
+  if(x.rt && x.rt.sent){ var N={ai:"🤖 AIへ",work:"💻 WORK",memo:"💭 メモ",co:"🏢 会社のClaude",task:"📥 タスク"}; var a=Object.keys(x.rt.sent).filter(function(k){return x.rt.sent[k];}).map(function(k){return N[k]||k;}); if(a.length) out += "    - 送り先: "+a.join("・")+"\n"; }
   if(x.ln){
     var o = x.ln;
     if(o.today && o.today.length) out += "    - ✂️ 今日やり切る: "+o.today.join("／")+"\n";
@@ -10050,7 +10065,7 @@ function swDue(k){
 }
 function swNewOp(op, memo){
   var x = swCur(); if(!x) return;
-  if(DB.focus.newOps) ftOp(op);
+  if(DB.focus.newOps !== false) ftOp(op);   /* v105: Task Sorter が読めるようになった（指示_2026-11-20_3）＝既定で新しい op を送る。false にすると memo に戻る */
   else ftOp({op:"memo", p:x.p, t:x.t, m:memo});
   save();
 }
@@ -10117,6 +10132,42 @@ function viewSweep(){
   if(sw.mode === "run" || sw.mode === "ask") h += '<button class="btn link" style="padding:7px;opacity:.7" onclick="swStop()">ここで終える</button>';
   return h;
 }
+
+
+/* ===== v105（2026-11-20 指示_2026-11-20_2・個人秘書が形を決めた）: 書き出しの 📥 タスク =====
+   ★形は Quick Memo の「📥 Inbox へ」（qmWriteInbox）と Smart Active Inbox の Private にそのまま合わせる。
+   ★仕事＝10_Action/Tasks/PM_tasks/、Private＝10_Action/Tasks/Private_Tasks/（tags: Private＋種類1つ・title 末尾に #Private）。
+   ★active_inbox: true／date・start・due＝今日／AI タグは付けない／hmc_synced・gcal_event_id は書かない。
+   ★memo は「🕞 セルフコンディションから」だけ（状態・原因を入れない。仕事のタスクは会社 Outlook へ出るため）。
+   ★1行＝1タップ（advanced-uri mode=new＝同名があれば別名で作る。上書き・追記しない）。ファイル名は \ / : * ? " < > | # ^ [ ] を _ に・80字。 */
+var SC_PKINDS = ["家のこと","手続き・お金","こどものこと","やりたいこと","自分を整える"];
+function scKind(i){ var r = scRt(); r.tk = r.tk || {}; return (r.mode==="all") ? (r.tk.all || "") : (r.tk[i] || ""); }
+function scSetKind(i, k){ scKeep(); var r = scRt(); r.tk = r.tk || {}; if(i < 0) r.tk.all = k; else r.tk[i] = k; save(); render(); }
+function scKindChips(i){
+  var cur = (i < 0) ? ((scRt().tk||{}).all || "") : ((scRt().tk||{})[i] || "");
+  var c = function(k, lb){ return '<button class="btn ghost" style="margin-top:0;width:auto;flex:0 0 auto;padding:5px 9px;font-size:12.5px'+(cur===k?';border:1px solid #e0a86a;color:#e0a86a':'')+'" onclick="scSetKind('+i+',\''+k+'\')">'+lb+'</button>'; };
+  return '<div class="row" style="flex-wrap:wrap;gap:5px;margin:6px 0 0">'+c("W","💼 仕事")+SC_PKINDS.map(function(k){ return c(k, "🏠 "+k); }).join('')+'</div>';
+}
+function scTaskUri(title, kind){
+  var d = new Date(), ymd = lnD(d), iso = d.toISOString();
+  var priv = (kind !== "W");
+  var t = String(title).replace(/\s+/g," ").trim();
+  var name = t.replace(/[\\\/:*?"<>|#^\[\]]/g,"_").trim().slice(0,80) || "無題";
+  var q = function(v){ return '"'+String(v).replace(/\\/g,"\\\\").replace(/"/g,'\\"')+'"'; };
+  var fm = "---\n"
+    + 'type: "single"\ntask_class: "task"\nstatus: "todo"\n'
+    + "title: "+q(t + (priv ? " #Private" : ""))+"\n"
+    + "date: "+ymd+"\nstart: "+ymd+"\ndue: "+ymd+"\n"
+    + 'allDay: true\nstartTime: "09:00"\nendTime: "18:00"\ncompleted: null\n'
+    + 'memo: "🕞 セルフコンディションから"\nrelated_note: ""\n'
+    + (priv ? "tags:\n  - Private\n  - "+kind+"\n" : "tags:\n")
+    + 'outlook_event_id: ""\nactive_inbox: true\n'
+    + "createdAt: "+iso+"\nupdatedAt: "+iso+"\n---\n";
+  var path = "10_Action/Tasks/"+(priv ? "Private_Tasks" : "PM_tasks")+"/"+name+".md";
+  return "obsidian://advanced-uri?vault="+encodeURIComponent(FB.vault||"My Valut")
+    + "&filepath="+encodeURIComponent(path)+"&mode=new&data="+encodeURIComponent(fm);
+}
+function scSentTask(i){ var r = scRt(); r.sentTask = r.sentTask || {}; r.sentTask[i] = Date.now(); r.sent.task = Date.now(); save(); setTimeout(function(){ render(); }, 1000); return true; }
 
 /* v44: ショートカットから #list=… で渡された内容を取り込む。
    取り込んだらハッシュを消す（再読み込みで二重に取り込まないため）。 */
