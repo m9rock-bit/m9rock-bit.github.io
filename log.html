@@ -91,7 +91,7 @@ h1{font-size:21px;margin:2px 0 4px}
 var HKEY = "bmc_log_hub_v1";
 var RKEY = "bmc_routine_v1";
 var GKEY = "bmc_gym_v1";
-var APPVER = "B.M.C. 記録ハブ v12 ・ 2026-10-25";
+var APPVER = "B.M.C. 記録ハブ v16 ・ 2026-11-20";
 
 var H = {
   vault: "My Valut",
@@ -239,6 +239,24 @@ function gymRoutine(g, r){
   }catch(e){}
   return "プログラム";
 }
+/* v14 (2026-11-16 指示_2026-11-15): gym v32 の 🔥 ほぐし（s.warm）を、筋トレの行の
+   「内容」欄の**先頭に1語だけ**足す。Obsidian 側に内容欄を読む処理が無いことは
+   Obsidian運用管理が現物で確認済み（指示_2026-11-14_4 Q1＝ア。テンプレート・_lib は0件）。
+   ★列の数（8列）・種別名「筋トレ」・#ID は変えていない＝`claude.md §1-1` の1の
+   「書き出す先のフォーマットを変える」には当たらない（セルの中身が1語増えるだけ）。
+   ★warm が無い回（gym v31 以前の記録・ほぐしを通っていない回）は何も足さない。
+   ★所要時間の列は筋トレだけの時間のまま（ほぐしの分は含めない。gym v32 の原則）。
+   形: 最後まで=「ほぐしA 8分 ・ 」／途中まで=「ほぐしA 3分（7/17） ・ 」／飛ばした=「ほぐし飛ばし ・ 」 */
+function warmHead(w){
+  if(!w) return "";
+  if(w.skip) return "ほぐし飛ばし ・ ";
+  /* k は gym の warmKey()＝A/B/C、それ以外のプログラムは "X"。X は A 用の後半を使うので A と書く */
+  var k = (w.k==="B"||w.k==="C") ? w.k : "A";
+  var m = Math.round(num(w.sec)/60); if(m<1 && num(w.sec)>0) m=1;
+  var done=num(w.done), total=num(w.total);
+  var part = (total && done < total) ? "（"+done+"/"+total+"）" : "";
+  return "ほぐし"+k+" "+m+"分"+part+" ・ ";
+}
 /* v3: 有酸素の「区間」を、続けて同じ設定のものはひとまとめにする。
    インターバルは同じ設定が回数ぶん並ぶだけなので、10ループを10行にすると読めない。
    逆に、走行中に速度・傾斜を変えた区間はそこで別の行に割れる＝**その日に上げた事実が残る。**
@@ -327,15 +345,30 @@ function collect(){
       var dur = durLabel(x.act) + (x.plan ? "（目安"+durLabel(x.plan)+"）" : "");
       add("x"+x.t, x.t, line(x.t, "routine", "項目", nm, "済", dur, "", "x"+x.t));
     });
+    /* v16 (2026-11-20 routine v97): 🕞 セルフコンディション（DB.sc）。8列＋#ID の形は変えない。
+       名前＝状態／結果＝「今日n回目・次の1つ」／メモ＝原因（＋深掘りの書き出し・いちばん重いもの）。#ID は "c"+t。 */
+    (r.sc||[]).forEach(function(x){
+      if(!x || !x.t || !x.st) return;
+      var res = (x.wave ? "今日"+x.wave+"回目" : "") + (x.next ? (x.wave ? "・" : "")+x.next : "");
+      var memo = (x.cause||"")
+        + (x.dig ? (x.cause ? " ／ " : "")+"書き出し: "+String(x.dig).split(/\n/).map(function(l){return l.trim();}).filter(Boolean).join("・") : "")
+        + (x.mark ? " ／ いちばん重い: "+x.mark : "");
+      add("c"+x.t, x.t, line(x.t, "routine", "セルフコンディション", x.st, res, "", memo, "c"+x.t));
+    });
     (r.notes||[]).forEach(function(x){
       if(!x || !x.t) return;
       add("n"+x.t, x.t, line(x.t, "routine", "メモ", x.step||"", "", "", x.v||"", "n"+x.t));
     });
+    /* v13 (2026-11-12 指示_2026-11-12 ③): 就寝（sid:"sleep"）の行は出さない。
+       ご本人のご記入「中途覚醒後に睡眠ボタンを押すことがある」のため、routine の
+       見守りの経過時間は眠った時間にならない。**記録そのものは routine 側に残っている**が、
+       ここ（Obsidian へ出す行）では睡眠時間として扱わない。★行の形（8列＋#ID）は変えていない。
+       ★中途覚醒（sid:"wake"）は従来どおり出す。 */
     (r.times||[]).forEach(function(x){
       if(!x || !x.t) return;
-      if(x.sid !== "sleep" && x.sid !== "wake") return;
+      if(x.sid !== "wake") return;
       add("t"+x.t, x.t, line(x.t, "routine",
-        (x.sid==="sleep" ? "就寝" : "中途覚醒"), x.step||"", "", mins(x.act), "", "t"+x.t));
+        "中途覚醒", x.step||"", "", mins(x.act), "", "t"+x.t));
     });
   }
 
@@ -355,7 +388,7 @@ function collect(){
         return gymName(g,id) + " " + (num(w) ? num(w)+"kg×" : "自重×") + reps;
       });
       add("g"+s.date, s.date, line(s.date, "gym", "筋トレ",
-        gymRoutine(g, s.routine), parts.join(" ・ "), mins(s.sec), "", "g"+s.date));
+        gymRoutine(g, s.routine), warmHead(s.warm)+parts.join(" ・ "), mins(s.sec), "", "g"+s.date));
     });
     (g.cardio||[]).forEach(function(c){
       if(!c || !c.date) return;
@@ -390,6 +423,20 @@ function collect(){
           "v"+c.date+"-"+i));
       });
     });
+    /* v15 (2026-11-20 仕様書_2026-11-14_3 Q1＝ア): gym v34 で gym に統合した
+       ストレッチ（DB.stretch.log）の行を、筋トレ・有酸素と同じ `実施ログ` へ送る。
+       形は Obsidian運用管理と合わせ済み（指示_2026-11-19 Q1＝ア＝このまま入れてよい。
+       実施ログの「種別」を決まった集合として読む処理は Obsidian 側に無いことを現物で確認）。
+       ★8列＋#ID の形は変えていない。種別に「ストレッチ」という値が1つ増えるだけで、
+         既存の「筋トレ」「有酸素」「有酸素区間」の行は1文字も変わらない。
+       ★日付（x.date）はミリ秒（gym の warmFinish が Date.now() を入れる）。
+         筋トレ・有酸素の date は「その日」の値なので、ここだけ時刻まで出る。
+       ★結果＝やった種目/全種目（途中でやめた回が読める）。所要＝実測。 */
+    ((g.stretch && g.stretch.log) || []).forEach(function(x){
+      if(!x || !x.date) return;
+      add("s"+x.date, x.date, line(x.date, "gym", "ストレッチ",
+        x.name||"ストレッチ", num(x.done)+"/"+num(x.total), mins(x.sec), "", "s"+x.date));
+    });
   }
 
   out.sort(function(a,b){ return a.t - b.t; });
@@ -401,7 +448,7 @@ function skippedCount(){
   var r = readApp(RKEY), g = readApp(GKEY);
   function cnt(arr, key){ (arr||[]).forEach(function(x){ if(x && x[key] && x[key] < since) n++; }); }
   if(r){ cnt(r.log,"t"); cnt(r.times,"t"); cnt(r.notes,"t"); }
-  if(g){ cnt(g.sessions,"date"); cnt(g.cardio,"date"); }
+  if(g){ cnt(g.sessions,"date"); cnt(g.cardio,"date"); cnt(g.stretch && g.stretch.log,"date"); }   /* v15 */
   return n;
 }
 
@@ -472,7 +519,9 @@ function defLinesGym(){
 
 function isSent(id){ return H.sent.indexOf(id) >= 0; }
 /* v7: gym（g=筋トレ c=有酸素 v=有酸素区間）を先に送る。同じ種類の中は古い順のまま。 */
-function isGym(id){ return /^[gcv]/.test(id); }
+/* v15: ストレッチの行（"s"+ミリ秒）も gym と同じ優先で先に送る。
+   ★セット定義の id は "s"+印+"-番号" で必ず "-" を含むため、ここには掛からない。 */
+function isGym(id){ return /^[gcv]/.test(id) || /^s\d+$/.test(id); }
 function unsentLog(){
   var a = collect().filter(function(x){ return !isSent(x.id); });
   return a.filter(function(x){ return isGym(x.id); }).concat(a.filter(function(x){ return !isGym(x.id); }));
