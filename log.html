@@ -91,7 +91,7 @@ h1{font-size:21px;margin:2px 0 4px}
 var HKEY = "bmc_log_hub_v1";
 var RKEY = "bmc_routine_v1";
 var GKEY = "bmc_gym_v1";
-var APPVER = "B.M.C. 記録ハブ v17 ・ 2026-11-20";
+var APPVER = "B.M.C. 記録ハブ v18 ・ 2026-11-21";
 
 var H = {
   vault: "My Valut",
@@ -356,7 +356,7 @@ function collect(){
        名前＝状態／結果＝「今日n回目・次の1つ」／メモ＝原因（＋深掘りの書き出し・いちばん重いもの）。#ID は "c"+t。 */
     (r.sc||[]).forEach(function(x){
       if(!x || !x.t || (!x.st && x.urge==null)) return;
-      var res = [ (x.urge!=null && x.urge!=="" ? "衝動"+x.urge : ""), (x.wave ? "今日"+x.wave+"回目" : ""), (x.next||"") ].filter(Boolean).join("・");   /* v17: 衝動の強さを先頭に */
+      var res = [ (x.urge!=null && x.urge!=="" ? "衝動"+x.urge : ""), (x.hun!=null && x.hun!=="" ? "空腹"+x.hun : ""), (x.wave ? "今日"+x.wave+"回目" : ""), (x.next||""), (x.wait ? (x.wait.res==="ate" ? "⏳15分→食べた" : (x.wait.res==="ok" ? "⏳15分→もういい" : "⏳15分")) : (x.ateAt ? "🍽 記録して食べた" : "")) ].filter(Boolean).join("・");   /* v18 (routine v106): 空腹と15分の結果 */   /* v17: 衝動の強さを先頭に */
       var memo = (x.cause||"")
         + (x.dig ? (x.cause ? " ／ " : "")+"書き出し: "+String(x.dig).split(/\n/).map(function(l){return l.trim();}).filter(Boolean).join("・") : "")
         + (x.mark ? " ／ いちばん重い: "+x.mark : "")

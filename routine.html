@@ -902,12 +902,16 @@ var DB = { v:19, sets:null, chime:true, voice:true, third:true, noteOpen:false, 
   showWeek:false };
 try{
   if(!Array.isArray(DB.sc)) DB.sc = [];
-  if(!Array.isArray(DB.plans)) DB.plans = [];   /* v99: ✂️ で決めた「いつ・最初の5分」（★読み戻しにも足してある） */   /* v97: 🕞 セルフコンディションの記録（★読み戻しにも足してある） */
+  if(!Array.isArray(DB.plans)) DB.plans = [];
+  if(!DB.relax || typeof DB.relax!=="object") DB.relax = { set:"ベッドタイムルーティン", from:"20:15", to:"22:00", day:"" };   /* v106: 🛋 ゆるめる（★読み戻しにも足してある） */
+  if(!DB.outlook || typeof DB.outlook!=="object") DB.outlook = {};   /* v106: 🌅 今日の見通し（★読み戻しにも足してある） */   /* v99: ✂️ で決めた「いつ・最初の5分」（★読み戻しにも足してある） */   /* v97: 🕞 セルフコンディションの記録（★読み戻しにも足してある） */
   var raw = localStorage.getItem(KEY);
   if(raw){
     var p = JSON.parse(raw);
     if(Array.isArray(p.sc)) DB.sc = p.sc;   /* v97 */
     if(Array.isArray(p.plans)) DB.plans = p.plans;   /* v99 */
+    if(p.relax && typeof p.relax==="object") DB.relax = p.relax;   /* v106 */
+    if(p.outlook && typeof p.outlook==="object") DB.outlook = p.outlook;   /* v106 */
     if(typeof p.chime==="boolean") DB.chime = p.chime;
     if(typeof p.voice==="boolean") DB.voice = p.voice;
     if(typeof p.spotifyUrl==="string") DB.spotifyUrl = p.spotifyUrl;
@@ -1656,7 +1660,7 @@ function parkBtn(){
 
 /* --- 状態 --- */
 /* v27: 版の表示（ホーム最下部）。中身を変えたら、ここも必ず上げる。 */
-var APPVER = "切り替えルーティン v105 ・ 2026-11-20";
+var APPVER = "切り替えルーティン v106 ・ 2026-11-21";
 var view = "home";
 var curId = null;
 var startAt = 0;
@@ -4617,8 +4621,10 @@ function render(){
   else if(view==="bl") h = viewBl();   /* v44 */
   else if(view==="scale") h = viewScale();
   else if(view==="backup") h = viewBackup();
+  else if(view==="relaxPick") h = viewRelaxPick();   /* v106 */
   if(view==="home" || view==="run") h = planBanner() + h;   /* v99: ✂️ で決めた「最初の5分」をその日に出す */
   if(view==="done" || view==="focusDone" || (view==="home" && !curId)) h = scPendCard(view) + h;   /* v102: 🕞 の記録がまだなら上に出す */
+  if(view==="home" || view==="run") h = scWaitCard() + relaxBanner() + olCard() + h;   /* v106: ⏳ 15分・🛋 ゆるめる・🌅 今日の見通し */
   if(view==="home" || view==="run"){   /* v100: 午前のうちに（朝の仕事準備の実行中にも出す）今日の一覧を取り込んでいなければ1行だけ出す（✂️・🎯 で使う） */
     var _f = (typeof lnFresh==="function") ? lnFresh() : null;
     if(_f && _f.stale && new Date().getHours() < 12) h = '<p style="margin:0 0 8px;color:#e8c99a;font-size:12.5px;line-height:1.7">📋 今日のタスク一覧はまだ取り込んでいません（✂️ 今日の線・🎯 で使います）　<a class="btn link" style="padding:0;width:auto;display:inline;font-size:12.5px" href="'+esc(lnSendUri())+'">Obsidianでコピー</a>　<button class="btn link" style="padding:0;width:auto;display:inline;font-size:12.5px" onclick="ftFromClip()">📋 取り込む</button></p>' + h;
@@ -9372,7 +9378,7 @@ function scWaveNo(){
   return DB.sc.filter(function(x){ return x && x.t >= d0; }).length;
 }
 function scGo(from){
-  scCur = { t:0, urge:null, st:"", cause:"", next:"", dig:"", mark:"", wave:0, from:from||"" };
+  scCur = { t:0, urge:null, hun:null, st:"", cause:"", next:"", dig:"", mark:"", wave:0, from:from||"" };
   scStep = "urge"; view = "sc"; render();   /* v98: まず衝動の強さを観察する（ご指示 2026-11-20 11:14） */
 }
 function scVal(id){ var el = document.getElementById(id); return el ? String(el.value||"") : null; }
@@ -9384,17 +9390,28 @@ function scKeep(){
   lnKeep();   /* v99 */
 }
 /* v98: ⓪ 食べたい衝動の強さ（0〜10）。ここで記録を作る（いちばん最初に押すものなので）。 */
-function scPickUrge(n){
+/* v106（2026-11-21 仕様書_2026-11-21 §3-1）: ⓪ 食べたい衝動 と ⓪' 空腹 の2つを同じ画面で。両方そろったら分かれ道へ。
+   ★数字は「どちらの打ち手にするか」を選ぶためだけに使う（空いていないから食べてはいけない、の判定には使わない）。 */
+function scEnsure(){
   if(!scCur) scGo("");
-  scCur.urge = n;
   if(!scCur.t){
     scCur.t = Date.now();
     DB.sc.push(scCur);
     if(DB.sc.length > 600) DB.sc = DB.sc.slice(-600);
     scCur.wave = scWaveNo();
   }
-  save(); scStep = "state"; render();
 }
+function scPickUrge(n){ scEnsure(); scCur.urge = n; save(); scRoute(); }
+function scPickHun(n){ scEnsure(); scCur.hun = n; save(); scRoute(); }
+function scRoute(){
+  var c = scCur;
+  if(!c || c.urge==null || c.hun==null){ scStep = "urge"; render(); return; }
+  if(c.urge === 0) scStep = "state";
+  else if(c.hun >= c.urge) scStep = "hungry";
+  else scStep = "feel";
+  render();
+}
+function scSetState(i){ scKeep(); scEnsure(); scCur.st = (scCur.st === SC_STATES[i]) ? "" : (SC_STATES[i] || ""); save(); render(); }
 function scPickState(i){
   if(!scCur) scGo("");
   scCur.st = SC_STATES[i] || "";
@@ -9452,13 +9469,53 @@ function viewSc(){
   var hd = function(t){ return '<p style="margin:14px 0 6px;font-weight:600;line-height:1.5">'+t+'</p>'; };
   var sub = function(t){ return '<p style="margin:0 0 8px;color:#8ea3b8;font-size:12.5px;line-height:1.75">'+t+'</p>'; };
   if(scStep === "urge"){
+    var _grid = function(fn, cur){
+      var g = '<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:6px;margin:0 0 8px">';
+      for(var u=0; u<=10; u++){ var on = (cur === u); g += '<button class="btn ghost" style="margin-top:0;padding:11px 0;font-size:17px'+(on?';border:1px solid #e0a86a;color:#e0a86a':'')+'" onclick="'+fn+'('+u+')">'+u+'</button>'; }
+      return g + '</div>';
+    };
+    h += sub('当てるものではありません。いまの感じを眺めて、近い数字を1つずつ。0＝ない／5＝はっきりある／10＝いちばん強い。');
     h += hd('⓪ 食べたい衝動は、いまどのくらい？');
-    h += sub('当てるものではありません。いまの感じを眺めて、近い数字を1つ。0＝ない／5＝はっきりある／10＝いちばん強い。');
-    h += '<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:6px;margin:0 0 8px">';
-    for(var u=0; u<=10; u++) h += '<button class="btn ghost" style="margin-top:0;padding:12px 0;font-size:17px" onclick="scPickUrge('+u+')">'+u+'</button>';
-    h += '</div>';
+    h += _grid("scPickUrge", c.urge);
+    h += hd("⓪' おなかは、どのくらい空いている？");
+    h += _grid("scPickHun", c.hun);
+    h += sub('2つ選ぶと次へ進みます。おなかの方が強ければ「記録して食べる」、気持ちの方が強ければ「⏳ 15分あとにする」へ。');
+  }else if(scStep === "hungry"){
+    h += sub('食べたい衝動 '+c.urge+'　・　空腹 '+c.hun);
+    h += hd('🍽 おなかが空いている側です');
+    h += sub('我慢しなくて大丈夫です。先に Meal Log で記録してから、枠の中で食べましょう。');
+    h += scAteLink(c, '🍽 記録してから食べる（Meal Log を開く）', true);
+    h += '<button class="btn ghost" onclick="scTo(\'wait\')">気持ちの方かもしれない → ⏳ 15分あとにする</button>';
+    h += '<button class="btn link" style="padding:7px" onclick="scTo(\'urge\')">← 数字に戻る</button>';
+  }else if(scStep === "feel"){
+    h += sub('食べたい衝動 '+c.urge+'　・　空腹 '+c.hun+'　・　気持ちの方が強いようです'+(c.wave ? '　・　今日 '+c.wave+' 回目' : ''));
+    h += hd('いま、どんな状態？（押さなくても進めます）');
+    h += '<div class="row" style="flex-wrap:wrap;gap:6px;margin:0 0 8px">'
+       + SC_STATES.map(function(x, i){ var on = (c.st === x); return '<button class="btn ghost" style="margin-top:0;width:auto;flex:0 0 auto;padding:6px 10px'+(on?';border:1px solid #e0a86a;color:#e0a86a':'')+'" onclick="scSetState('+i+')">'+esc(x)+'</button>'; }).join('')
+       + '</div>';
+    h += hd('何がそうさせていそう？（一言・空でOK）');
+    h += '<div class="row" style="flex-wrap:wrap;gap:6px;margin:0 0 8px">'
+       + SC_HINTS.map(function(w, i){ return '<button class="btn ghost" style="margin-top:0;width:auto;flex:0 0 auto;padding:6px 10px" onclick="scHint('+i+')">'+esc(w)+'</button>'; }).join('')
+       + '</div>';
+    h += '<textarea class="inp" id="sc_cause" rows="2" style="width:100%" placeholder="例：寝かしつけ前で気が張っている">'+esc(c.cause)+'</textarea>';
+    h += '<button class="btn" style="padding:16px;font-size:16px" onclick="scTo(\'wait\')">⏳ 15分あとにする<br><span style="font-size:12px;opacity:.85">食べてもいい。ただし15分後に</span></button>';
+    h += '<button class="btn ghost" onclick="scTo(\'next\')">いつもの「次の1つ」を選ぶ（✂️・🎯・✍️ など）</button>';
+    h += scAteLink(c, 'それでも今すぐ食べる（先に Meal Log で記録）', false);
+    h += '<button class="btn link" style="padding:7px" onclick="scTo(\'urge\')">← 数字に戻る</button>';
+  }else if(scStep === "wait"){
+    h += hd('⏳ 15分のあいだに（1つ選ぶ）');
+    h += sub('15分たったら、ホームの上で「まだ食べたい？」と聞きます。食べるなら、そこから先に記録します。');
+    var _rs = relaxSet();
+    if(_rs) h += '<button class="setb" style="margin-bottom:8px;border-color:#8a7ac4" onclick="scWaitStart(\'relax\')">🛋 '+esc(_rs.icon+" "+_rs.name)+'<small>いつものゆるめるセット</small></button>';
+    h += '<button class="setb" style="margin-bottom:8px" onclick="scWaitStart(\'out\')">📺 アプリの外で過ごす（YouTube・ゲーム）<small>iPhone のタイマーに15分を渡します（画面を離れても鳴ります）</small></button>';
+    if(breatherSet())      h += '<button class="setb" style="margin-bottom:8px" onclick="scWaitStart(\'rest\')">🍵 ひと息<small>約7分。最後に次にやることを1つだけ決めます</small></button>';
+    if(setOf("breath478")) h += '<button class="setb" style="margin-bottom:8px" onclick="scWaitStart(\'breath\')">🌬️ 呼吸法</button>';
+    if(setOf("moveplace")) h += '<button class="setb" style="margin-bottom:8px" onclick="scWaitStart(\'move\')">🚶 場所を変える</button>';
+    if(new Date().getHours() >= 15) h += '<button class="setb" style="margin-bottom:8px;border-color:#c49a6a" onclick="scWaitStart(\'ln\')">✂️ 今日の線を引く</button>';
+    h += '<button class="btn ghost" onclick="scWaitStart(\'none\')">そのまま待つ（ホームへ）</button>';
+    h += '<button class="btn link" style="padding:7px" onclick="scTo(\'urge\')">← 数字に戻る</button>';
   }else if(scStep === "state"){
-    h += sub((c.urge!=null ? '食べたい衝動：'+c.urge+'　・　' : '')+'点数はつけません。');
+    h += sub((c.urge!=null ? '食べたい衝動：'+c.urge+'　・　' : '')+(c.hun!=null ? '空腹：'+c.hun+'　・　' : '')+'点数はつけません。');
     h += hd('① いま、どんな状態？（1つ）');
     SC_STATES.forEach(function(x, i){
       h += '<button class="setb" style="margin-bottom:8px" onclick="scPickState('+i+')">'+esc(x)+'</button>';
@@ -9934,14 +9991,41 @@ function planBanner(){
    ★行の形（PC 版と揃える。指示_2026-11-20 §2）: `- HH:MM 🕞 衝動7｜😰 焦り｜原因: …｜次: …｜今日2回目` ＋ 書き出し・送り先・✂️ の決めたことを下の段に。 */
 var SC_HEAD = "🕞 15:30 セルフコンディション";
 function scById(t){ for(var i=DB.sc.length-1;i>=0;i--) if(DB.sc[i] && DB.sc[i].t===t) return DB.sc[i]; return null; }
-function scPendList(){ var lim = Date.now()-86400000; return DB.sc.filter(function(x){ return x && x.t && x.t > lim && !x.obs && (x.st || x.urge!=null); }); }
+/* v106: 24時間で案内が消えるのをやめた（送るか「記録しない」を押すまで残す）。v97 より前の記録は無いので 11/20 を下限にする。
+   ⏳ 15分の答えを待っている回は、答えが出るまで（または6時間たつまで）送る対象に入れない。 */
+var SC_FLOOR = new Date(2026,10,20).getTime();
+function scPendList(){ var now = Date.now(); return DB.sc.filter(function(x){ return x && x.t && x.t >= SC_FLOOR && !x.obs && (x.st || x.urge!=null) && !(x.wait && !x.wait.res && now < x.wait.end + 6*3600000); }); }
+/* v106: 同じ日の未記録をまとめて1回で送る（Obsidian への受け渡しは1回につきノート1つ・見出し1つ） */
+function scPendGroups(){
+  var map = {}, order = [];
+  scPendList().forEach(function(x){ var k = fbNoteName(x.t); if(!map[k]){ map[k] = []; order.push(k); } map[k].push(x); });
+  return order.map(function(k){ return map[k]; });
+}
+function scGroupOf(x){ var k = fbNoteName(x.t); var g = scPendList().filter(function(y){ return fbNoteName(y.t) === k; }); if(g.indexOf(x) < 0) g.push(x); return g.sort(function(a,b){ return a.t-b.t; }); }
+function scRecUriList(list){
+  return "obsidian://advanced-uri?vault="+encodeURIComponent(FB.vault||"My Valut")
+    + "&filepath="+encodeURIComponent(fbNotePath(list[0].t))+"&heading="+encodeURIComponent(SC_HEAD)
+    + "&mode=append&data="+encodeURIComponent(list.map(scRecText).join(""));
+}
+function scRecTapList(csv, close){
+  try{ scKeep(); }catch(e){}
+  var now = Date.now(), cur = scCur && scCur.t;
+  String(csv).split(",").forEach(function(s){ var x = scById(+s); if(x) x.obs = now; });
+  save();
+  if(close) setTimeout(function(){ if(scCur && scCur.t===cur){ scCur = null; scStep = "state"; } if(view==="sc") view = curId ? "run" : "home"; render(); }, 1000);
+  else setTimeout(function(){ render(); }, 1000);
+  return true;
+}
 function scRecText(x){
   var d = new Date(x.t), hm = fbHm(d);
   var parts = [];
   if(x.urge!=null && x.urge!=="") parts.push("衝動"+x.urge);
+  if(x.hun!=null && x.hun!=="") parts.push("空腹"+x.hun);   /* v106 */
   parts.push(x.st || "（状態なし）");
   if(x.cause) parts.push("原因: "+x.cause);
   if(x.next) parts.push("次: "+x.next);
+  if(x.wait) parts.push(x.wait.res==="ate" ? "⏳15分→食べた "+fbHm(new Date(x.wait.at||x.wait.end)) : (x.wait.res==="ok" ? "⏳15分→もういい" : "⏳15分（答えなし）"));   /* v106 */
+  else if(x.ateAt) parts.push("🍽 記録して食べた "+fbHm(new Date(x.ateAt)));   /* v106 */
   if(x.wave) parts.push("今日"+x.wave+"回目");
   var out = "- "+hm+" 🕞 "+parts.join("｜").replace(/\n/g," ")+"\n";
   var L = String(x.dig||"").split(/\n/).map(function(l){ return l.trim(); }).filter(Boolean);
@@ -9973,21 +10057,148 @@ function scRecTap(t, close){
 function scCloseLink(label, style){
   var x = scCur && scCur.t ? scById(scCur.t) : null;
   if(!x) return '<button class="btn '+(style||"ghost")+'" onclick="scClose()">'+label+'</button>';
-  return '<a class="btn '+(style||"ghost")+'" style="display:block;text-align:center;text-decoration:none;margin-top:8px" href="'+esc(scRecUri(x))+'" onclick="return scRecTap('+x.t+',true)">'+label+'</a>';
+  var g = scGroupOf(x);
+  return '<a class="btn '+(style||"ghost")+'" style="display:block;text-align:center;text-decoration:none;margin-top:8px" href="'+esc(scRecUriList(g))+'" onclick="return scRecTapList(\''+g.map(function(y){return y.t;}).join(",")+'\',true)">'+label+(g.length>1 ? '（今日の '+g.length+'件をまとめて）' : '')+'</a>';
 }
 /* セットの完了画面・集中の終わりの画面・ホームの上に出す「まだ記録していない回」 */
 function scPendCard(where){
-  var a = scPendList(); if(!a.length) return "";
-  var x = a[a.length-1], d = new Date(x.t);
+  var gs = scPendGroups(); if(!gs.length) return "";
+  var g = gs[0], d0 = new Date(g[0].t);   /* 古い日から。1回の受け渡し＝その日の分ぜんぶ */
+  var ids = g.map(function(y){ return y.t; }).join(",");
+  var today = (fbNoteName(Date.now()) === fbNoteName(g[0].t));
+  var rest = 0; gs.slice(1).forEach(function(x){ rest += x.length; });
   var waitSend = (where === "focusDone") && ftPending() && !(DB.focus.opsSentAt);
   var h = '<div style="border:1px solid #c49a6a;border-radius:10px;padding:8px 10px;margin:0 0 10px;background:#1f1a14">'
-        + '<div style="font-size:12.5px;color:#e0a86a;margin-bottom:4px">🕞 '+fbHm(d)+' のセルフコンディションを、まだ Obsidian に記録していません'+(a.length>1?'（ほか'+(a.length-1)+'件）':'')+'</div>';
+        + '<div style="font-size:12.5px;color:#e0a86a;margin-bottom:4px">🕞 '+(today ? '今日' : (d0.getMonth()+1)+'/'+d0.getDate())+'のセルフコンディション '+g.length+'件を、まだ Obsidian に記録していません'+(rest?'（ほかの日に '+rest+'件）':'')+'</div>';
   if(waitSend) h += '<div style="font-size:12px;color:#cfd8e3;margin-bottom:6px">先に下の 📤 でタスクを戻してから、戻ってきてここを押してください。</div>';
-  h += '<a class="btn'+(waitSend?' ghost':'')+'" style="display:block;text-align:center;text-decoration:none;margin-top:0" href="'+esc(scRecUri(x))+'" onclick="return scRecTap('+x.t+',false)">🕞 Obsidian に記録する</a>';
-  if(where === "home") h += '<button class="btn link" style="padding:6px;font-size:12px" onclick="scPendDrop('+x.t+')">記録しない（この回を消さずに、案内だけ消す）</button>';
+  h += '<a class="btn'+(waitSend?' ghost':'')+'" style="display:block;text-align:center;text-decoration:none;margin-top:0" href="'+esc(scRecUriList(g))+'" onclick="return scRecTapList(\''+ids+'\',false)">🕞 Obsidian に記録する（'+g.length+'件をまとめて）</a>';
+  if(where === "home") h += '<button class="btn link" style="padding:6px;font-size:12px" onclick="scPendDrop(\''+ids+'\')">記録しない（記録は消さずに、案内だけ消す）</button>';
   return h + '</div>';
 }
-function scPendDrop(t){ var x = scById(t); if(x){ x.obs = -1; save(); render(); } }
+function scPendDrop(csv){ String(csv).split(",").forEach(function(s){ var x = scById(+s); if(x) x.obs = -1; }); save(); render(); }
+
+
+/* ===================== v106（2026-11-21 仕様書_2026-11-21 §3・ご承認「提案の通りで進めてください」）=====
+   ⏳ 15分あとにする／🍽 記録してから食べる／🛋 ゆるめる（20:30 のアラーム → ベッドタイムルーティン）／🌅 今日の見通し。
+   ★15分の待ちは DB.sc[].wait = {t, end, res:"ate"|"ok"|"unk", at, how}。答えはホームの上のカードで聞く（画面を離れても end 時刻で判定する）。
+   ★📺（アプリの外）を選んだときだけ iPhone の標準タイマー（DB.scName）へ 900 秒を渡す。routine の中で過ごすときは渡さない（積み重ね防止）。
+   ★🛋 は標準タイマーを使わない（朝〜夕方に別のセットを始めると重なる・消されるため）。合図はご本人が時計に入れた毎日 20:30 のアラーム。
+   ★🌅 の行は、日次ノートの見出しが新しい名前に変わるまで、いまの見出し「🚩 いつもと違う日（朝に確かめる）」へ入れる（行の形も今の 🚩 行のまま＝PC の部品が読める）。
+   ★Meal Log へは引数を渡せない（コマンドを開くだけ）。食事の行に 🕞 の印は付かない。🕞 の行に「⏳15分→食べた HH:MM」を残し、週次レポートが時刻で突き合わせる。 */
+var SC_WAIT_MS = 15*60000;
+function scAteLink(c, label, primary){
+  var u = mealUri(MEAL.cmdLog), t = (c && c.t) || 0;
+  if(!u) return '<button class="btn'+(primary?'':' ghost')+'" onclick="scAteNow('+t+',false)">'+label+'</button><p class="note">（食事記録のコマンドIDが空なので、Obsidian は開きません。設定の 🗒 →送信先の設定で入れられます）</p>';
+  return '<a class="btn'+(primary?'':' ghost')+'" style="display:block;text-align:center;text-decoration:none;margin-top:8px" href="'+esc(u)+'" onclick="return scAteNow('+t+',true)">'+label+'</a>';
+}
+function scAteNow(t, isLink){
+  try{ scKeep(); }catch(e){}
+  var x = t ? scById(t) : scCur;
+  if(x){ x.ateAt = Date.now(); if(!x.next) x.next = (x.hun!=null && x.urge!=null && x.hun >= x.urge) ? "🍽 空腹→記録して食べる" : "🍽 記録して食べる"; }
+  save();
+  setTimeout(function(){ if(scCur && (!t || scCur.t===t)){ scCur = null; scStep = "state"; } if(view==="sc") view = curId ? "run" : "home"; render(); }, isLink ? 1000 : 0);
+  return true;
+}
+function scWaitStart(k){
+  scKeep(); scEnsure();
+  var x = scCur, now = Date.now();
+  var LB = { relax:"🛋 "+(relaxSet() ? relaxSet().name : "ゆるめるセット"), out:"📺 アプリの外で", rest:"🍵 ひと息", breath:"🌬️ 呼吸法", move:"🚶 場所を変える", ln:"✂️ 今日の線を引く", none:"そのまま待つ" };
+  x.wait = { t:now, end:now + SC_WAIT_MS, res:"", how:k };
+  x.next = "⏳15分のあいだに: " + (LB[k] || k);
+  save();
+  if(k === "ln"){ var nx = x.next; lnGo(); x.next = nx; save(); return; }
+  if(k === "breath" || k === "rest" || k === "move"){ var nx2 = x.next; scNext(k); x.next = nx2; save(); return; }
+  scCur = null; scStep = "state";
+  if(k === "relax"){ var s = relaxSet(); if(s){ DB.relax.day = olDay(); save(); scRunSet(s.id); return; } }
+  view = curId ? "run" : "home"; render();
+  if(k === "out") nativeTimer(SC_WAIT_MS/1000);
+}
+function scWaitList(){ return DB.sc.filter(function(x){ return x && x.wait && !x.wait.res; }); }
+function scWaitRes(t, res, isLink){
+  var x = scById(t); if(!x || !x.wait) return true;
+  x.wait.res = res; x.wait.at = Date.now();
+  if(res === "ate") x.ateAt = x.wait.at;
+  save();
+  if(isLink) setTimeout(function(){ render(); }, 1000); else render();
+  return true;
+}
+function scWaitCard(){
+  var a = scWaitList(); if(!a.length) return "";
+  var x = a[a.length-1], now = Date.now();
+  if(now - x.wait.end > 6*3600000){ x.wait.res = "unk"; save(); return ""; }   /* 6時間たっても答えが無ければ「答えなし」で閉じる */
+  var h = '<div style="border:1px solid #6a9ac4;border-radius:10px;padding:9px 10px;margin:0 0 10px;background:#141c24">';
+  if(now < x.wait.end){
+    h += '<div style="font-size:13px;color:#9ac4e8;line-height:1.6">⏳ '+fbHm(new Date(x.wait.end))+' まで待っています（あと約'+Math.ceil((x.wait.end-now)/60000)+'分）<br><span style="font-size:12px;color:#8ea3b8">食べてもいい、ただし15分後に。</span></div>';
+    h += '<button class="btn link" style="padding:6px;font-size:12px" onclick="scWaitRes('+x.t+',\'ok\')">🙆 もう大丈夫（食べない）</button>';
+  }else{
+    h += '<div style="font-size:14px;color:#9ac4e8;margin-bottom:4px">⏳ 15分たちました。まだ食べたい？</div>';
+    var u = mealUri(MEAL.cmdLog);
+    if(u) h += '<a class="btn" style="display:block;text-align:center;text-decoration:none;margin-top:4px" href="'+esc(u)+'" onclick="return scWaitRes('+x.t+',\'ate\',true)">🍽 食べる（先に Meal Log で記録）</a>';
+    else  h += '<button class="btn" onclick="scWaitRes('+x.t+',\'ate\')">🍽 食べる（先に記録してから）</button>';
+    h += '<button class="btn ghost" onclick="scWaitRes('+x.t+',\'ok\')">🙆 もういい</button>';
+  }
+  return h + '</div>';
+}
+
+/* 🛋 ゆるめる（毎日 20:15〜22:00 にホームの先頭。セットは DB.relax.set の名前で探す） */
+function olDay(){ return fbNoteName(Date.now()); }
+function relaxSet(){ var nm = (DB.relax && DB.relax.set) || ""; for(var i=0;i<DB.sets.length;i++){ if(DB.sets[i].name === nm) return DB.sets[i]; } return null; }
+function rxMin(s){ var m = String(s||"").split(":"); return (parseInt(m[0],10)||0)*60 + (parseInt(m[1],10)||0); }
+function relaxBanner(){
+  var r = DB.relax || {}, d = new Date(), mm = d.getHours()*60 + d.getMinutes();
+  if(mm < rxMin(r.from||"20:15") || mm > rxMin(r.to||"22:00")) return "";
+  if(r.day === olDay()) return "";
+  var s = relaxSet();
+  if(s && curId === s.id) return "";
+  if(!s) return '<div style="border:1px solid #8a7ac4;border-radius:10px;padding:8px 10px;margin:0 0 10px;background:#1a1726"><div style="font-size:13px;color:#c4b8f0">🛋 ゆるめる時間です。セット「'+esc(r.set||"")+'」が見つかりません。</div><button class="btn ghost" onclick="go(\'relaxPick\')">🛋 のセットを選ぶ</button></div>';
+  return '<button class="setb" style="border-color:#8a7ac4;background:#1a1726;margin-bottom:4px" onclick="relaxGo()">🛋 ゆるめる時間 ▶ '+esc(s.icon+" "+s.name)+'<small>20:30 のアラームの合図。押せばそのまま始まります</small></button>'
+       + '<div class="row" style="gap:6px;margin:0 0 10px"><button class="btn link" style="padding:5px;font-size:12px" onclick="relaxSkip()">今日はやめておく</button><button class="btn link" style="padding:5px;font-size:12px" onclick="go(\'relaxPick\')">セットを選び直す</button></div>';
+}
+function relaxGo(){ var s = relaxSet(); if(!s) return; DB.relax.day = olDay(); save(); scRunSet(s.id); }
+function relaxSkip(){ DB.relax.day = olDay(); save(); render(); }
+function relaxPickSet(i){ var s = DB.sets[i]; if(!s) return; DB.relax.set = s.name; save(); go("home"); }
+function viewRelaxPick(){
+  var h = '<h1>🛋 ゆるめるセットを選ぶ</h1><p class="sub">毎日 20:15〜22:00 にホームの先頭に出すセットです。いまは「'+esc((DB.relax||{}).set||"")+'」。</p>';
+  DB.sets.forEach(function(s, i){ h += '<button class="setb" style="margin-bottom:6px" onclick="relaxPickSet('+i+')">'+esc(s.icon+" "+s.name)+'</button>'; });
+  return h + '<button class="btn link" onclick="go(\'home\')">← 戻る</button>';
+}
+
+/* 🌅 今日の見通し（正午まで・ホームと実行中の画面の上。言葉の正本は 🌱 B.M.C.の使い方「🕞」節の 🚩 A〜C） */
+var OL_FLAGS = [["A","いつもの流れが崩れる"],["B","一人の時間が取りにくい"],["C","仕事の焦り・先の不安が大きい"]];
+var OL_HEAD = "🚩 いつもと違う日（朝に確かめる）";   /* ★日次ノートの見出しが「🌅 今日の見通し」に変わったら差し替える（仕様書_2026-11-21 §3-4） */
+var olSel = {}, olLater = "";
+function olToggle(k){ olSel[k] = !olSel[k]; render(); }
+function olKeys(){ return OL_FLAGS.map(function(f){ return f[0]; }).filter(function(k){ return olSel[k]; }); }
+function olUri(){
+  var keys = olKeys();
+  var line = "- 🚩 "+fbHm(new Date())+" [mejirushi:: "+(keys.length ? keys.join(",") : "なし")+"]\n";
+  return "obsidian://advanced-uri?vault="+encodeURIComponent(FB.vault||"My Valut")
+    + "&filepath="+encodeURIComponent(fbNotePath(Date.now()))+"&heading="+encodeURIComponent(OL_HEAD)
+    + "&mode=append&data="+encodeURIComponent(line);
+}
+function olTap(){
+  DB.outlook[olDay()] = { t:Date.now(), keys:olKeys() };
+  var ks = Object.keys(DB.outlook).sort(); if(ks.length > 40) ks.slice(0, ks.length-40).forEach(function(k){ delete DB.outlook[k]; });
+  save(); olSel = {};
+  setTimeout(function(){ render(); }, 1000);
+  return true;
+}
+function olCard(){
+  var d = new Date(), o = DB.outlook[olDay()];
+  if(o){
+    if(o.keys && o.keys.length && view === "home") return '<p style="margin:0 0 8px;color:#e8c99a;font-size:12.5px;line-height:1.7">🌅 今日は波が来やすい日（'+o.keys.join("・")+'）。食べたくなったら 🕞 → ⏳ 15分。</p>';
+    return "";
+  }
+  if(d.getHours() >= 12 || olLater === olDay()) return "";
+  var h = '<div style="border:1px solid #c4a06a;border-radius:10px;padding:9px 10px;margin:0 0 10px;background:#211e18">'
+        + '<div style="font-size:14px;color:#e8c99a;margin-bottom:2px">🌅 今日の見通し</div>'
+        + '<div style="font-size:12px;color:#8ea3b8;margin-bottom:6px">当てはまるものを押して（いくつでも）。どれも無ければそのまま「決めた」へ。採点はしません。</div>';
+  OL_FLAGS.forEach(function(f){ var on = !!olSel[f[0]]; h += '<button class="btn ghost" style="margin:0 0 6px;text-align:left;padding:8px 10px'+(on?';border:1px solid #e0a86a;color:#e0a86a':'')+'" onclick="olToggle(\''+f[0]+'\')">'+(on?'● ':'')+f[0]+'：'+esc(f[1])+'</button>'; });
+  h += '<a class="btn" style="display:block;text-align:center;text-decoration:none;margin-top:4px" href="'+esc(olUri())+'" onclick="return olTap()">✅ これで決めた（Obsidian へ）</a>';
+  h += '<button class="btn link" style="padding:5px;font-size:12px" onclick="olLater=olDay();render()">あとで</button>';
+  return h + '</div>';
+}
+document.addEventListener("visibilitychange", function(){ if(!document.hidden && view === "home" && !curId) render(); });   /* v106: ⏳ の答えを戻ったときに聞く */
 
 
 /* ===================== v104（2026-11-20 16:23・16:29 ご指示）: 🧹 3分ずつ片づける =====
