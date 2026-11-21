@@ -1660,7 +1660,7 @@ function parkBtn(){
 
 /* --- 状態 --- */
 /* v27: 版の表示（ホーム最下部）。中身を変えたら、ここも必ず上げる。 */
-var APPVER = "切り替えルーティン v107 ・ 2026-11-21";
+var APPVER = "切り替えルーティン v108 ・ 2026-11-21";
 var view = "home";
 var curId = null;
 var startAt = 0;
@@ -6387,7 +6387,26 @@ function ftFromClip(){
   }catch(e){}
   ftPaste();
 }
-function ftOpenList(){ ftInit(); return DB.focus.tasks.filter(function(x){ return !x.done; }); }
+/* v108（🤖 AIへ 11/21 12:25）: 一覧の対象を 💼 仕事／🏠 Private／両方 から選ぶ（DB.focus.scope）。🤖 From AI（tags に AI）も一覧に入る（Obsidian 側の送る仕組みも同日に直した）。
+   ★「このブロックだけ」の項目（local）は Obsidian へ戻さない（ops を作らない）。 */
+function ftScopeOf(){ var s = DB.focus && DB.focus.scope; return (s==="W"||s==="P") ? s : "all"; }
+function ftScopeSet(s){ DB.focus.scope = s; save(); render(); }
+function ftIsAI(x){ return !!(x && x.tags && x.tags.indexOf("AI") >= 0); }
+function ftOpenList(){ ftInit(); var sc = ftScopeOf(); return DB.focus.tasks.filter(function(x){ return !x.done && (sc==="all" || x.k===sc || (x.local && x.k!=="W" && x.k!=="P")); }); }
+function ftScopeCard(){
+  ftInit();
+  var sc = ftScopeOf(), any = DB.focus.tasks.some(function(x){ return !x.done; }), L = ftOpenList(), ai = L.filter(ftIsAI).length;
+  var chip = function(k, lb){ return '<button class="btn ghost" style="margin-top:0'+(sc===k?';border:1px solid #e0a86a;color:#e0a86a':'')+'" onclick="ftScopeSet(\''+k+'\')">'+lb+'</button>'; };
+  var h = '<div class="card"><label>① 何をやる？</label>' + ftMsgHtml();
+  h += '<div class="row" style="margin:0 0 8px">'+chip("W","💼 仕事")+chip("P","🏠 Private")+chip("all","両方")+'</div>';
+  h += '<div style="font-size:13px;line-height:1.6;margin:0 0 6px">' + (any
+      ? '<b>'+L.length+'件</b>'+(ai ? '（うち 🤖 From AI '+ai+'件）' : '')+'（'+esc(DB.focus.tasksAt||"")+' 時点の取り込み）'
+      : 'まだ取り込んでいません。Obsidian の Task Sorter で<b>「🎯 routine へ今日のタスクを送る」</b>を押してから、下のボタンを押してください。') + '</div>';
+  h += '<button class="btn ghost" style="margin-top:0" onclick="ftFromClip()">📋 取り込む（コピーしたもの）</button>';
+  h += '<button class="btn ghost" onclick="ftAddNew()">＋ 手で足す</button>';
+  h += ftSendBtn();
+  return h + '</div>';
+}
 function ftCur(){ return (fMode==="ask" && !fAsking && fTasks[fSeg] && !fTasks[fSeg].set) ? fTasks[fSeg] : null; }
 function ftOp(o){ ftInit(); o.at = Date.now(); DB.focus.ops.push(o); save(); }
 function ftPending(){ ftInit(); return DB.focus.ops.length; }
@@ -6448,6 +6467,7 @@ function ftAct(kind){ ftActX(ftCur(), kind, true); }
 function ftActI(i, kind){ ftInit(); var x = DB.focus.tasks[i]; if(x) ftActX(x, kind, false); }
 function ftActX(x, kind, inBlock){
   if(!x) return;
+  if(x.local) return ftActLocal(x, kind, inBlock);   /* v108 */
   /* v88（提案_2026-11-09 ③）: 🗑️ 不要。Obsidian ではファイルを消さず、完了＋「不要」のメモにして Archive へ（Task Sorter の 🎯 戻すで） */
   if(kind === "drop"){
     if(!confirm("「"+x.t+"」を不要にしますか？\n（Obsidian ではファイルを消さず、完了＋「不要」のメモにします。戻すのはブロックの終わりにまとめて）")) return;
@@ -6509,10 +6529,57 @@ function ftActX(x, kind, inBlock){
     ftMsg = "📝 メモを残しました"; ftMsgAt = Date.now(); render(); return;
   }
 }
+/* v108: 「このブロックだけ」の項目の操作。Obsidian へは何も戻さない（📌 で登録したときだけ add を作る） */
+function ftActLocal(x, kind, inBlock){
+  var msg = function(s){ ftMsg = s; ftMsgAt = Date.now(); };
+  if(kind === "done" || kind === "drop"){
+    x.done = true; if(kind === "drop"){ x.dropped = true; planForget(x.t); }
+    save(); msg((kind==="done" ? "✅ 「" : "🗑️ 「")+x.t+"」を終えました（このブロックだけの項目なので Obsidian へは戻しません）");
+    if(inBlock && kind === "done") ftEndSeg(); else render();
+    return;
+  }
+  if(kind === "reg"){
+    var priv = confirm("「"+x.t+"」は 🏠 Private のタスクですか？\n（OK＝Private／キャンセル＝仕事）");
+    x.local = false; x.isNew = true; x.k = priv ? "P" : "W"; x.d = x.d || ftDate("今日");
+    ftOp({ op:"add", t:x.t, d:x.d, k:x.k }); save();
+    msg("📌 「"+x.t+"」を Obsidian のタスクとして登録します（ブロックの終わりに 📤 で）"); render(); return;
+  }
+  if(kind === "rename"){
+    var nn = prompt("✏️ 新しい名前", x.t); if(nn === null) return;
+    nn = ftClean(nn); if(!nn || nn === x.t) return;
+    var oldT = x.t; x.t = nn; if(inBlock) fLabels[fSeg] = nn; planRename(oldT, nn); save();
+    msg("✏️ 「"+nn+"」にしました"); render(); return;
+  }
+  if(kind === "split"){
+    var r = prompt("✂️ 「"+x.t+"」を分けた小さい項目を、「、」か改行で区切って入れてください", ""); if(r === null) return;
+    var names = String(r).split(/[\n、,，]/).map(ftClean).filter(function(n){ return n && n !== x.t; }); if(!names.length) return;
+    var at = DB.focus.tasks.indexOf(x);
+    Array.prototype.splice.apply(DB.focus.tasks, [at+1, 0].concat(names.map(function(n){ return { p:"", t:n, d:x.d, k:x.k, local:true, parent:x.t }; })));
+    save(); msg("✂️ "+names.length+"件に分けました（このブロックだけ）");
+    if(inBlock && confirm("いまの区切りをここで終えて、分けた項目から次を選びますか？\n（キャンセル＝このまま続ける）")){ ftEndSeg(); return; }
+    render(); return;
+  }
+  if(kind === "due"){
+    var ds = prompt("📅 日付（今日／明日／来週 など）", "明日"); if(ds === null) return;
+    var d = ftDate(ds); if(!d){ alert("日付として読めませんでした: "+ds); return; }
+    x.d = d; save(); msg("📅 「"+x.t+"」を "+d+" にしました（このブロックだけ）"); render(); return;
+  }
+  msg("このブロックだけの項目にはメモを残せません（📌 で登録すると残せます）"); render();
+}
 function ftMsgHtml(){ return (ftMsg && Date.now() - ftMsgAt < 8000) ? '<div class="hint">'+esc(ftMsg)+'</div>' : ''; }
 function ftPanel(){
   var x = ftCur(), h = ftMsgHtml();
   if(!x) return h;
+  if(x.local){   /* v108: このブロックだけの項目 */
+    return h + '<div class="sec">この項目を（このブロックだけ。Obsidian へは戻しません）</div>'
+      + '<div class="row">'
+      + '<button class="btn ghost" style="margin-top:0" onclick="ftAct(\'done\')">✅ 終わった</button>'
+      + '<button class="btn ghost" style="margin-top:0" onclick="ftAct(\'split\')">✂️ 分ける</button>'
+      + '</div><div class="row">'
+      + '<button class="btn ghost" onclick="ftAct(\'rename\')">✏️ 名前</button>'
+      + '<button class="btn ghost" onclick="ftAct(\'reg\')">📌 Obsidian にタスクとして登録</button>'
+      + '</div>' + (ftPending() ? '<p class="note">まだ Obsidian に戻していない変更：'+ftPending()+'件</p>' : '');
+  }
   h += '<div class="sec">このタスクを（Obsidian へはブロックの終わりにまとめて戻します）</div>'
      + '<div class="row">'
      + '<button class="btn ghost" style="margin-top:0" onclick="ftAct(\'done\')">✅ 終わった</button>'
@@ -6667,8 +6734,16 @@ function ftNewTask(){
   var nm = prompt("＋ 追加するタスクの名前", ""); if(nm === null) return -1;
   nm = ftClean(nm); if(!nm) return -1;
   var hit = planTaskOf(nm); if(hit){ ftMsg = "同じ名前のタスクが一覧にあります: " + nm; ftMsgAt = Date.now(); return DB.focus.tasks.indexOf(hit); }
-  var priv = confirm("「"+nm+"」は 🏠 Private のタスクですか？\n（OK＝Private／キャンセル＝仕事）");
   var d = ftDate("今日");
+  /* v108（🤖 AIへ 11/21 11:38）: 足すときに「このブロックだけ」か「Obsidian にタスクとして登録」かを選ぶ */
+  if(!confirm("「"+nm+"」を Obsidian にタスクとして登録しますか？\n（OK＝登録して、ブロックの終わりに 📤 で戻す／キャンセル＝このブロックだけ。Obsidian へは戻しません）")){
+    var sc0 = ftScopeOf();
+    DB.focus.tasks.push({ p:"", t:nm, d:d, k:(sc0==="all" ? "" : sc0), local:true });
+    save();
+    ftMsg = "＋ 「"+nm+"」を足しました（このブロックだけ。Obsidian へは戻しません）"; ftMsgAt = Date.now();
+    return DB.focus.tasks.length - 1;
+  }
+  var priv = confirm("「"+nm+"」は 🏠 Private のタスクですか？\n（OK＝Private／キャンセル＝仕事）");
   DB.focus.tasks.push({ p:"", t:nm, d:d, k:(priv ? "P" : "W"), isNew:true });
   ftOp({ op:"add", t:nm, d:d, k:(priv ? "P" : "W") });
   save();
@@ -6745,7 +6820,7 @@ function aiOfferHtml(){
     + '<p class="note" style="margin:4px 0 6px">あと '+Math.max(1, Math.ceil((aiEnd - Date.now())/60000))+'分で合図。合図が来たら「'+esc(cur.t)+'」に戻れます（いまの残りの時間はそのまま持って戻ります）。</p>';
   if(L.length){
     h += '<div style="display:flex;flex-wrap:wrap;gap:6px">' + L.map(function(x){ var i = DB.focus.tasks.indexOf(x);
-      return '<button class="btn ghost" style="margin-top:0;flex:0 0 auto;width:auto;padding:6px 10px;text-align:left" onclick="aiSwitchGo('+i+')">🔀 '+(x.k==="P" ? '🏠 ' : '')+esc(x.t)+'</button>'; }).join('') + '</div>';
+      return '<button class="btn ghost" style="margin-top:0;flex:0 0 auto;width:auto;padding:6px 10px;text-align:left" onclick="aiSwitchGo('+i+')">🔀 '+(ftIsAI(x) ? '🤖 ' : x.k==="P" ? '🏠 ' : '')+esc(x.t)+'</button>'; }).join('') + '</div>';
   }
   h += '<button class="btn ghost" onclick="aiSwitchNew()">＋ 新しいタスクを追加して移る</button>'
      + '<button class="btn ghost" onclick="aiOffer=false;render()">▶ 移らずに、このまま続ける</button></div>';
@@ -7293,6 +7368,12 @@ function askGo(m){
   scPrefill = "";   /* v97: 🕞 から入れた題名は最初の区切りだけ */
   ftInit();
   var x = (fAskSel >= 0 && DB.focus.tasks[fAskSel] && !DB.focus.tasks[fAskSel].done) ? DB.focus.tasks[fAskSel] : null;
+  /* v108（🤖 AIへ 11/21 11:38「手で入れた項目の完了が押せない」）: 1行で入れた項目も「このブロックだけ」の項目にして ✅ を出す */
+  if(!x && t){
+    var hit = planTaskOf(t);
+    if(hit && !hit.done) x = hit;
+    else { var sc1 = ftScopeOf(); x = { p:"", t:(ftClean(t) || t), d:ftDate("今日"), k:(sc1==="all" ? "" : sc1), local:true }; DB.focus.tasks.push(x); save(); }
+  }
   if(!(m > 0)) m = 15;
   var sec = Math.min(m*60, Math.max(60, fCap - fElapsed()));   /* 休憩までを超えない */
   fSegs.push(sec);
@@ -7605,6 +7686,11 @@ function planNewTask(){
   var nm = prompt("＋ 新しいタスクの名前", ""); if(nm === null) return;
   nm = ftClean(nm); if(!nm) return;
   if(planTaskOf(nm)){ alert("同じ名前のタスクが一覧にあります: " + nm); return; }
+  if(!confirm("「"+nm+"」を Obsidian にタスクとして登録しますか？\n（OK＝登録して 📤 で戻す／キャンセル＝このブロックだけ。Obsidian へは戻しません）")){   /* v108 */
+    var sc2 = ftScopeOf();
+    DB.focus.tasks.push({ p:"", t:nm, d:ftDate("今日"), k:(sc2==="all" ? "" : sc2), local:true }); save();
+    ftMsg = "＋ 「"+nm+"」を足しました（このブロックだけ）"; ftMsgAt = Date.now(); render(); return;
+  }
   var priv = confirm("「"+nm+"」は 🏠 Private のタスクですか？\n（OK＝Private／キャンセル＝仕事）");
   var d = ftDate("今日");
   DB.focus.tasks.push({ p:"", t:nm, d:d, k:(priv ? "P" : "W"), isNew:true });
@@ -7672,7 +7758,7 @@ function viewFocusPlan(){
     h += L.map(function(x){
       var i = DB.focus.tasks.indexOf(x), inN = p.items.filter(function(it){ return it.t === x.t; }).length;
       return '<div class="card" style="padding:10px 12px"><div style="font-weight:700;line-height:1.5;margin-bottom:6px">'
-        + (x.parent ? '↳ ' : '') + (x.k==="P" ? '🏠 ' : '') + esc(x.t)
+        + (x.parent ? '↳ ' : '') + (ftIsAI(x) ? '🤖 ' : x.k==="P" ? '🏠 ' : '') + esc(x.t)
         + (x.isNew ? ' <small style="font-weight:400">＋新規</small>' : '')
         + ((x.d && x.d < today) ? ' <small>🔴'+esc(x.d.slice(5))+'</small>' : (x.d ? ' <small style="font-weight:400">'+esc(x.d.slice(5))+'</small>' : ''))
         + (inN ? ' <small style="font-weight:400;color:#e0a86a">✔ 計画に'+(inN>1?inN+'回':'')+'</small>' : '') + '</div>'
@@ -7699,13 +7785,10 @@ function viewFocusStart(){
   var sl = fSlotNow(), segs = segsFor(sl);
   var h = '<h1>🎯 集中ブロック</h1>'
     + '<p class="sub">押した瞬間から、休憩までの時間を数えます。<br>途中の区切りは「次へ移る合図」です。仕事の日にも、休日にも使えます。</p>';
-  h += ftStartCard();   /* v86 */
-  h += '<button class="setb" style="border-color:#8fa86a;margin-bottom:10px" onclick="swGo()">🧹 3分ずつ片づける<small>溜まったタスク（期限切れ → 📥 Inbox → 🧭）を1件3分。時間が来たら行き先を決める。5件ごとに続けるか聞きます</small></button>';   /* v104 */
-  h += '<button class="btn big" onclick="go(\'focusPlan\')">⏱ 枠を決めて、計画して始める</button>'
-     + '<p class="note">次のMTGまで など、使える時間を先に決めて、その中で<b>どのタスクに何分</b>使うかを並べてから始めます。選ぶ画面でタスクの名前・日付・不要・新規も直せます。</p>';   /* v88 */
-  h += '<button class="btn" onclick="go(\'focusPlan\')">🔁 時間を決めてセットをやる</button>'
-     + '<p class="note">「〜時まで」と決めて、routine に登録したセットを入れます。いつもと違う時間でも、その枠に収まるように項目を縮めます（セットの中身は変えません）。Obsidian のタスクと組み合わせても使えます。</p>';
-  h += '<div class="card"><div class="big ok" style="font-size:40px">'+durLabel(DB.focus.len[sl]*60)+'</div>'
+  /* v108（2026-11-21 🤖 AIへ 11:53・動線図をご確認のうえ「この形で作る」）: 入口を ①何をやる？ → ②どう進める？（3つ）にまとめた。
+     「順に回して始める」「1つに集中して始める」と ✍ 手で書く欄はなくした（関数 focusBegin('rotate'|'one') は残置・入口だけ外した）。 */
+  h += ftScopeCard();
+  var slotCard = '<div class="card"><div class="big ok" style="font-size:40px">'+durLabel(DB.focus.len[sl]*60)+'</div>'
      + '<div class="bigsub">'+SLOTN[sl]+' ・ 休憩まで</div>'
      + '<div class="row" style="margin-top:10px">'
      + ["am","pm","ev","kids"].map(function(k){
@@ -7721,22 +7804,11 @@ function viewFocusStart(){
           + '</div>'
         : '')
      + '<p class="note" style="text-align:center">区切り： '+segLabel(sl)+'</p></div>';
-  h += '<label>このブロックで手をつけること（1行に1つ）</label>'
-     + '<textarea id="f_list" style="min-height:96px;font-family:inherit;font-size:14px" placeholder="空のままでも始められます。&#10;例）A案件の企画書のたたき&#10;例）B案件の見積もり確認">'
-     + esc(fList.join("\n"))+'</textarea>'
-     + '<p class="note">書いておくと、区切りのたびに「次はこれ」と出ます。<br><b>書かなくても始められます。</b>先に決めた行き先があると、漂流しにくくなります。<br>'
-     + '<b>「その都度、決めて始める」を選ぶときは、ここは空のままで構いません。</b></p>';
-  h += '<div class="sec">始める</div>';
-  h += '<button class="btn" onclick="focusBegin(\'rotate\')">順に回して始める</button>';
-  h += '<p class="note">区切りのたびに、上に書いた行き先を順に案内します。没頭して他が止まるのを防ぎたいとき。</p>';
-  h += '<button class="btn ghost" onclick="focusBegin(\'one\')">1つに集中して始める</button>';
-  h += '<p class="note">区切りは「いま何分経ったか」を知らせるだけ。続けるか移るかは、その場で決めます。</p>';
-  /* v15: 休日など、先にまとめて決められないとき用 */
-  h += '<button class="btn ghost" onclick="focusBegin(\'ask\')">その都度、決めて始める</button>';
-  h += '<p class="note"><b>上の欄は使いません。</b>区切りが終わるたびに「次に何をしますか」と聞き、'
-     + '入力してから次が始まります。長さもその都度決められます。<br>'
-     + '<b>先にまとめて決められないとき</b>（休日など、細切れにしか動けないとき）はこちらです。'
-     + '考えているあいだ、時計は止まります。</p>';
+  h += '<div class="sec">② どう進める？</div>';
+  h += '<button class="setb" style="border-color:#8fa86a;margin-bottom:8px" onclick="swGo()">🧹 3分ずつ回す<small>一覧を上から1件3分（期限切れ → 📥 Inbox → 🤖 From AI → 🧭）。始めるたびに iPhone のタイマーへ3分を渡します。時間が来たら行き先を決めます。</small></button>';
+  h += '<button class="setb" style="margin-bottom:8px" onclick="go(\'focusPlan\')">⏱ 計画して始める<small>次のMTGまで など使える時間を先に決めて、タスクや routine のセットに何分使うかを並べてから始めます。</small></button>';
+  h += '<button class="setb" style="margin-bottom:8px" onclick="focusBegin(\'ask\')">▶ その都度決める<small>区切りごとに一覧から1つ選び、分を押すと始まります。1つに集中したいときもこちら（長めの分を選ぶ）。</small></button>';
+  h += '<details style="margin:8px 0"><summary style="color:#8ea3b8;font-size:13px">⚙ 休憩までの長さ：'+durLabel(DB.focus.len[sl]*60)+'（'+SLOTN[sl]+'）・変える</summary>' + slotCard + '</details>';
   if(notifyState()==="granted" && DB.focus.notify){
     h += '<div class="hint">このブラウザでは<b>区切りと休憩のたびにPCの通知</b>が出ます。タブを裏にしていても届きます（裏タブだと最大1分ほど遅れることがあります）。</div>';
   }else if(notifyState()==="default" && DB.focus.notify){
@@ -7793,7 +7865,7 @@ function viewFocus(){
       h += ftList.map(function(x){
         var i = DB.focus.tasks.indexOf(x), on = (i === fAskSel);
         return '<button class="btn ghost" style="margin-top:6px;text-align:left'+(on?';border:1px solid #e0a86a;color:#e0a86a':'')+'" onclick="askSel('+i+')">'
-          + (on ? '✔ ' : '') + (x.parent ? '↳ ' : '') + (x.k==="P" ? '🏠 ' : '') + esc(x.t)
+          + (on ? '✔ ' : '') + (x.parent ? '↳ ' : '') + (ftIsAI(x) ? '🤖 ' : x.k==="P" ? '🏠 ' : '') + esc(x.t)
           + ((x.d && x.d < ftToday) ? ' <small>🔴'+esc(x.d.slice(5))+'</small>' : '') + '</button>';
       }).join('');
     }else{
@@ -10221,8 +10293,9 @@ function swQueue(){
   var fut = function(x){ return !!x.w; };
   var od = L.filter(function(x){ return !fut(x) && x.d && x.d < today; }).sort(function(a,b){ return a.d < b.d ? -1 : a.d > b.d ? 1 : 0; });
   var ib = L.filter(function(x){ return !fut(x) && x.i && od.indexOf(x) < 0; });
-  var nx = L.filter(function(x){ return !fut(x) && /^🧭/.test(x.t) && od.indexOf(x) < 0 && ib.indexOf(x) < 0; });
-  var q = od.concat(ib, nx);
+  var ai = L.filter(function(x){ return !fut(x) && ftIsAI(x) && od.indexOf(x) < 0 && ib.indexOf(x) < 0; });   /* v108: 🤖 From AI */
+  var nx = L.filter(function(x){ return !fut(x) && /^🧭/.test(x.t) && od.indexOf(x) < 0 && ib.indexOf(x) < 0 && ai.indexOf(x) < 0; });
+  var q = od.concat(ib, ai, nx);
   if(!L.some(function(x){ return x.i; })){   /* Inbox の印が届くまでは、残りを日付の古い順に */
     var rest = L.filter(function(x){ return !fut(x) && q.indexOf(x) < 0; }).sort(function(a,b){ var A=a.d||"9", B=b.d||"9"; return A < B ? -1 : A > B ? 1 : 0; });
     q = q.concat(rest);
@@ -10237,28 +10310,40 @@ function swGo(){
   if(swTimer) clearInterval(swTimer);
   swTimer = setInterval(swTick, 250);
   view = "sweep"; render();
+  swHand();   /* v108 */
 }
+/* v108（🤖 AIへ 11/21 12:13・ご回答「1件ごとに毎回」）: 1件の3分が始まるたびに、iPhone のタイマーへ3分を渡す（ショートカット DB.scName）。
+   ★画面遷移を伴うので、必ず指で押した操作の中から・render のあとに呼ぶ。swTick（自動）からは渡さない。
+   ★DB.focus.swTimer === false で渡さない（画面の下の「⏱ タイマーを渡さない」）。 */
+function swHand(){
+  if(!sw || sw.mode !== "run" || DB.focus.swTimer === false) return;
+  if(!String(DB.scName||"").trim()) return;
+  sw.handAt = Date.now();
+  try{ nativeTimer(SW_SEC + (sw.extra||0)); }catch(e){}
+}
+function swTimerToggle(){ DB.focus.swTimer = (DB.focus.swTimer === false) ? true : false; save(); render(); }
 function swCur(){ if(!sw) return null; var t = sw.q[sw.i]; return t ? planTaskOf(t) : null; }
 function swLeft(){ return sw ? Math.max(0, SW_SEC + sw.extra - Math.floor((Date.now()-sw.start)/1000)) : 0; }
 function swTick(){
   if(!sw || view !== "sweep"){ return; }
   if(sw.mode === "run"){
-    if(!swCur()){ swNext(); return; }
+    if(!swCur()){ swNext(true); return; }
     if(swLeft() <= 0){ sw.mode = "ask"; sw.askAt = Date.now(); try{ chimeWake(); }catch(e){} render(); return; }
     var el = document.getElementById("sw_left"); if(el) el.textContent = mmss(swLeft());
   }
 }
 function swAskNow(){ if(sw){ sw.mode = "ask"; render(); } }
-function swMore(){ if(!sw) return; sw.start = Date.now(); sw.extra = 0; sw.mode = "run"; render(); }
-function swNext(){
+function swMore(){ if(!sw) return; sw.start = Date.now(); sw.extra = 0; sw.mode = "run"; render(); swHand(); }
+function swNext(auto){
   if(!sw) return;
   sw.i++; sw.done++;
   while(sw.i < sw.q.length && !swCur()) sw.i++;
   if(sw.i >= sw.q.length){ sw.mode = "end"; render(); return; }
   if(sw.done % SW_BATCH === 0){ sw.mode = "batch"; render(); return; }
   sw.start = Date.now(); sw.extra = 0; sw.mode = "run"; render();
+  if(!auto) swHand();
 }
-function swCont(){ if(!sw) return; sw.start = Date.now(); sw.extra = 0; sw.mode = "run"; render(); }
+function swCont(){ if(!sw) return; sw.start = Date.now(); sw.extra = 0; sw.mode = "run"; render(); swHand(); }
 function swStop(){ if(sw) sw.mode = "end"; render(); }
 function swClose(){ if(swTimer) clearInterval(swTimer); swTimer = null; sw = null; view = "home"; render(); }
 function swLog(a){ if(sw) sw.log.push({ t:(swCur()||{}).t || "", a:a }); }
@@ -10310,7 +10395,7 @@ function viewSweep(){
   var today = ftDate("今日");
   h += sub((sw.i+1)+' / '+sw.q.length+' 件目　・　済み '+sw.done+' 件');
   if(sw.mode !== "end" && sw.mode !== "batch" && x){
-    h += '<div class="card" style="padding:12px"><div style="font-size:17px;font-weight:700;line-height:1.55;word-break:break-word">'+(x.k==="P"?'🏠 ':'')+esc(x.t)+'</div>'
+    h += '<div class="card" style="padding:12px"><div style="font-size:17px;font-weight:700;line-height:1.55;word-break:break-word">'+(ftIsAI(x)?'🤖 ':x.k==="P"?'🏠 ':'')+esc(x.t)+'</div>'
        + '<div style="font-size:12.5px;color:#8ea3b8;margin-top:4px">'+(x.p?esc(x.p)+'　':'')+(x.d ? (x.d < today ? '🔴 期限 '+esc(x.d.slice(5)) : '期限 '+esc(x.d.slice(5))) : '日付なし')+(x.i?'　📥 Inbox':'')+(x.parent?'　↳ '+esc(x.parent):'')+((x.tags&&x.tags.length)?'　🏷 '+esc(x.tags.join("・")):'')+'</div></div>';
   }
   if(typeof ftMsgHtml==="function") h += ftMsgHtml();
@@ -10318,6 +10403,9 @@ function viewSweep(){
     h += '<div class="big" id="sw_left" style="font-size:54px;text-align:center;margin:6px 0">'+mmss(swLeft())+'</div>';
     h += sub('3分だけ手をつけます。終わらせなくて大丈夫。開いて眺めるだけでもOK。時間が来たら行き先を決めます。');
     h += btn('⏩ もう決められる（行き先へ）', 'swAskNow()');
+    h += sub(DB.focus.swTimer === false
+      ? '⏱ iPhone のタイマーへは渡していません。<a href="javascript:swTimerToggle()" style="color:#9fb8d0">渡すようにする</a>'
+      : '⏱ 1件ごとに iPhone のタイマーへ3分を渡します（ショートカット「'+esc(DB.scName||"")+'」）。早めに行き先を決めたときは、残ったタイマーが鳴ることがあります。<a href="javascript:swTimerToggle()" style="color:#9fb8d0">タイマーを渡さない</a>');
   }else if(sw.mode === "ask"){
     h += '<p style="margin:10px 0 6px;font-weight:600">このタスクをどうする？</p>';
     h += '<div class="row" style="flex-wrap:wrap">'
