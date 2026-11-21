@@ -1660,7 +1660,7 @@ function parkBtn(){
 
 /* --- 状態 --- */
 /* v27: 版の表示（ホーム最下部）。中身を変えたら、ここも必ず上げる。 */
-var APPVER = "切り替えルーティン v106 ・ 2026-11-21";
+var APPVER = "切り替えルーティン v107 ・ 2026-11-21";
 var view = "home";
 var curId = null;
 var startAt = 0;
@@ -9499,7 +9499,7 @@ function viewSc(){
        + '</div>';
     h += '<textarea class="inp" id="sc_cause" rows="2" style="width:100%" placeholder="例：寝かしつけ前で気が張っている">'+esc(c.cause)+'</textarea>';
     h += '<button class="btn" style="padding:16px;font-size:16px" onclick="scTo(\'wait\')">⏳ 15分あとにする<br><span style="font-size:12px;opacity:.85">食べてもいい。ただし15分後に</span></button>';
-    h += '<button class="btn ghost" onclick="scTo(\'next\')">いつもの「次の1つ」を選ぶ（✂️・🎯・✍️ など）</button>';
+    h += '<button class="btn ghost" onclick="scTo(\'next\')">15分は待たずに「次の1つ」だけ選ぶ</button>';
     h += scAteLink(c, 'それでも今すぐ食べる（先に Meal Log で記録）', false);
     h += '<button class="btn link" style="padding:7px" onclick="scTo(\'urge\')">← 数字に戻る</button>';
   }else if(scStep === "wait"){
@@ -9512,6 +9512,10 @@ function viewSc(){
     if(setOf("breath478")) h += '<button class="setb" style="margin-bottom:8px" onclick="scWaitStart(\'breath\')">🌬️ 呼吸法</button>';
     if(setOf("moveplace")) h += '<button class="setb" style="margin-bottom:8px" onclick="scWaitStart(\'move\')">🚶 場所を変える</button>';
     if(new Date().getHours() >= 15) h += '<button class="setb" style="margin-bottom:8px;border-color:#c49a6a" onclick="scWaitStart(\'ln\')">✂️ 今日の線を引く</button>';
+    /* v107: 「次の1つ」の 🎯・✍️ もこの一覧で選べるように（15分の待ちと次にやることを1回で。🤖 AIへ 11/21 09:07） */
+    h += '<button class="setb" style="margin-bottom:8px" onclick="scWaitStart(\'focus\')">🎯 集中ブロック<small>'+(c.cause ? '題名に「'+esc(scFirstLine(c.cause))+'」を入れて始めます' : 'その都度決める形で始めます')+'</small></button>';
+    if(new Date().getHours() < 15) h += '<button class="setb" style="margin-bottom:8px;border-color:#c49a6a" onclick="scWaitStart(\'ln\')">✂️ 今日の線を引く</button>';
+    h += '<button class="setb" style="margin-bottom:8px" onclick="scWaitStart(\'dig\')">✍️ 深掘り<small>頭の中を全部書き出す → いちばん重いものに印</small></button>';
     h += '<button class="btn ghost" onclick="scWaitStart(\'none\')">そのまま待つ（ホームへ）</button>';
     h += '<button class="btn link" style="padding:7px" onclick="scTo(\'urge\')">← 数字に戻る</button>';
   }else if(scStep === "state"){
@@ -10102,12 +10106,12 @@ function scAteNow(t, isLink){
 function scWaitStart(k){
   scKeep(); scEnsure();
   var x = scCur, now = Date.now();
-  var LB = { relax:"🛋 "+(relaxSet() ? relaxSet().name : "ゆるめるセット"), out:"📺 アプリの外で", rest:"🍵 ひと息", breath:"🌬️ 呼吸法", move:"🚶 場所を変える", ln:"✂️ 今日の線を引く", none:"そのまま待つ" };
+  var LB = { relax:"🛋 "+(relaxSet() ? relaxSet().name : "ゆるめるセット"), out:"📺 アプリの外で", rest:"🍵 ひと息", breath:"🌬️ 呼吸法", move:"🚶 場所を変える", ln:"✂️ 今日の線を引く", focus:"🎯 集中ブロック", dig:"✍️ 深掘り", none:"そのまま待つ" };
   x.wait = { t:now, end:now + SC_WAIT_MS, res:"", how:k };
   x.next = "⏳15分のあいだに: " + (LB[k] || k);
   save();
   if(k === "ln"){ var nx = x.next; lnGo(); x.next = nx; save(); return; }
-  if(k === "breath" || k === "rest" || k === "move"){ var nx2 = x.next; scNext(k); x.next = nx2; save(); return; }
+  if(k === "breath" || k === "rest" || k === "move" || k === "focus" || k === "dig"){ var nx2 = x.next; scNext(k); x.next = nx2; save(); return; }   /* v107: focus・dig も */
   scCur = null; scStep = "state";
   if(k === "relax"){ var s = relaxSet(); if(s){ DB.relax.day = olDay(); save(); scRunSet(s.id); return; } }
   view = curId ? "run" : "home"; render();
