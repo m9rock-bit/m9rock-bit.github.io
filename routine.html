@@ -1660,7 +1660,7 @@ function parkBtn(){
 
 /* --- 状態 --- */
 /* v27: 版の表示（ホーム最下部）。中身を変えたら、ここも必ず上げる。 */
-var APPVER = "切り替えルーティン v112 ・ 2026-11-24";
+var APPVER = "切り替えルーティン v115 ・ 2026-11-25";
 var view = "home";
 var curId = null;
 var startAt = 0;
@@ -4407,6 +4407,31 @@ function breatherGo(){
   start("breather");
 }
 
+/* ===== v114（2026-11-24 🤖 AIへ 17:14 → 指示_2026-11-24_3 お願い3）=====
+   「セルフコンディションで『一息』を選んだあと、次にやることをセットの中身ではなく Obsidian のタスクから1つ選べる、
+    またはその場で追加できるように。実施時間は3分」。
+   ★🕞 の ③（または ⏳ 15分のあいだに）で 🍵 を選んだ回だけ、🍵 の完了画面に「▶ 次の1つを選ぶ（3分）」を出す（DB.scRestNext＝選んだ時刻・3時間で消える）。
+   ★押すと集中ブロックの「次は何を」の画面（取り込んだ Obsidian のタスク一覧・🔍・環境の切り替え・＋ タスクを追加）へ。分のボタンの先頭に 3分。
+   ★足したタスクは、いつもどおりブロックの終わりの 📤 で Obsidian に戻る（新しい書き出しの形は作っていない）。
+   ★🍵 のセットの最後の20秒（次にやることを1つ決める）はそのまま（セットの中身は変えていない）。 */
+function restNextOn(){ return curId === "breather" && DB.scRestNext && (Date.now() - DB.scRestNext) < 3*3600000; }
+function restNextCard(){
+  if(!restNextOn()) return "";
+  return '<div style="border:1px solid #8fa86a;border-radius:10px;padding:9px 10px;margin:10px 0;background:#181d14">'
+       + '<div style="font-size:13px;color:#d3e4bd;line-height:1.6;margin-bottom:4px">🍵 のあとの次の1つ。Obsidian のタスクから選ぶか、その場で足して、まず3分だけ。</div>'
+       + '<button class="btn" style="margin-top:0" onclick="restNextGo()">▶ 次の1つを選ぶ（3分）</button>'
+       + '<button class="btn link" style="padding:6px;font-size:12px" onclick="DB.scRestNext=0;save();render()">今回は選ばない</button>'
+       + '</div>';
+}
+function restNextGo(){
+  DB.scRestNext = 0; save();
+  if(fStart && !fDone){ stop(); focusBack(); return; }   /* もう集中中なら、その画面へ戻るだけ */
+  stop();
+  fQuick3Want = true;
+  fSlot = slotAt(Date.now()); fList = []; fMemo = "";
+  focusBegin("ask");
+}
+
 function angerGo(){
   var a = angerSet(); if(!a) return;
   if(curId === "anger") return;              /* 二重に飛ばない */
@@ -6133,6 +6158,7 @@ function viewDone(){
   else if(d===n) h += '<div class="hint">全部やれました。時間は超えましたが、見ているのは順番ではなく「やったかどうか」です。</div>';
   else if(d>0) h += '<div class="hint">'+d+'つやれました。<b>0か1かではありません。</b>次の合図でまた押せます。</div>';
   else h += '<div class="hint">今日はここまで。押したこと自体は残っています。次の合図でまた押してください。</div>';
+  h += restNextCard();   /* v114 */
   /* ===== v34（2026-09-08 ご依頼）: 畳んだ回の「積極的な休養」 =====================
      参考資料の3ステップ目「受動的な暇つぶし（無限スクロール）ではなく、自分で決めた
      休み方」をここに置く。**畳んだあとを空けたままにすると、そこが無限スクロールに
@@ -6326,6 +6352,7 @@ var fCap = 0, fLabels = [], fAsking = false;
    ② 休憩なしで続ける（終わりの画面のいちばん上）。③ 分のボタンを押したらすぐ始まる（入力欄は「一覧に無いときだけ」）。
    ④ 🤖 AIの返事を確かめるタイマー（5・10・15・30分・1本だけ・押すまで画面の縁が点滅）。 */
 var fTasks = [], fAskSel = -1, ftMsg = "", ftMsgAt = 0;
+var fQuick3 = false, fQuick3Want = false;   /* v114: 🍵 ひと息のあとの「次の1つ」は 3分 を先頭に出す */
 var fPlanned = false;   /* v88: 「枠を決めて、計画して始める」で始めたブロックか */
 /* v89（指示_2026-11-10・🤖 AIへ 10:38）: その都度・計画のモードで、区切りの時間が来ても勝手に次へ進まない。
    fOver   … いま「⏩ 延長して続ける／✂️ ここで切り分ける」の確認待ちか（このあいだ時計は止めず、いまのタスクの延長として数える）
@@ -6543,7 +6570,8 @@ function ftActLocal(x, kind, inBlock){
   if(kind === "reg"){
     var priv = confirm("「"+x.t+"」は 🏠 Private のタスクですか？\n（OK＝Private／キャンセル＝仕事）");
     x.local = false; x.isNew = true; x.k = priv ? "P" : "W"; x.d = x.d || ftDate("今日");
-    ftOp({ op:"add", t:x.t, d:x.d, k:x.k }); save();
+    var ev0 = askEnvPick(x.t); if(ev0.length) x.env = ev0;   /* v115 */
+    ftAddOp(x.t, x.d, x.k, ev0); save();
     msg("📌 「"+x.t+"」を Obsidian のタスクとして登録します（ブロックの終わりに 📤 で）"); render(); return;
   }
   if(kind === "rename"){
@@ -6746,8 +6774,10 @@ function ftNewTask(){
     return DB.focus.tasks.length - 1;
   }
   var priv = confirm("「"+nm+"」は 🏠 Private のタスクですか？\n（OK＝Private／キャンセル＝仕事）");
-  DB.focus.tasks.push({ p:"", t:nm, d:d, k:(priv ? "P" : "W"), isNew:true });
-  ftOp({ op:"add", t:nm, d:d, k:(priv ? "P" : "W") });
+  var ev1 = askEnvPick(nm);   /* v115 */
+  var t1 = { p:"", t:nm, d:d, k:(priv ? "P" : "W"), isNew:true }; if(ev1.length) t1.env = ev1;
+  DB.focus.tasks.push(t1);
+  ftAddOp(nm, d, (priv ? "P" : "W"), ev1);
   save();
   ftMsg = "＋ 「"+nm+"」を追加しました（Obsidian へはブロックの終わりに 📤 で。日付は今日）"; ftMsgAt = Date.now();
   return DB.focus.tasks.length - 1;
@@ -7329,6 +7359,7 @@ function focusBegin(mode, plan){
   fSlot = fSlotNow();
   fLabels = []; fAsking = false;
   fTasks = []; fAskSel = -1;   /* v86 */
+  fQuick3 = fQuick3Want; fQuick3Want = false;   /* v114 */
   fOver = false; fClosed = []; aiAway = null; aiOffer = false;   /* v89 */
   if(mode === "ask"){
     /* v15: 区切りは先に決めない。1つずつ、そのときに決める。
@@ -7378,6 +7409,19 @@ function ftEnvOf(x){
     if(/pc|会社|💻/i.test(s)) return "pc";
     return ""; }).filter(function(k, i, A){ return k && A.indexOf(k) === i; });
 }
+/* ===== v115（2026-11-25 指示_2026-11-25 ← Obsidian運用管理 指示_2026-11-24 お願い1）=====
+   「＋ 新しいタスク」で Obsidian に登録するとき、名前・Private/仕事のあとに「🌐 どこでできる？」を1問だけ聞く（複数可・空で飛ばす＝印なし）。
+   選んだものは戻しの add op に env:["off","pc"] の形で載せる（無ければキーごと省く）。ほかのキー・形は変えていない。 */
+function askEnvPick(nm){
+  var keys = ["off","mob","pc","home"];
+  var a = prompt("🌐 「"+nm+"」はどこでできる？（番号を入れてください・複数可・空のままOKで飛ばす＝どこでも）\n1 "+ENV_LB.off+"\n2 "+ENV_LB.mob+"\n3 "+ENV_LB.pc+"\n4 "+ENV_LB.home, "");
+  if(a === null) return [];
+  a = String(a).replace(/[１-４]/g, function(c){ return String.fromCharCode(c.charCodeAt(0) - 0xFEE0); });
+  var out = [];
+  a.replace(/[1-4]/g, function(c){ var k = keys[+c - 1]; if(out.indexOf(k) < 0) out.push(k); return c; });
+  return out;
+}
+function ftAddOp(t, d, k, env){ var o = { op:"add", t:t, d:d, k:k }; if(env && env.length) o.env = env.slice(); ftOp(o); }
 function askEnvSet(k){ ftInit(); DB.focus.envNow = (DB.focus.envNow===k ? "" : k); save(); askRerender(); }
 function askOpen(g){ fAskOpen[g] = !fAskOpen[g]; askRerender(); }
 function askRerender(){
@@ -7456,6 +7500,7 @@ function askGo(m){
   fTasks[fSegs.length - 1] = x;
   fSeg = fSegs.length - 1; fAskSel = -1;
   fAsking = false; fOver = false;   /* v89 */
+  fQuick3 = false;   /* v114: 3分は最初の1区切りだけ */
   fUnpause(false);        /* 考えていた時間は「ずれ」に数えない */
   fFlash = Date.now();
   render();
@@ -7768,8 +7813,10 @@ function planNewTask(){
   }
   var priv = confirm("「"+nm+"」は 🏠 Private のタスクですか？\n（OK＝Private／キャンセル＝仕事）");
   var d = ftDate("今日");
-  DB.focus.tasks.push({ p:"", t:nm, d:d, k:(priv ? "P" : "W"), isNew:true });
-  ftOp({ op:"add", t:nm, d:d, k:(priv ? "P" : "W") });
+  var ev2 = askEnvPick(nm);   /* v115 */
+  var t2 = { p:"", t:nm, d:d, k:(priv ? "P" : "W"), isNew:true }; if(ev2.length) t2.env = ev2;
+  DB.focus.tasks.push(t2);
+  ftAddOp(nm, d, (priv ? "P" : "W"), ev2);
   save();
   ftMsg = "＋ 「"+nm+"」を足しました（Obsidian へは 📤 で。日付は今日・あとで 📅 で変えられます）"; ftMsgAt = Date.now(); render();
 }
@@ -8030,8 +8077,9 @@ function viewFocus(){
     h += '<input class="inp" type="text" id="ask_text" value="'+esc(scPrefill)+'" placeholder="一覧に無いときだけ：やることを1行（空でも始められます）">';
     h += '<label>どれくらい（押すとすぐ始まります）</label>'
        + '<div class="row" style="margin-bottom:8px">'
-       + [10,15,25,40].map(function(m){ return '<button class="btn" style="margin-top:0" onclick="askGo('+m+')">'+m+'分</button>'; }).join('')
+       + (fQuick3 ? [3,10,15,25,40] : [10,15,25,40]).map(function(m){ return '<button class="btn" style="margin-top:0'+((fQuick3 && m===3)?';border:2px solid #8fa86a;background:#2a3420':'')+'" onclick="askGo('+m+')">'+m+'分</button>'; }).join('')
        + '</div>'
+       + (fQuick3 ? '<p class="note">🍵 ひと息のあとです。まず <b>3分</b> だけ。続けたくなったら、そのまま次の区切りを選べます。</p>' : '')
        + '<p class="note">休憩までの残りを超える長さを選んでも、休憩までで止まります。考えているあいだ、時計は止まっています。</p>';
     h += askSetHtml();   /* v110 */
     h += aiButton();
@@ -9674,7 +9722,7 @@ function scNext(k){
   var title = (k === "digfocus") ? (scCur ? scCur.mark : "") : (scCur ? scFirstLine(scCur.cause) : "");
   scCur = null; scStep = "state";
   if(k === "breath"){ if(setOf("breath478")) scRunSet("breath478"); else { view="home"; render(); } return; }
-  if(k === "rest"){ view = "home"; breatherGo(); render(); return; }
+  if(k === "rest"){ view = "home"; DB.scRestNext = Date.now(); save(); breatherGo(); render(); return; }   /* v114: ひと息のあとに「次の1つ（3分）」を出す印 */
   if(k === "move"){ if(setOf("moveplace")) scRunSet("moveplace"); else { view="home"; render(); } return; }
   if(k === "focus" || k === "digfocus"){
     if(fStart && !fDone){ focusBack(); return; }   /* もう集中中なら、その画面へ戻るだけ */
@@ -10349,12 +10397,19 @@ function scWaitStart(k){
   x.wait = { t:now, end:now + SC_WAIT_MS, res:"", how:k };
   x.next = "⏳15分のあいだに: " + (LB[k] || k);
   save();
-  if(k === "ln"){ var nx = x.next; lnGo(); x.next = nx; save(); return; }
-  if(k === "breath" || k === "rest" || k === "move" || k === "focus" || k === "dig"){ var nx2 = x.next; scNext(k); x.next = nx2; save(); return; }   /* v107: focus・dig も */
+  if(k === "ln"){ var nx = x.next; lnGo(); x.next = nx; save(); scWaitTimer(k); return; }
+  if(k === "breath" || k === "rest" || k === "move" || k === "focus" || k === "dig"){ var nx2 = x.next; scNext(k); x.next = nx2; save(); scWaitTimer(k); return; }   /* v107: focus・dig も */
   scCur = null; scStep = "state";
-  if(k === "relax"){ var s = relaxSet(); if(s){ DB.relax.day = olDay(); save(); scRunSet(s.id); return; } }
+  if(k === "relax"){ var s = relaxSet(); if(s){ DB.relax.day = olDay(); save(); scRunSet(s.id); scWaitTimer(k); return; } }
   view = curId ? "run" : "home"; render();
-  if(k === "out") nativeTimer(SC_WAIT_MS/1000);
+  scWaitTimer(k);
+}
+/* v113（2026-11-24 🤖 AIへ 16:40「どの選択肢を選んでも15分タイマーをセットするように」）:
+   ⏳ 15分のあいだに の選択肢は、どれを選んでも iPhone のタイマーへ15分を渡す（従来は 📺 アプリの外で だけ）。
+   ★ゆるめるセットが自分でタイマー／通知を渡す設定（alarmOf が off 以外）のときだけは渡さない（ショートカットAppへの二重の飛び先で片方が消えるため）。 */
+function scWaitTimer(k){
+  if(k === "relax"){ var s = relaxSet(); if(s && alarmOf(s) !== "off") return; }
+  setTimeout(function(){ nativeTimer(SC_WAIT_MS/1000); }, 400);
 }
 function scWaitList(){ return DB.sc.filter(function(x){ return x && x.wait && !x.wait.res; }); }
 function scWaitRes(t, res, isLink){
