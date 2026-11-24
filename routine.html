@@ -1660,7 +1660,7 @@ function parkBtn(){
 
 /* --- 状態 --- */
 /* v27: 版の表示（ホーム最下部）。中身を変えたら、ここも必ず上げる。 */
-var APPVER = "切り替えルーティン v109 ・ 2026-11-22";
+var APPVER = "切り替えルーティン v111 ・ 2026-11-24";
 var view = "home";
 var curId = null;
 var startAt = 0;
@@ -4606,6 +4606,7 @@ function render(){
   else if(view==="wakeAte") h = viewWakeAte();   /* v63 */
   else if(view==="focusStart") h = viewFocusStart();
   else if(view==="focusPlan") h = viewFocusPlan();   /* v88 */
+  else if(view==="focusMorning") h = viewFocusMorning();   /* v110 */
   else if(view==="focus"){
     focusTick();                       /* 完了すると内部で view="focusDone" に変わることがある */
     if(view==="focus") focusTitle();
@@ -7357,6 +7358,77 @@ function focusBegin(mode, plan){
 }
 /* v86: 分のボタンを押したらすぐ始まる（提案_2026-10-30_2 ②）。一覧で選んだタスクがあればその名前、
    無ければ入力欄（一覧に無いときだけ）、それも空なら「区切りn」。 */
+/* ===== v111（2026-11-24 🤖 AIへ 09:32・10:24 → 提案_2026-11-24_2 ご回答「アとしつつ、タスク検索もつけて」）
+   「次は何を」の一覧を選びやすくする。
+   ① 見出しで3つに分ける：🔴 期限が過ぎたもの／📋 そのほか／🤖 From AI。各見出しは上から3件だけ出し、残りは「ほか n件 ▼」で開く
+   ② 🔍 タスクを探す欄：打った文字を含むタスクだけを（見出しの畳みに関係なく）出す。描き直さずに絞るので打っている途中で消えない
+   ③ 環境の切り替え：取り込んだタスクに env（📴 オフライン可／📱 スマホでオンライン／💻 会社PC／🏠 家のPC）が1件でもあるときだけ出す。
+      印の無いタスクはどの環境でも出す。env は Obsidian 側（Template_Focus_Send）が送るようになってから効く（いまは出ない）
+   並び順・取り込み・書き出すデータの形は変えていない。 */
+var fAskQ = "", fAskOpen = {};
+var ENV_LB = {off:"📴 オフライン可", mob:"📱 スマホでオンライン", pc:"💻 会社PC", home:"🏠 家のPC"};
+function ftEnvOf(x){
+  var v = x && x.env; if(!v) return [];
+  if(typeof v === "string") v = v.split(/[,、\s]+/);
+  return v.map(function(s){ s = String(s||"");
+    if(/off|オフライン|📴/.test(s)) return "off";
+    if(/mob|スマホ|📱|online|オンライン|🌐/.test(s)) return "mob";
+    if(/home|家|🏠/.test(s)) return "home";
+    if(/pc|会社|💻/i.test(s)) return "pc";
+    return ""; }).filter(function(k, i, A){ return k && A.indexOf(k) === i; });
+}
+function askEnvSet(k){ ftInit(); DB.focus.envNow = (DB.focus.envNow===k ? "" : k); save(); askRerender(); }
+function askOpen(g){ fAskOpen[g] = !fAskOpen[g]; askRerender(); }
+function askRerender(){
+  var e1 = document.getElementById("ask_text"), keep = e1 ? e1.value : "";
+  render();
+  var e2 = document.getElementById("ask_text"); if(e2) e2.value = keep;
+}
+function askFilter(v){
+  fAskQ = String(v||"");
+  var q = fAskQ.trim().toLowerCase(), n = 0;
+  document.querySelectorAll(".ftpick").forEach(function(b){
+    var show = q ? (b.getAttribute("data-t").indexOf(q) >= 0) : (b.getAttribute("data-more")!=="1" || fAskOpen[b.getAttribute("data-g")] || b.getAttribute("data-on")==="1");
+    b.style.display = show ? "" : "none"; if(show && q) n++;
+  });
+  document.querySelectorAll(".ftmorebtn").forEach(function(b){ b.style.display = q ? "none" : ""; });
+  document.querySelectorAll(".ftgh").forEach(function(b){ b.style.display = q ? "none" : ""; });
+  var c = document.getElementById("ask_qn"); if(c) c.textContent = q ? (n ? n+"件" : "見つかりません") : "";
+}
+function askPickHtml(list, today){
+  ftInit();
+  var envs = {}, h = "";
+  list.forEach(function(x){ ftEnvOf(x).forEach(function(k){ envs[k] = 1; }); });
+  var envNow = DB.focus.envNow || "";
+  if(Object.keys(envs).length){
+    h += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 2px">'
+       + ["off","mob","pc","home"].map(function(k){ var on = envNow===k;
+           return '<button class="btn ghost" style="margin-top:0;width:auto;flex:0 0 auto;padding:6px 10px;font-size:13px'+(on?';border:1px solid #e0a86a;color:#e0a86a':'')+'" onclick="askEnvSet(\''+k+'\')">'+ENV_LB[k]+'</button>'; }).join('')
+       + '</div><p class="note" style="margin:0 0 4px">いまの環境を押すと、それに合うものだけ（印の無いものは常に出します）。もう一度押すと全部に戻ります。</p>';
+    if(envNow) list = list.filter(function(x){ var e = ftEnvOf(x); return !e.length || e.indexOf(envNow) >= 0; });
+  }
+  h += '<div class="row" style="margin:4px 0 2px;align-items:center"><input class="inp" type="search" id="ask_q" style="margin:0" value="'+esc(fAskQ)+'" placeholder="🔍 タスクを探す（文字で絞る）" oninput="askFilter(this.value)"><small id="ask_qn" style="flex:0 0 auto;margin-left:6px"></small></div>';
+  var G = [{g:"over", lb:"🔴 期限が過ぎたもの", L:[]}, {g:"rest", lb:"📋 そのほか", L:[]}, {g:"ai", lb:"🤖 From AI", L:[]}];
+  list.forEach(function(x){ (ftIsAI(x) ? G[2] : (x.d && x.d < today) ? G[0] : G[1]).L.push(x); });
+  var q = fAskQ.trim().toLowerCase();
+  G.forEach(function(gr){
+    if(!gr.L.length) return;
+    h += '<div class="ftgh" style="font-size:13px;color:#e0a86a;margin:10px 0 0'+(q?';display:none':'')+'">'+gr.lb+'（'+gr.L.length+'件）</div>';
+    gr.L.forEach(function(x, j){
+      var i = DB.focus.tasks.indexOf(x), on = (i === fAskSel), more = j >= 3;
+      var show = q ? (String(x.t||"").toLowerCase().indexOf(q) >= 0) : (!more || fAskOpen[gr.g] || on);
+      var e = ftEnvOf(x).map(function(k){ return ENV_LB[k].split(" ")[0]; }).join("");
+      h += '<button class="btn ghost ftpick" data-g="'+gr.g+'" data-more="'+(more?1:0)+'" data-on="'+(on?1:0)+'" data-t="'+esc(String(x.t||"").toLowerCase())+'" style="margin-top:6px;text-align:left'+(on?';border:1px solid #e0a86a;color:#e0a86a':'')+(show?'':';display:none')+'" onclick="askSel('+i+')">'
+         + (on ? '✔ ' : '') + (x.parent ? '↳ ' : '') + (ftIsAI(x) ? '🤖 ' : x.k==="P" ? '🏠 ' : '') + esc(x.t)
+         + ((x.d && x.d < today) ? ' <small>🔴'+esc(x.d.slice(5))+'</small>' : '') + (e ? ' <small>'+e+'</small>' : '') + '</button>';
+    });
+    if(gr.L.length > 3){
+      h += '<button class="btn link ftmorebtn" style="margin-top:4px'+(q?';display:none':'')+'" onclick="askOpen(\''+gr.g+'\')">'
+         + (fAskOpen[gr.g] ? '▲ たたむ' : '▼ ほか '+(gr.L.length-3)+'件') + '</button>';
+    }
+  });
+  return h;
+}
 function askSel(i){
   var e1 = document.getElementById("ask_text"), keep = e1 ? e1.value : "";
   fAskSel = (fAskSel === i) ? -1 : i;
@@ -7780,6 +7852,81 @@ function viewFocusPlan(){
   return h;
 }
 
+/* ===== v110（2026-11-24 🤖 AIへ 09:26「集中ブロックの準備に朝のセット（メールチェック・通知・Teams など）を足せるように」
+   ＋ 同日チャット「計画して始める以外の動線からも使えるようにしてほしい」）=====
+   ① 準備画面に「☀ 朝のセットから始める」。朝のセット＝ DB.focus.morningSet（routine のセットの id）。
+      未設定・見つからないときは選ぶ画面（focusMorning）へ。押すと「朝のセット1区切り」の計画で始め、
+      終わったら いつもの「次は何を」（その都度決める）へ続く＝ v88 の計画の仕組みをそのまま使う。
+   ② その都度決める（次は何を）の画面にも「🔁 routine のセットを入れる」。押したセットを1区切りとして始める
+      （区切りの中の「▶ セットを始める」は v88 と同じ focusSetBtn）。
+   ★セットの中身はご本人が routine の「セットを編集」で作る（端末の中のデータ。アプリ側で勝手に作らない）。
+   ★書き出すデータの形は変えていない（記録・📤 の形はそのまま）。 */
+function morningSet(){ var id = DB.focus.morningSet; var s = id ? setOf(id) : null; return (s && !s.archived) ? s : null; }
+function setNameOf(s){ return (s.icon ? s.icon+" " : "") + s.name; }
+function setSecOf(s){ return Math.max(60, Math.ceil(limitOf(s)/60)*60); }
+function morningBtn(){
+  var s = morningSet();
+  return '<button class="setb" style="border-color:#e0a86a;margin-bottom:8px" onclick="morningGo()">☀ 朝のセットから始める<small>'
+    + (s ? esc(setNameOf(s))+'（'+Math.round(setSecOf(s)/60)+'分）→ 終わったら「次は何を」へ続きます。' : '初回だけ、朝に使う routine のセットを選びます（メール・通知・Teams など）。')
+    + '</small></button>'
+    + (s ? '<p class="note" style="margin:-4px 0 10px;text-align:right"><a href="#" onclick="go(\'focusMorning\');return false;">朝のセットを変える</a></p>' : '');
+}
+function morningGo(){
+  var s = morningSet();
+  if(!s){ go("focusMorning"); return; }
+  var sl = fSlotNow(), cap = Math.max(60, (DB.focus.len[sl]||60)*60);
+  var sec = Math.min(setSecOf(s), cap), nm = setNameOf(s);
+  focusBegin("ask", { cap:cap, segs:[sec], labels:[nm], tasks:[{ t:nm, set:s.id, off:[], k:"S" }] });
+}
+function morningPick(id){ DB.focus.morningSet = id; save(); morningGo(); }
+function morningOnly(id){ DB.focus.morningSet = id; save(); go("focusStart"); }
+function viewFocusMorning(){
+  var L = normals(), cur = DB.focus.morningSet;
+  var h = '<h1>☀ 朝のセットを選ぶ</h1>'
+    + '<p class="sub">集中ブロックの最初に入れる routine のセットを1つ選びます。次からは準備画面の1タップで始まります（ここでいつでも変えられます）。</p>';
+  if(!L.length){
+    h += '<div class="warn">登録してあるセットがありません。先にホームの「セットを編集」で、たとえば「☀ 朝のセット」（メールチェック 5分・通知の処理 5分・Teams の処理 5分）を作ってください。</div>';
+  }else{
+    h += '<p class="note">朝用のセットがまだ無ければ、ホームの「セットを編集」で作ってから戻ってきてください（例：メールチェック 5分・通知の処理 5分・Teams の処理 5分）。</p>';
+  }
+  h += L.map(function(s){
+    var on = (s.id === cur);
+    return '<div class="card" style="padding:10px 12px'+(on?';border-color:#e0a86a':'')+'"><div style="font-weight:700;line-height:1.5;margin-bottom:6px">'
+      + (on ? '✔ ' : '') + esc(setNameOf(s)) + ' <small style="font-weight:400">（'+Math.round(setSecOf(s)/60)+'分・'+s.steps.length+'項目）</small></div>'
+      + '<div class="row"><button class="btn" style="margin-top:0" onclick="morningPick(\''+s.id+'\')">▶ これで始める</button>'
+      + '<button class="btn ghost" style="margin-top:0" onclick="morningOnly(\''+s.id+'\')">選ぶだけ</button></div></div>';
+  }).join('');
+  h += '<button class="btn link" onclick="go(\'focusStart\')">戻る</button>';
+  return h;
+}
+function askSetHtml(){
+  var L = normals(); if(!L.length) return '';
+  var left = Math.max(60, fCap - fElapsed()), ms = morningSet();
+  var btn = function(s){
+    var m = Math.round(Math.min(setSecOf(s), left)/60);
+    return '<button class="btn ghost" style="margin-top:6px;text-align:left" onclick="askSetGo(\''+s.id+'\')">🔁 '+esc(setNameOf(s))+' <small>（'+m+'分）</small></button>';
+  };
+  var h = '<label>routine のセットを入れる（押すとすぐ始まります）</label>';
+  if(ms) h += btn(ms).replace('🔁 ','☀ ');
+  var rest = L.filter(function(s){ return !ms || s.id !== ms.id; });
+  if(rest.length) h += '<details style="margin:6px 0 8px"><summary style="color:#8ea3b8;font-size:13px">ほかのセット（'+rest.length+'）</summary>' + rest.map(btn).join('') + '</details>';
+  h += '<p class="note">休憩までの残りより長いセットは、残りに収まるように項目を同じ割合で縮めます。</p>';
+  return h;
+}
+function askSetGo(id){
+  var s = setOf(id); if(!s) return;
+  scPrefill = "";
+  var sec = Math.min(setSecOf(s), Math.max(60, fCap - fElapsed())), nm = setNameOf(s);
+  fSegs.push(sec);
+  fLabels.push(nm);
+  fTasks[fSegs.length - 1] = { t:nm, set:s.id, off:[], k:"S" };
+  fSeg = fSegs.length - 1; fAskSel = -1;
+  fAsking = false; fOver = false;
+  fUnpause(false);
+  fFlash = Date.now();
+  render();
+}
+
 /* --------- 集中：始める前の画面 --------- */
 function viewFocusStart(){
   var sl = fSlotNow(), segs = segsFor(sl);
@@ -7804,6 +7951,7 @@ function viewFocusStart(){
           + '</div>'
         : '')
      + '<p class="note" style="text-align:center">区切り： '+segLabel(sl)+'</p></div>';
+  h += morningBtn();   /* v110 */
   h += '<div class="sec">② どう進める？</div>';
   h += '<button class="setb" style="border-color:#8fa86a;margin-bottom:8px" onclick="swGo()">🧹 3分ずつ回す<small>一覧を上から1件3分（期限切れ → 📥 Inbox → 🤖 From AI → 🧭）。始めるたびに iPhone のタイマーへ3分を渡します。時間が来たら行き先を決めます。</small></button>';
   h += '<button class="setb" style="margin-bottom:8px" onclick="go(\'focusPlan\')">⏱ 計画して始める<small>次のMTGまで など使える時間を先に決めて、タスクや routine のセットに何分使うかを並べてから始めます。</small></button>';
@@ -7862,12 +8010,7 @@ function viewFocus(){
     var ftList = ftOpenList(), ftToday = ftDate("今日");
     h += '<label>次にやるタスク（押して選ぶ）</label>';
     if(ftList.length){
-      h += ftList.map(function(x){
-        var i = DB.focus.tasks.indexOf(x), on = (i === fAskSel);
-        return '<button class="btn ghost" style="margin-top:6px;text-align:left'+(on?';border:1px solid #e0a86a;color:#e0a86a':'')+'" onclick="askSel('+i+')">'
-          + (on ? '✔ ' : '') + (x.parent ? '↳ ' : '') + (ftIsAI(x) ? '🤖 ' : x.k==="P" ? '🏠 ' : '') + esc(x.t)
-          + ((x.d && x.d < ftToday) ? ' <small>🔴'+esc(x.d.slice(5))+'</small>' : '') + '</button>';
-      }).join('');
+      h += askPickHtml(ftList, ftToday);   /* v111 */
     }else{
       h += '<p class="note">Obsidian のタスクはまだ取り込んでいません。</p>';
     }
@@ -7879,6 +8022,7 @@ function viewFocus(){
        + [10,15,25,40].map(function(m){ return '<button class="btn" style="margin-top:0" onclick="askGo('+m+')">'+m+'分</button>'; }).join('')
        + '</div>'
        + '<p class="note">休憩までの残りを超える長さを選んでも、休憩までで止まります。考えているあいだ、時計は止まっています。</p>';
+    h += askSetHtml();   /* v110 */
     h += aiButton();
     h += '<button class="btn ghost" onclick="focusFinish()">ここで終える</button>';
     h += '<button class="btn link" onclick="focusLeave()">やめて最初に戻る</button>';
@@ -9152,7 +9296,7 @@ function fbCtx(){
   var NM = {home:"ホーム", run:"実行中", done:"完了", log:"これまでの記録", review:"振り返り",
     edit:"セットの編集", backup:"バックアップ", about:"このアプリが持たないもの",
     scale:"満腹度のものさし", scenes:"シーン", words:"声かけ",
-    focusStart:"集中ブロックの準備", focus:"集中ブロック中", focusDone:"集中ブロック完了",
+    focusStart:"集中ブロックの準備", focusMorning:"朝のセットを選ぶ", focus:"集中ブロック中", focusDone:"集中ブロック完了",
     focusSet:"集中ブロックの設定", sleepWatch:"就寝の見守り",
     wakeChoice:"中途覚醒の3択", wakeRun:"中途覚醒の対処",
     sxlib:"ストレッチのプログラム", sximp:"ストレッチの取り込み", sxtext:"ストレッチの書式",
