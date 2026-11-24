@@ -1660,7 +1660,7 @@ function parkBtn(){
 
 /* --- 状態 --- */
 /* v27: 版の表示（ホーム最下部）。中身を変えたら、ここも必ず上げる。 */
-var APPVER = "切り替えルーティン v108 ・ 2026-11-21";
+var APPVER = "切り替えルーティン v109 ・ 2026-11-22";
 var view = "home";
 var curId = null;
 var startAt = 0;
@@ -10065,7 +10065,19 @@ function planBanner(){
    ★③ で 🌬️・🍵・🚶 を選んだ回は、そのセットの完了画面の上に「🕞 記録して閉じる」。🎯 は集中の終わりの画面で 📤 のあと。
    ★押し忘れても、ホームの上に「🕞 まだ記録していない回」が1行出る（24時間以内）。
    ★行の形（PC 版と揃える。指示_2026-11-20 §2）: `- HH:MM 🕞 衝動7｜😰 焦り｜原因: …｜次: …｜今日2回目` ＋ 書き出し・送り先・✂️ の決めたことを下の段に。 */
-var SC_HEAD = "🕞 15:30 セルフコンディション";
+var SC_HEAD = "🕞 15:30 セルフコンディション";        /* 旧い名前 */
+/* ===== v109（2026-11-22 巡回・Obsidian運用管理 指示_2026-11-21 の「B.M.C. へ①」）: 日次ノートの見出しの新旧どちらにも書ける形 =====
+   日次ノートの見出しは「🚩 いつもと違う日（朝に確かめる）」→「🌅 今日の見通し」、「🕞 15:30 セルフコンディション」→「🕞 セルフコンディション」に変わる。
+   Advanced URI は見出しが見つからないと書けないので、**その記録が入る日次ノートの日付**で名前を選ぶ。
+   HEAD_SWITCH の日付の日次ノートから新しい名前。Obsidian 側（Template_Daily_Start の定数2か所）の切り替えと同じ日にする。 */
+var SC_HEAD_NEW = "🕞 セルフコンディション";           /* 新しい名前 */
+var HEAD_SWITCH = new Date(2026,10,24).getTime();     /* 2026-11-24（月）の日次ノートから新しい名前 */
+function headOf(ts, oldName, newName){
+  var d = new Date(ts || Date.now());
+  var day = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  return (day >= HEAD_SWITCH) ? newName : oldName;
+}
+function scHeadFor(ts){ return headOf(ts, SC_HEAD, SC_HEAD_NEW); }
 function scById(t){ for(var i=DB.sc.length-1;i>=0;i--) if(DB.sc[i] && DB.sc[i].t===t) return DB.sc[i]; return null; }
 /* v106: 24時間で案内が消えるのをやめた（送るか「記録しない」を押すまで残す）。v97 より前の記録は無いので 11/20 を下限にする。
    ⏳ 15分の答えを待っている回は、答えが出るまで（または6時間たつまで）送る対象に入れない。 */
@@ -10080,7 +10092,7 @@ function scPendGroups(){
 function scGroupOf(x){ var k = fbNoteName(x.t); var g = scPendList().filter(function(y){ return fbNoteName(y.t) === k; }); if(g.indexOf(x) < 0) g.push(x); return g.sort(function(a,b){ return a.t-b.t; }); }
 function scRecUriList(list){
   return "obsidian://advanced-uri?vault="+encodeURIComponent(FB.vault||"My Valut")
-    + "&filepath="+encodeURIComponent(fbNotePath(list[0].t))+"&heading="+encodeURIComponent(SC_HEAD)
+    + "&filepath="+encodeURIComponent(fbNotePath(list[0].t))+"&heading="+encodeURIComponent(scHeadFor(list[0].t))   /* v109 */
     + "&mode=append&data="+encodeURIComponent(list.map(scRecText).join(""));
 }
 function scRecTapList(csv, close){
@@ -10118,7 +10130,7 @@ function scRecText(x){
 }
 function scRecUri(x){
   return "obsidian://advanced-uri?vault="+encodeURIComponent(FB.vault||"My Valut")
-    + "&filepath="+encodeURIComponent(fbNotePath(x.t))+"&heading="+encodeURIComponent(SC_HEAD)
+    + "&filepath="+encodeURIComponent(fbNotePath(x.t))+"&heading="+encodeURIComponent(scHeadFor(x.t))   /* v109 */
     + "&mode=append&data="+encodeURIComponent(scRecText(x));
 }
 /* リンクを押したとき：印を付け、少し待ってから閉じる（押した瞬間に画面を作り直すと、開こうとしているリンクが消える） */
@@ -10241,7 +10253,9 @@ function viewRelaxPick(){
 
 /* 🌅 今日の見通し（正午まで・ホームと実行中の画面の上。言葉の正本は 🌱 B.M.C.の使い方「🕞」節の 🚩 A〜C） */
 var OL_FLAGS = [["A","いつもの流れが崩れる"],["B","一人の時間が取りにくい"],["C","仕事の焦り・先の不安が大きい"]];
-var OL_HEAD = "🚩 いつもと違う日（朝に確かめる）";   /* ★日次ノートの見出しが「🌅 今日の見通し」に変わったら差し替える（仕様書_2026-11-21 §3-4） */
+var OL_HEAD = "🚩 いつもと違う日（朝に確かめる）";   /* 旧い名前 */
+var OL_HEAD_NEW = "🌅 今日の見通し";                  /* 新しい名前。v109: 切り替えは HEAD_SWITCH（仕様書_2026-11-21 §3-4） */
+function olHeadFor(ts){ return headOf(ts, OL_HEAD, OL_HEAD_NEW); }
 var olSel = {}, olLater = "";
 function olToggle(k){ olSel[k] = !olSel[k]; render(); }
 function olKeys(){ return OL_FLAGS.map(function(f){ return f[0]; }).filter(function(k){ return olSel[k]; }); }
@@ -10249,7 +10263,7 @@ function olUri(){
   var keys = olKeys();
   var line = "- 🚩 "+fbHm(new Date())+" [mejirushi:: "+(keys.length ? keys.join(",") : "なし")+"]\n";
   return "obsidian://advanced-uri?vault="+encodeURIComponent(FB.vault||"My Valut")
-    + "&filepath="+encodeURIComponent(fbNotePath(Date.now()))+"&heading="+encodeURIComponent(OL_HEAD)
+    + "&filepath="+encodeURIComponent(fbNotePath(Date.now()))+"&heading="+encodeURIComponent(olHeadFor(Date.now()))   /* v109 */
     + "&mode=append&data="+encodeURIComponent(line);
 }
 function olTap(){
