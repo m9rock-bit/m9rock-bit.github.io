@@ -1660,7 +1660,7 @@ function parkBtn(){
 
 /* --- 状態 --- */
 /* v27: 版の表示（ホーム最下部）。中身を変えたら、ここも必ず上げる。 */
-var APPVER = "切り替えルーティン v115 ・ 2026-11-25";
+var APPVER = "切り替えルーティン v117 ・ 2026-11-25";
 var view = "home";
 var curId = null;
 var startAt = 0;
@@ -7383,7 +7383,8 @@ function focusBegin(mode, plan){
   if(tick) clearInterval(tick);
   tick = setInterval(tickRender, 250);
   view = "focus"; render();
-  if(focusAlarm()!=="off") focusHand(fBlockSec());   /* 休憩までの1本だけ渡す（画面遷移を伴うので最後）。v76: 3択 */
+  if(fPlanned && fTasks[0] && fTasks[0].set){ /* v117: 最初の区切りが routine のセット（☀ 朝のセット等）のときは、ここでブロックのタイマーを渡さない。▶ セットを始めたときに、ブロックの設定「時間を決めてセットをやるときのアラーム」どおりの1本だけを渡す（2本渡すと後から来たほうに上書きされ、どちらで動いているか分からなくなるため） */ }
+  else if(focusAlarm()!=="off") focusHand(fBlockSec());   /* 休憩までの1本だけ渡す（画面遷移を伴うので最後）。v76: 3択 */
   /* v20 (2026-09-03): タイマーを渡さないときだけ、プレイリストを自動で開く。
      どちらも前面のアプリを切り替えるので、同時にはできない（セットと同じ扱い）。 */
   else openUrl(focusSpUrl());
@@ -10244,19 +10245,44 @@ function plansDue(){
 function planDone(i){ var a = plansDue(); if(a[i]){ a[i].done = true; a[i].doneAt = Date.now(); save(); render(); } }
 function planLater(i){ var a = plansDue(); if(a[i]){ a[i].due = lnNextWork(); a[i].at = ""; save(); render(); } }
 function planFocus(i){ var a = plansDue(); var x = a[i]; if(!x) return; x.done = true; x.doneAt = Date.now(); save(); lnToPlan([x.task]); if(x.f5){ ftMsg = "最初の5分："+x.f5+"（"+x.task+"）"; ftMsgAt = Date.now(); render(); } }   /* v101: タスクのまま計画へ */
+/* ===== v116（2026-11-25 B.M.C. 提案_2026-11-24_3 問1ア「推奨通り」）: ホームの帯のタスクを作業環境で絞る =====
+   帯（📌 今日の最初の5分 など）のタスクに、Obsidian から取り込んだ一覧の同じ名前のタスクの env を引いて当てる。
+   1件でも印があれば 📴／📱／💻／🏠 の切り替えを帯の上に出す（選んだ環境は集中ブロックと共通の DB.focus.envNow）。
+   合わないものは「▼ 別の環境 n件」に畳む（消さない。開けば今までどおり押せる）。印の無いものは常に出す。
+   書き出すデータの形・plans の中身は変えていない。 */
+var pbEnvOpen = false;
+function pbEnvOf(x){
+  var e = ftEnvOf(x); if(e.length) return e;
+  var T = (DB.focus && DB.focus.tasks) || [], nm = String(x && x.task || "");
+  for(var j = 0; j < T.length; j++){ if(T[j] && T[j].t === nm){ e = ftEnvOf(T[j]); if(e.length) return e; } }
+  return [];
+}
+function pbEnvToggle(){ pbEnvOpen = !pbEnvOpen; render(); }
 function planBanner(){
   var a = plansDue(); if(!a.length) return "";
   var LB = { rest:"📌 今日の最初の5分", mon:"📌 月曜の朝いちばん", worry:"📌 決めておいたこと", check:"🗓 確認する時間" };
   var h = '<div style="border:1px solid #c49a6a;border-radius:10px;padding:8px 10px;margin:0 0 10px;background:#1f1a14">';
+  var EV = a.map(pbEnvOf), any = EV.some(function(e){ return e.length; });
+  var envNow = (any && DB.focus && DB.focus.envNow) || "", hid = 0;
+  if(any){
+    h += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px">'
+       + ["off","mob","pc","home"].map(function(k){ var on = envNow===k;
+           return '<button class="btn ghost" style="margin-top:0;width:auto;flex:0 0 auto;padding:4px 8px;font-size:12px'+(on?';border:1px solid #e0a86a;color:#e0a86a':'')+'" onclick="askEnvSet(\''+k+'\')">'+ENV_LB[k]+'</button>'; }).join('')
+       + '</div>';
+  }
   a.forEach(function(x, i){
-    h += '<div style="margin:2px 0 6px"><div style="font-size:12px;color:#e0a86a">'+LB[x.kind]+'（'+(new Date(x.made).getMonth()+1)+'/'+new Date(x.made).getDate()+' に決めた）</div>'
-       + '<div style="font-size:14px;line-height:1.6">'+esc(x.task)+(x.f5 ? '<br><span style="color:#cfd8e3">最初の5分：'+esc(x.f5)+'</span>' : '')+(x.kind==="check" ? '<br><span style="color:#8ea3b8;font-size:12px">いま考えてよい時間です。計画にできたら「🎯」へ。</span>' : '')+'</div>'
+    var off = envNow && EV[i].length && EV[i].indexOf(envNow) < 0;
+    if(off) hid++;
+    var ee = EV[i].map(function(k){ return ENV_LB[k].split(" ")[0]; }).join("");
+    h += '<div class="pbitem" style="margin:2px 0 6px'+((off && !pbEnvOpen)?';display:none':'')+(off?';opacity:.7':'')+'"><div style="font-size:12px;color:#e0a86a">'+LB[x.kind]+'（'+(new Date(x.made).getMonth()+1)+'/'+new Date(x.made).getDate()+' に決めた）</div>'
+       + '<div style="font-size:14px;line-height:1.6">'+esc(x.task)+(ee ? ' <small>'+ee+'</small>' : '')+(x.f5 ? '<br><span style="color:#cfd8e3">最初の5分：'+esc(x.f5)+'</span>' : '')+(x.kind==="check" ? '<br><span style="color:#8ea3b8;font-size:12px">いま考えてよい時間です。計画にできたら「🎯」へ。</span>' : '')+'</div>'
        + '<div class="row" style="flex-wrap:wrap;gap:6px;margin-top:4px">'
        + '<button class="btn ghost" style="margin-top:0;width:auto;flex:0 0 auto;padding:5px 10px" onclick="planDone('+i+')">✅ やった</button>'
        + '<button class="btn ghost" style="margin-top:0;width:auto;flex:0 0 auto;padding:5px 10px" onclick="planFocus('+i+')">🎯 集中ブロック</button>'
        + '<button class="btn ghost" style="margin-top:0;width:auto;flex:0 0 auto;padding:5px 10px" onclick="planLater('+i+')">次の出勤日へ</button>'
        + '</div></div>';
   });
+  if(hid) h += '<button class="btn ghost" style="margin-top:2px;width:auto;padding:4px 10px;font-size:12px" onclick="pbEnvToggle()">'+(pbEnvOpen ? '▲ 別の環境を畳む' : '▼ 別の環境 '+hid+'件')+'</button>';
   return h + '</div>';
 }
 
@@ -10753,6 +10779,47 @@ blFromHash();
 openFromHash();
 render();
 fbInit();
+
+/* ===== v117（2026-11-25 指示_2026-11-25_3「朝のセットを連携したときのタイマーの受け渡しがごちゃついています」・見回り代行）=====
+   ① ☀ 朝のセットから始める（計画の最初の区切りがセット）では、ブロック開始時の「休憩まで」のタイマーを渡さない（focusBegin の v117 の1行）。
+      iPhone へ渡すのは ▶ セットを始めたときの1本だけ＝ブロックの設定「時間を決めてセットをやるときのアラーム」（既定 ⏱ 項目ごと・
+      「セットの設定どおり」を選べばセット側の ⏱ セット全体／項目ごと）。項目ごとの場合、5分未満の項目は従来どおり渡さない（v91）。
+   ② いま iPhone へ渡したタイマーを、実行中の画面と集中ブロックのセットの区切りに1行出す（例「⏱ いま iPhone に渡したタイマー：☀ 朝のセット（項目ごと）5分・08:40」）。
+   ★書き出すデータの形（記録・📤）は変えていない。 */
+var lastHand = null, handWhat = "";
+function handDefaultWhat(){
+  try{
+    var s = curId ? setOf(curId) : null;
+    if(s){
+      var nm = (s.icon ? s.icon+" " : "") + s.name;
+      if(fSetRun && s.id === fSetRun.id){ var a = fSetAlarmEff(s); return nm + (a==="step" ? "（項目ごと）" : a==="set" ? "（セット全体）" : ""); }
+      var b = alarmOf(s); return nm + (b==="step" ? "（項目ごと）" : b==="set" ? "（セット全体）" : "");
+    }
+    if(view==="focus" || fMode) return "🎯 集中ブロック（休憩まで）";
+  }catch(e){}
+  return "";
+}
+(function(){
+  var _nt = nativeTimer;
+  nativeTimer = function(sec){
+    try{ var s2 = Math.max(1, Math.round(sec || left())); lastHand = { sec:s2, at:Date.now(), what:(handWhat || handDefaultWhat()) }; }catch(e){}
+    handWhat = "";
+    return _nt(sec);
+  };
+  var _fh = focusHand;
+  focusHand = function(sec, manual){ handWhat = "🎯 集中ブロック"; var r = _fh(sec, manual); handWhat = ""; return r; };
+})();
+function handNote(){
+  if(!lastHand || Date.now() - lastHand.at > 3*3600*1000) return "";
+  var m = Math.max(1, Math.round(lastHand.sec/60));
+  return '<p class="note" style="margin:2px 0 6px">⏱ いま iPhone に渡したタイマー：<b>' + esc(lastHand.what || "（名前なし）") + ' ' + m + '分</b>・' + hhmm(lastHand.at) + '</p>';
+}
+(function(){
+  var _vr = viewRun;
+  viewRun = function(){ var h = _vr.apply(this, arguments); try{ if(fSetRun || fromFocus) h = handNote() + h; }catch(e){} return h; };
+  var _fb = focusSetBtn;
+  focusSetBtn = function(){ var h = _fb.apply(this, arguments); try{ if(h) h += handNote(); }catch(e){} return h; };
+})();
 </script>
 </body>
 </html>
