@@ -1660,7 +1660,7 @@ function parkBtn(){
 
 /* --- 状態 --- */
 /* v27: 版の表示（ホーム最下部）。中身を変えたら、ここも必ず上げる。 */
-var APPVER = "切り替えルーティン v118 ・ 2026-11-25";
+var APPVER = "切り替えルーティン v119 ・ 2026-11-25";
 var view = "home";
 var curId = null;
 var startAt = 0;
@@ -1853,6 +1853,7 @@ function tickRender(){
   /* v15: 「次に何をしますか」の入力待ちも同じ。描き直すと打ち込んだ文字が消える。
      このあいだ時計は止めてあるので、描き直さなくても表示はずれない。 */
   if(fAsking && view==="focus") return;
+  if(fSplitUI && fSplitUI.step==="input" && view==="focus") return;   /* v119: ✂️ 分ける の入力中は描き直さない */
   if(view==="focusPlan" && document.activeElement && document.activeElement.id==="ask_q") return;   /* v112 */
   if(view==="sc") return;   /* v97: 🕞 は入力欄がある画面。描き直すと打った文字が消える */
   render();
@@ -8092,41 +8093,13 @@ function viewFocus(){
   h += '<div class="big'+(fPaused?' over':'')+'">'+mmss(leftAll)+'</div>';
   h += '<div class="bigsub">'+(fPaused?'一時停止中':'休憩まで')+'</div>';
   h += '<div class="bar"><i style="width:'+Math.max(0,Math.min(100,(e/Math.max(1,total))*100))+'%"></i></div>';
-  h += '<p class="note" style="text-align:center;margin-top:9px">'
+  h += '<p style="text-align:center;margin-top:9px;font-size:13px;color:#8ea3b8">'   /* v119: くわしく に畳まれないように */
      + (fMode==="ask" ? '区切り '+fSegs.length+'つめ' : '区切り '+Math.min(fSeg+1,fSegs.length)+' / '+fSegs.length)
      + ' ・ この区切りの残り <b>'+mmss(segLeft)+'</b></p>';
   h += '</div>';
   h += fFirstHint();   /* v96 */
-  if(fMode==="ask"){
-    h += '<div class="card"'+(flash?' style="border-color:#e0a86a"':'')+'>'
-       + '<p class="note" style="margin:0">いま</p>'
-       + '<div style="font-size:19px;font-weight:700;margin:3px 0 9px;line-height:1.5">'+esc(fLabels[fSeg]||"（決めずに始めた）")+'</div>'
-       + focusSetBtn()
-       + (fSeg+1 < fSegs.length
-          ? '<p class="note" style="margin:0">次は <b>'+esc(fLabels[fSeg+1]||"")+'</b>（'+Math.round((fSegs[fSeg+1]||0)/60)+'分）。早く終わったら ✅ か「次の区切りへ」：余った分は次に足します。</p>'
-          : '<p class="note" style="margin:0">終わったら、次に何をするかをまた聞きます。</p>')
-       + (fLabels.length>1 ? '<p class="note" style="margin:7px 0 0">ここまで： '+esc(fLabels.slice(0,-1).join(" → "))+'</p>' : '')
-       + '</div>';
-  }
-  /* v89: 区切りの時間が来たら、ここで「延長して続ける／切り分ける」を決める。決めるまでは次へ進まない */
-  if(fMode==="ask" && fOver){
-    var ov = Math.max(0, e - fSegEnd(fSeg)), curX = (fTasks[fSeg] && !fTasks[fSeg].set) ? fTasks[fSeg] : null;
-    h += '<div class="card" style="border-color:#e0a86a;background:#211d18">'
-       + '<div style="font-size:13px;color:#e0a86a;margin:0">⏰ 予定の時間が来ました</div>'
-       + '<div style="font-size:17px;font-weight:700;margin:3px 0 6px;line-height:1.5">「'+esc(fLabels[fSeg]||"いまの区切り")+'」</div>'
-       + '<div class="big" style="font-size:34px">+'+mmss(ov)+'</div>'
-       + '<div class="bigsub">延長中（決めるまで、このタスクの時間として数えています。次へは進みません）</div>'
-       + '<label>⏩ 延長して続ける</label>'
-       + '<div class="row" style="margin-bottom:6px">'
-       + [5,10,15,25].map(function(m){ return '<button class="btn" style="margin-top:0" onclick="overExt('+m+')">+'+m+'分</button>'; }).join('')
-       + '</div>'
-       + '<button class="btn big" onclick="overCut()">✂️ ここで切り分けて'+(fSeg+1 < fSegs.length ? '「'+esc(fLabels[fSeg+1]||"")+'」へ' : '次を選ぶ')+'</button>'
-       + (curX ? '<div class="row" style="margin-top:6px"><button class="btn ghost" style="margin-top:0" onclick="ftAct(\'done\')">✅ 終わった</button>'
-               + '<button class="btn ghost" style="margin-top:0" onclick="ftAct(\'split\')">✂️ 残りを小さく分ける</button></div>' : '')
-       + (fPlanned ? '<p class="note" style="margin:7px 0 0">延長した分は、後ろのタスクの時間から差し引きます。休憩までの残りは変わりません。</p>' : '')
-       + '</div>';
-  }
-  h += ftPanel(); h += ftAddBtn(); h += aiButton();   /* v86 */
+  if(fMode==="ask"){ h += fRunAskHtml(flash, e); }   /* v119: その都度・計画のモードは fRunAskHtml にまとめた */
+  else { h += ftPanel(); h += ftAddBtn(); h += aiButton(); }
   if(fMode==="rotate" && fList.length){
     h += '<div class="card"'+(flash?' style="border-color:#e0a86a"':'')+'>'
        + '<p class="note" style="margin:0">いま</p>'
@@ -8150,6 +8123,7 @@ function viewFocus(){
      （.btn.big・幅いっぱい）へ格上げし、「次の区切りへ」を下の小さいほうへ退けた。
      v18 で「次へ▶」を格上げしたのと同じ考え方で、**どちらが主かが場面で違う**。
      仕事の集中ブロック（am/pm/ev）では従来どおり横並びのまま。常時は変えない。 */
+  var tailAt = h.length;   /* v119: ここから下は「ほかの操作」に畳む（その都度・計画のモード） */
   if(fSlotNow()==="kids"){
     h += '<button class="btn big" onclick="focusPause()">'+(fPaused?'▶ 再開する':'⏸ 一時停止する')+'</button>';
     h += '<button class="btn ghost" style="margin-top:9px" onclick="focusSkip()">次の区切りへ ▶</button>';
@@ -8193,7 +8167,259 @@ function viewFocus(){
   }
   h += '<button class="btn" onclick="focusFinish()">ここで終える</button>';
   h += '<button class="btn link" onclick="focusLeave()">やめて最初に戻る</button>';
+  if(fMode==="ask" && fSlotNow()!=="kids") h = h.slice(0, tailAt) + fMoreWrap(h.slice(tailAt));   /* v119 */
   return h;
+}
+
+/* ===== v119（2026-11-25 個人秘書チャットのご依頼・ご確認済み）: 集中ブロックの実施画面を整理 =====
+   ① 「いま」のカード（親 › 名前・子の件数・タグ）＋主ボタン ✂️ 分ける／次へ ▶、2段目に 🗂 整理／🤖 AIに投げた。そのほかは「ほかの操作」に畳む。
+   ② 区切りの時間が来たら（fOver）：⏩ 延長／✂️ 分ける（主）／▶ 次へ／🗂 整理。整理＝✅ 完了・📅 明日／来週月曜／日付・🔗 親・🏷 タグ（今あるタグから）・✏️ 名前・📝 メモ・💤 Someday・🗑️ 不要。
+   ③ ✂️ 分けるは複数行の入力欄（1行に1つ）。分けたあと「ここで区切って今から／いまの区切りのあと／いちばん後ろ／一覧に置くだけ」を選ぶ（各10分・ご回答）。入れた分は後ろから差し引き、休憩の時刻は動かさない。
+   ④ 🗓 この先の見通し：時刻・タスク・分。↑↓（順番）・分（時間）・✕（今回はやらない）。
+   ⑤ 🤖 AIに投げた：待ち時間 3／5／10／15／30分 → 待つあいだ見通しの次のタスク（または一覧から）へ移り、時間が来たら元のタスクに戻る（v93 の寄り道を使う）。
+   ★Obsidian へ戻す op は既存の種類だけ（done・due・split・rename・memo・drop・someday・tag・parent）。Task Sorter 側の読み方は変えていない。 */
+var fOrg = null, fSplitUI = null, fMoreOpen = false;
+function fClock(sec){ var d = new Date(Date.now() + Math.max(0, sec)*1000); return ("0"+d.getHours()).slice(-2)+":"+("0"+d.getMinutes()).slice(-2); }
+function fKidsOf(x){ ftInit(); return x ? DB.focus.tasks.filter(function(y){ return !y.done && y.parent === x.t; }).length : 0; }
+function fNameHtml(x, lb, big){
+  var h = '';
+  if(x && x.parent) h += '<span style="color:#8ea3b8;font-size:'+(big?'12.5':'11.5')+'px">'+(/^📦/.test(x.parent)?'':'📦 ')+esc(x.parent)+' › </span>'+(big?'<br>':'');
+  h += big ? '<span style="font-size:19px;font-weight:700;line-height:1.5">'+esc(lb)+'</span>' : '<b>'+esc(lb)+'</b>';
+  return h;
+}
+function fNowName(x){
+  var lb = fLabels[fSeg] || "（決めずに始めた）", k = fKidsOf(x);
+  var sub = [];
+  if(k) sub.push('子 '+k+'件');
+  if(x && x.tags && x.tags.length) sub.push('🏷 '+esc(x.tags.join("・")));
+  return '<div style="margin:3px 0 6px">'+fNameHtml(x, lb, true)+'</div>'
+    + (sub.length ? '<div style="font-size:12px;color:#8ea3b8;margin:-2px 0 6px">'+sub.join('　')+'</div>' : '');
+}
+function fRunAskHtml(flash, e){
+  var x = ftCur(), nx = fSeg+1 < fSegs.length, nextLb = nx ? (fLabels[fSeg+1]||"") : "";
+  var h = ftMsgHtml();
+  if(fOver){
+    var ov = Math.max(0, e - fSegEnd(fSeg));
+    h += '<div class="card" style="border-color:#e0a86a;background:#211d18">'
+       + '<div style="font-size:13px;color:#e0a86a">⏰ 予定の時間が来ました ・ 延長中 <b>+'+mmss(ov)+'</b></div>'
+       + fNowName(x)
+       + '<div class="row" style="margin:2px 0 4px">'+[5,10,15,25].map(function(m){ return '<button class="btn ghost" style="margin-top:0;padding:9px 4px" onclick="overExt('+m+')">⏩ +'+m+'分</button>'; }).join('')+'</div>'
+       + (x ? '<button class="btn big" style="margin-top:6px" onclick="fSplitOpen()">✂️ 分ける（1行に1つ）</button>' : '')
+       + '<div class="row"><button class="btn'+(x?' ghost':'')+'" style="margin-top:6px" onclick="overCut()">▶ 次へ'+(nx ? '「'+esc(nextLb)+'」' : '（次を選ぶ）')+'</button>'
+       + (x ? '<button class="btn ghost" style="margin-top:6px" onclick="fOrgToggle()">🗂 整理</button>' : '') + '</div>'
+       + '<p style="font-size:12.5px;color:#8ea3b8;line-height:1.6;margin:6px 0 0">決めるまでは、このタスクの時間として数えます（次へは進みません）。'+(fPlanned ? '延長した分は後ろのタスクから差し引きます。' : '')+'</p>'
+       + '</div>';
+  }else{
+    h += '<div class="card"'+(flash?' style="border-color:#e0a86a"':'')+'>'
+       + '<p style="font-size:12.5px;color:#8ea3b8;line-height:1.6;margin:0">いま</p>'
+       + fNowName(x)
+       + focusSetBtn()
+       + (x ? '<div class="row"><button class="btn" style="margin-top:4px" onclick="fSplitOpen()">✂️ 分ける</button><button class="btn ghost" style="margin-top:4px" onclick="focusSkip()">次へ ▶</button></div>'
+            + '<div class="row"><button class="btn ghost" style="margin-top:6px" onclick="fOrgToggle()">🗂 整理</button><button class="btn ghost" style="margin-top:6px" onclick="fAiOpen()">🤖 AIに投げた</button></div>'
+            : '<div class="row"><button class="btn ghost" style="margin-top:4px" onclick="focusSkip()">次へ ▶</button><button class="btn ghost" style="margin-top:4px" onclick="fAiOpen()">🤖 AIに投げた</button></div>')
+       + '</div>';
+  }
+  h += fSplitHtml() + fOrgHtml() + fAiPanel() + fOutlookHtml();
+  return h;
+}
+function fMoreWrap(tail){
+  if(!fMoreOpen) return '<button class="btn link" style="opacity:.85" onclick="fMoreOpen=true;render()">▸ ほかの操作（一時停止・タイマー・呼吸・ひと息・＋タスク・ここで終える）</button>';
+  return '<button class="btn link" style="opacity:.85" onclick="fMoreOpen=false;render()">▾ ほかの操作をたたむ</button>' + ftAddBtn() + tail;
+}
+function fCloseAll(){ fOrg = null; fSplitUI = null; aiPick = false; }
+function fOrgToggle(){ var o = fOrg; fCloseAll(); fOrg = o ? null : "menu"; render(); }
+function fAiOpen(){ var o = aiPick; fCloseAll(); if(!o){ aiPick = true; var c = ftCur(); aiTaskSel = c ? c.t : (aiTask || null); } render(); }
+/* ---- 🤖 AIに投げた ---- */
+function fAiPanel(){
+  if(aiOffer && aiEnd && !aiFired && ftCur() && !fOver){
+    var k = fSeg+1, y = fTasks[k], h = '';
+    if(y && !y.set && y !== ftCur() && !y.done) h += '<button class="btn" onclick="aiSwitchNextPlanned()">▶ 見通しの次「'+esc(fLabels[k]||y.t)+'」をやって、合図で戻る</button>';
+    return h + aiOfferHtml();
+  }
+  if(!aiPick) return '';
+  var c = ftCur();
+  return '<div class="card" style="padding:10px 12px;border-color:#e0a86a"><label style="margin-top:0">🤖 AIの返事を待つ時間</label>'
+    + '<p style="font-size:12.5px;color:#8ea3b8;line-height:1.6;margin:0 0 4px">待つあいだ別のタスクへ移り、時間が来たら'+(c ? '「'+esc(c.t)+'」' : '元のタスク')+'に戻れます。</p>'
+    + '<div class="row">'+[3,5,10,15,30].map(function(m){ return '<button class="btn ghost" style="margin-top:0;padding:9px 2px" onclick="aiSet('+m+')">'+m+'分</button>'; }).join('')+'</div>'
+    + '<button class="btn link" onclick="aiPick=false;render()">やめる</button></div>';
+}
+function aiSwitchNextPlanned(){
+  var k = fSeg+1, y = fTasks[k]; if(!y || y.set) return;
+  var dur = fSegs[k] || 0, i = DB.focus.tasks.indexOf(y); if(i < 0) return;
+  aiSwitchGo(i);
+  if(fTasks[fSeg] !== y || !aiAway) return;
+  /* 寄り道（y）→ 元のタスク → y の残り（もとの予定から寄り道で使う分を引いた分） */
+  if(fTasks[fSeg+2] === y){ fSegs[fSeg+2] = Math.max(60, dur - (fSegs[fSeg]||0)); fFitCap(fSeg+2); save(); render(); }
+}
+/* ---- ✂️ 分ける（1行に1つ） ---- */
+function fSplitOpen(){
+  var x = ftCur(); if(!x) return;
+  if(x.local){ ftAct('split'); return; }
+  fCloseAll(); fSplitUI = { step:"input" }; render();
+  setTimeout(function(){ var el = document.getElementById("fs_text"); if(el) el.focus(); }, 30);
+}
+function fSplitHtml(){
+  if(!fSplitUI) return '';
+  var x = ftCur();
+  if(fSplitUI.step === "input"){
+    if(!x){ fSplitUI = null; return ''; }
+    return '<div class="card" style="padding:10px 12px;border-color:#8fa86a"><label style="margin-top:0">✂️ 「'+esc(x.t)+'」を分ける（1行に1つ）</label>'
+      + '<textarea class="inp" id="fs_text" rows="5" style="width:100%;min-height:120px;box-sizing:border-box;font-size:16px;line-height:1.6" placeholder="論点を3つ書き出す&#10;AIに構成案を頼む&#10;構成案に自分の判断を3行足す"></textarea>'
+      + '<p style="font-size:12.5px;color:#8ea3b8;line-height:1.6;margin:4px 0 0">入力しているあいだ、画面の時計は止まって見えますが、時間は進んでいます。</p>'
+      + '<div class="row"><button class="btn" onclick="fSplitDo()">分ける</button><button class="btn ghost" onclick="fSplitUI=null;render()">やめる</button></div></div>';
+  }
+  var n = fSplitUI.kids.length;
+  return '<div class="card" style="padding:10px 12px;border-color:#8fa86a"><label style="margin-top:0">✂️ '+n+'件に分けました（「'+esc(fSplitUI.p)+'」の子）</label>'
+    + '<p style="font-size:12.5px;color:#8ea3b8;line-height:1.6;margin:0 0 4px">この集中ブロックに入れますか？（1件10分。入れた分は後ろのタスクから差し引きます。休憩の時刻は変わりません）</p>'
+    + '<button class="btn" onclick="fSplitIns(\'now\')">▶ ここで区切って、分けたタスクを今から</button>'
+    + '<button class="btn ghost" onclick="fSplitIns(\'after\')">⤵ いまの区切りのあとに入れる</button>'
+    + '<button class="btn ghost" onclick="fSplitIns(\'end\')">⤓ この先のいちばん後ろに足す</button>'
+    + '<button class="btn ghost" onclick="fSplitIns(\'none\')">📋 一覧に置くだけ（今回はやらない）</button></div>';
+}
+function fSplitDo(){
+  var x = ftCur(), el = document.getElementById("fs_text"); if(!x || !el) return;
+  var seen = {};
+  var names = String(el.value||"").split(/\n/).map(function(n){ return ftClean(String(n).replace(/^\s*(?:[-・*•]|\d+[.)．])\s*/, "")); })
+    .filter(function(n){ if(!n || n === x.t || seen[n]) return false; seen[n] = 1; return true; });
+  if(!names.length){ fSplitUI = null; render(); return; }
+  ftOp({op:"split", p:x.p, t:x.t, kids:names});
+  ftInit();
+  var at = DB.focus.tasks.indexOf(x); if(at < 0) at = DB.focus.tasks.length - 1;
+  var today = ftDate("今日");
+  var kids = names.map(function(n){ return { p:"", t:n, d:today, k:x.k, parent:x.t }; });
+  Array.prototype.splice.apply(DB.focus.tasks, [at+1, 0].concat(kids));
+  save();
+  fSplitUI = { step:"choice", kids:names, p:x.t };
+  render();
+}
+function fSplitIns(where){
+  var su = fSplitUI; fSplitUI = null; if(!su) return;
+  if(where === "none"){ ftMsg = "📋 "+su.kids.length+"件を一覧に置きました（次の区切りで選べます）"; ftMsgAt = Date.now(); render(); return; }
+  var tasks = su.kids.map(planTaskOf).filter(Boolean); if(!tasks.length){ render(); return; }
+  fPadTo(fSegs.length);
+  var at = (where === "end") ? fSegs.length : fSeg+1, n = tasks.length;
+  Array.prototype.splice.apply(fSegs, [at, 0].concat(tasks.map(function(){ return 600; })));
+  Array.prototype.splice.apply(fLabels, [at, 0].concat(tasks.map(function(t){ return t.t; })));
+  Array.prototype.splice.apply(fTasks, [at, 0].concat(tasks));
+  Array.prototype.splice.apply(fClosed, [at, 0].concat(tasks.map(function(){ return false; })));
+  if(aiAway && at <= aiAway.r) aiAway.r += n;
+  fFitCap(at + n - 1);
+  save();
+  ftMsg = "✂️ 分けた "+n+"件を"+(where==="end" ? "この先のいちばん後ろに" : "いまの区切りのあとに")+"入れました（1件10分）"; ftMsgAt = Date.now();
+  if(where === "now"){ ftEndSeg(); return; }
+  render();
+}
+/* ---- 🗓 この先の見通し ---- */
+function fOutlookHtml(){
+  var e = fElapsed(), n = fSegs.length;
+  var sb = function(l, fn){ return '<button class="btn ghost" style="margin-top:0;width:auto;flex:0 0 auto;padding:4px 8px;font-size:12.5px" onclick="'+fn+'">'+l+'</button>'; };
+  var h = '<div class="card" style="padding:10px 12px"><label style="margin-top:0">🗓 この先の見通し</label>';
+  if(fSeg+1 >= n){
+    var cur = ftCur(), L = ftOpenList().filter(function(y){ return y !== cur; }).slice(0, 3);
+    h += '<p style="font-size:12.5px;color:#8ea3b8;line-height:1.6;margin:0">この先は決めていません。区切りが終わったら次を聞きます。'
+       + (L.length ? '<br>候補： '+L.map(function(y){ return (y.parent ? esc(y.parent)+' › ' : '')+esc(y.t); }).join(' ／ ') : '')+'</p>';
+  }else{
+    for(var k = fSeg+1; k < n; k++){
+      var y = fTasks[k], st = fSegEnd(k-1) - e, lock = aiAway && (k === aiAway.r);
+      h += '<div style="display:flex;align-items:center;gap:4px;margin:5px 0;border-top:1px solid #2a3340;padding-top:5px">'
+         + '<div style="flex:1 1 auto;min-width:0;font-size:13.5px;line-height:1.45;word-break:break-word"><span style="color:#8ea3b8">'+fClock(st)+'</span> '
+         + ((y && y.set) ? '▶ '+esc(fLabels[k]||"") : fNameHtml(y, fLabels[k]||"", false))
+         + ' <span style="color:#8ea3b8">（'+Math.max(1, Math.round((fSegs[k]||0)/60))+'分）</span>'+(lock ? ' <span style="color:#e0a86a;font-size:12px">↩ AIの返事のあと戻る</span>' : '')+'</div>'
+         + (lock ? '' : (k > fSeg+1 && !(aiAway && k-1 === aiAway.r) ? sb('↑', 'fSegMove('+k+',-1)') : '')
+                      + (k < n-1 && !(aiAway && k+1 === aiAway.r) ? sb('↓', 'fSegMove('+k+',1)') : '')
+                      + sb('分', 'fSegMin('+k+')') + sb('✕', 'fSegDrop('+k+')'))
+         + '</div>';
+    }
+  }
+  var rest = Math.max(0, fCap - e), free = fCap - fSegEnd(n-1);
+  h += '<p style="font-size:12.5px;color:#8ea3b8;line-height:1.6;margin:6px 0 0;border-top:1px solid #2a3340;padding-top:5px">☕ 休憩 '+fClock(rest)+'（あと'+Math.round(rest/60)+'分）'
+     + (free >= 60 && fSeg+1 < n ? '・最後のあとに '+Math.round(free/60)+'分あき' : '')+'</p>';
+  if(fLabels.length > 1 && fSeg > 0) h += '<p style="font-size:12.5px;color:#8ea3b8;line-height:1.6;margin:4px 0 0">ここまで： '+esc(fLabels.slice(0, fSeg).join(" → "))+'</p>';
+  if(ftPending()) h += '<p style="font-size:12.5px;color:#8ea3b8;line-height:1.6;margin:4px 0 0">まだ Obsidian に戻していない変更：'+ftPending()+'件（ブロックの終わりにまとめて戻します）</p>';
+  return h + '</div>';
+}
+function fSegMove(k, d){
+  var j = k + d; if(k <= fSeg || j <= fSeg || j >= fSegs.length) return;
+  if(aiAway && (k === aiAway.r || j === aiAway.r)) return;
+  fPadTo(fSegs.length);
+  [fSegs, fLabels, fTasks, fClosed].forEach(function(a){ var t = a[k]; a[k] = a[j]; a[j] = t; });
+  save(); render();
+}
+function fSegMin(k){
+  if(k <= fSeg || k >= fSegs.length) return;
+  var r = prompt("「"+(fLabels[k]||"")+"」は何分？", String(Math.max(1, Math.round((fSegs[k]||0)/60)))); if(r === null) return;
+  var m = parseInt(String(r).replace(/[^\d]/g, ""), 10); if(!(m > 0)) return;
+  fSegs[k] = m*60; fFitCap(k);
+  ftMsg = "⏱ 「"+(fLabels[k]||"")+"」を "+Math.round(fSegs[k]/60)+"分にしました"+(fSegs[k] < m*60 ? "（休憩までに収まる分だけ）" : ""); ftMsgAt = Date.now();
+  save(); render();
+}
+function fSegDrop(k){
+  if(k <= fSeg || k >= fSegs.length) return;
+  if(aiAway && k === aiAway.r) return;
+  fPadTo(fSegs.length);
+  var lb = fLabels[k] || "";
+  [fSegs, fLabels, fTasks, fClosed].forEach(function(a){ a.splice(k, 1); });
+  if(aiAway && k < aiAway.r) aiAway.r--;
+  ftMsg = "✕ 「"+lb+"」を今回の見通しから外しました（タスクは一覧に残ります）"; ftMsgAt = Date.now();
+  save(); render();
+}
+/* ---- 🗂 整理 ---- */
+function fNewOp(x, op, memo){ if(DB.focus.newOps !== false) ftOp(op); else ftOp({op:"memo", p:x.p, t:x.t, m:memo}); save(); }
+function fOrgDo(k){
+  var x = ftCur(); if(!x) return;
+  if(k === "tomorrow" || k === "mon"){
+    var d = (k === "tomorrow") ? ftDate("明日") : lnNextMon();
+    if(x.isNew){ DB.focus.ops.forEach(function(o){ if(o.op === "add" && o.t === x.t) o.d = d; }); }
+    else ftOp({op:"due", p:x.p, t:x.t, d:d});
+    x.d = d; save(); ftMsg = "📅 「"+x.t+"」を "+d+" にしました"; ftMsgAt = Date.now(); fOrg = null; render(); return;
+  }
+  if(k === "someday"){
+    fNewOp(x, {op:"someday", p:x.p, t:x.t}, "💤 Someday にする（routine 🎯）");
+    x.done = true; save(); ftMsg = "💤 「"+x.t+"」を Someday にしました（次へ ▶ で進めます）"; ftMsgAt = Date.now(); fOrg = null; render(); return;
+  }
+  if(k === "parent" || k === "tag"){ fOrg = k; render(); return; }
+  fOrg = null; ftAct(k);
+}
+function fOrgParent(i){
+  var x = ftCur(), pr = DB.focus.tasks[i]; if(!x || !pr || pr === x) return;
+  fNewOp(x, {op:"parent", p:x.p, t:x.t, parent:pr.t, pp:pr.p}, "🔗 親: "+pr.t);
+  x.parent = pr.t; save();
+  ftMsg = "🔗 「"+x.t+"」を「"+pr.t+"」の子にしました"; ftMsgAt = Date.now(); fOrg = "menu"; render();
+}
+function fOrgTag(i){
+  var x = ftCur(); if(!x) return;
+  var t = (i >= 0) ? swTagCur[i] : null;
+  if(!t){ var r = prompt("🏷 付けるタグ（「、」で区切ると複数）", ""); if(r === null) return; t = r; }
+  var tags = String(t).split(/[、,，\s]+/).map(function(s){ return s.replace(/^#/,"").trim(); }).filter(Boolean); if(!tags.length) return;
+  fNewOp(x, {op:"tag", p:x.p, t:x.t, add:tags}, "🏷 タグ: "+tags.join("・"));
+  x.tags = (x.tags||[]).concat(tags); save();
+  ftMsg = "🏷 「"+x.t+"」に "+tags.join("・")+" を付けました"; ftMsgAt = Date.now(); fOrg = "menu"; render();
+}
+function fOrgHtml(){
+  var x = ftCur(); if(!fOrg) return ''; if(!x){ fOrg = null; return ''; }
+  if(x.local) return '<div class="card" style="padding:10px 12px">'+ftPanel()+'<button class="btn link" onclick="fOrg=null;render()">閉じる</button></div>';
+  var b = function(l, k){ return '<button class="btn ghost" style="margin-top:0;flex:1 1 30%;min-width:30%;padding:9px 4px;font-size:14px" onclick="fOrgDo(\''+k+'\')">'+l+'</button>'; };
+  var h = '<div class="card" style="padding:10px 12px;border-color:#6a8fa8"><label style="margin-top:0">🗂 「'+esc(x.t)+'」を整理</label>';
+  if(fOrg === "parent"){
+    var L = ftOpenList().filter(function(y){ return y !== x && y.parent !== x.t; });
+    L.sort(function(a, c){ return (fKidsOf(c) - fKidsOf(a)) || ((/📦/.test(c.t)?1:0) - (/📦/.test(a.t)?1:0)); });
+    h += '<p style="font-size:12.5px;color:#8ea3b8;line-height:1.6;margin:0 0 4px">🔗 親にするタスク（子のいるもの・📦 が上）</p>';
+    h += L.length ? L.slice(0, 20).map(function(y){ var i = DB.focus.tasks.indexOf(y); return '<button class="setb" style="margin-bottom:6px" onclick="fOrgParent('+i+')">'+(y.parent ? '<small style="color:#8ea3b8">'+esc(y.parent)+' › </small>' : '')+esc(y.t)+(fKidsOf(y) ? ' <small style="color:#8ea3b8">（子 '+fKidsOf(y)+'）</small>' : '')+'</button>'; }).join('') : '<p style="font-size:12.5px;color:#8ea3b8">一覧に親にできるタスクがありません。</p>';
+    h += '<button class="btn ghost" onclick="fOrg=\'menu\';render()">← 戻る</button>';
+  }else if(fOrg === "tag"){
+    var TL = swTagList(x);
+    h += '<p style="font-size:12.5px;color:#8ea3b8;line-height:1.6;margin:0 0 4px">🏷 いま一覧にあるタグから</p>';
+    h += TL.length ? '<div style="display:flex;flex-wrap:wrap;gap:6px">'+TL.map(function(t, i){ return '<button class="btn ghost" style="margin-top:0;width:auto;flex:0 0 auto;padding:7px 10px" onclick="fOrgTag('+i+')">🏷 '+esc(t)+'</button>'; }).join('')+'</div>' : '<p style="font-size:12.5px;color:#8ea3b8">取り込んだタスクに付いているタグがまだありません。</p>';
+    h += '<button class="btn ghost" onclick="fOrgTag(-1)">✏️ 一覧に無いタグを入れる</button><button class="btn ghost" onclick="fOrg=\'menu\';render()">← 戻る</button>';
+  }else{
+    h += '<div style="display:flex;flex-wrap:wrap;gap:6px">'
+       + b('📅 明日', 'tomorrow') + b('📅 来週月曜', 'mon') + b('📅 日付', 'due')
+       + b('🔗 親', 'parent') + b('🏷 タグ', 'tag') + b('✏️ 名前', 'rename')
+       + b('📝 メモ', 'memo') + b('💤 Someday', 'someday') + b('✅ 完了', 'done')
+       + b('🗑️ 不要', 'drop')
+       + '</div>';
+  }
+  return h + '<button class="btn link" onclick="fOrg=null;render()">閉じる</button></div>';
 }
 
 /* --------- 集中：休憩の合図 --------- */
