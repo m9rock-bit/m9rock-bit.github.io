@@ -1660,7 +1660,7 @@ function parkBtn(){
 
 /* --- 状態 --- */
 /* v27: 版の表示（ホーム最下部）。中身を変えたら、ここも必ず上げる。 */
-var APPVER = "切り替えルーティン v117 ・ 2026-11-25";
+var APPVER = "切り替えルーティン v118 ・ 2026-11-25";
 var view = "home";
 var curId = null;
 var startAt = 0;
@@ -10629,6 +10629,20 @@ function swTag(tag){
   ftMsg = "🏷 「"+x.t+"」に "+tags.join("・")+" を付けました（📤 で戻します）"; ftMsgAt = Date.now(); render();
 }
 function swParentPick(){ if(sw){ sw.mode = "parent"; render(); } }
+/* v118（2026-11-25 指示_2026-11-25_4 お願い1・見回り代行）: 🏷 のタグを、取り込んだタスク（DB.focus.tasks）に付いている今のタグから選ぶ。
+   多く使われている順。Private・AI（仕組みのタグ）と、そのタスクに既に付いているタグは出さない。一覧に無いときだけ手入力（swTag()）。
+   送る op（{op:"tag", add:[…]}）の形は変えていない＝Task Sorter 側の読み方はそのまま。 */
+var swTagCur = [];
+var SW_TAG_SKIP = ["Private","AI"];
+function swTagList(x){
+  var cnt = {};
+  (DB.focus.tasks||[]).forEach(function(y){ ((y && y.tags) || []).forEach(function(t){ t = String(t||"").replace(/^#/,"").trim(); if(!t || SW_TAG_SKIP.indexOf(t) >= 0) return; cnt[t] = (cnt[t]||0) + 1; }); });
+  var have = (x && x.tags) || [];
+  swTagCur = Object.keys(cnt).filter(function(t){ return have.indexOf(t) < 0; }).sort(function(a,b){ return (cnt[b]-cnt[a]) || (a < b ? -1 : (a > b ? 1 : 0)); });
+  return swTagCur;
+}
+function swTagPick(){ if(sw){ sw.mode = "tag"; render(); } }
+function swTagSel(i){ var t = swTagCur[i]; if(!t || !sw) return; sw.mode = "ask"; swTag(t); }
 function swParent(i){
   var x = swCur(); if(!x) return;
   var pr = DB.focus.tasks[i]; if(!pr || pr === x) return;
@@ -10665,7 +10679,7 @@ function viewSweep(){
     h += '<div class="row" style="flex-wrap:wrap">'
        + btn('✂️ 分ける', "swAct('split')") + btn('✏️ 名前', "swAct('rename')") + btn('💤 Someday', 'swSomeday()') + '</div>';
     h += '<div class="row" style="flex-wrap:wrap">'
-       + btn('🏷 ⚡light', "swTag('light')") + btn('🏷 タグを入れる', 'swTag()') + btn('🔗 親を選ぶ', 'swParentPick()') + '</div>';
+       + btn('🏷 ⚡light', "swTag('light')") + btn('🏷 タグを選ぶ', 'swTagPick()') + btn('🔗 親を選ぶ', 'swParentPick()') + '</div>';
     h += '<div class="row" style="flex-wrap:wrap">'
        + btn('🗑️ 不要', "swAct('drop')") + btn('⏭ 今は決めない（次へ）', "swLog('skip');swNext()") + '</div>';
     h += sub('🏷・🔗 は付けたあと、続けて行き先も選べます（付けるだけなら「⏭ 次へ」）。');
@@ -10674,6 +10688,12 @@ function viewSweep(){
     h += '<p style="margin:10px 0 6px;font-weight:600">🔗 親にするタスク</p>';
     h += L.length ? L.map(function(y){ var i = DB.focus.tasks.indexOf(y); return '<button class="setb" style="margin-bottom:6px" onclick="swParent('+i+')">'+esc(y.t)+'</button>'; }).join('') : sub('一覧に親にできるタスクがありません。');
     h += btn('← 戻る', "sw.mode='ask';render()");
+  }else if(sw.mode === "tag"){   /* v118 */
+    var TL = swTagList(x);
+    h += '<p style="margin:10px 0 6px;font-weight:600">🏷 付けるタグ（いま一覧にあるタグから）</p>';
+    h += TL.length ? '<div class="row" style="flex-wrap:wrap">' + TL.map(function(t, i){ return btn('🏷 '+esc(t), 'swTagSel('+i+')'); }).join('') + '</div>'
+                   : sub('取り込んだタスクに付いているタグがまだありません。下の「一覧に無いタグを入れる」から入れてください。');
+    h += btn('✏️ 一覧に無いタグを入れる', "sw.mode='ask';render();swTag()") + btn('← 戻る', "sw.mode='ask';render()");
   }else if(sw.mode === "batch"){
     h += '<p style="margin:10px 0 6px;font-weight:600">'+sw.done+'件おわりました。続けますか？</p>';
     h += btn('▶ 続ける（次の5件）', 'swCont()', '') + btn('ここまで', 'swStop()');
