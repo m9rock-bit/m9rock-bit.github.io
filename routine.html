@@ -1660,7 +1660,7 @@ function parkBtn(){
 
 /* --- 状態 --- */
 /* v27: 版の表示（ホーム最下部）。中身を変えたら、ここも必ず上げる。 */
-var APPVER = "切り替えルーティン v120 ・ 2026-11-25";
+var APPVER = "切り替えルーティン v121 ・ 2026-11-25";
 var view = "home";
 var curId = null;
 var startAt = 0;
@@ -10403,6 +10403,69 @@ function lnToPlan(list){
 }
 function lnFocusAll(){ lnCommit(); var o = lnObj(); var a = o ? o.today.slice(0) : []; scCur = null; scStep = "state"; lnToPlan(a); }
 function lnSentWork(){ var o = lnObj(); if(o) o.sentWork = Date.now(); save(); return true; }
+/* ===== v121（2026-11-25 🤖 AIへ 17:03「今日の線を引くのタスク選択が全部一覧で、親・子が分かりづらい」）=====
+   ✂️ 今日の線を引く の ①②③ のタスク選びを、チップの羅列から「まとまりごとの縦の一覧」に変える。
+   ・📦 親ごと：見出しに親（親も一覧にあれば見出しごと選べる）、その下に子を字下げで。
+   ・親子のないもの：🔴 期限が過ぎたもの／📋 そのほか（上から6件・残りは「ほか n件 ▼」）／🤖 From AI（たたんだまま）。
+   ・🔍 文字で絞る欄（描き直さずに絞る）。選んだものは ● と色で目立たせ、たたんだ中でも出す。
+   ・行の右に 期限（🔴 は過ぎたもの）・（今週）（来週）・作業環境の印 を小さく。
+   選んだときの動き（lnToggleToday・lnUse）と保存の形は変えていない。 */
+var lnQ = "", lnOpen = {};
+var LN_ENV_IC = { off:"📴", mob:"📱", pc:"💻", home:"🏠" };
+function lnPickHtml(list, isOn, fnOf, wFirst){
+  ftInit();
+  var today = ftDate("今日"), names = {}, kidsOf = {}, groups = [], gi = {};
+  list.forEach(function(x){ names[x.t] = x; });
+  list.forEach(function(x){ if(x.parent){ (kidsOf[x.parent] = kidsOf[x.parent] || []).push(x); } });
+  var row = function(x, g, kid, more){
+    var on = isOn(x), meta = [];
+    if(x.d) meta.push(x.d < today ? '<span style="color:#e08a8a">🔴 '+esc(x.d.slice(5).replace("-","/"))+'</span>' : esc(x.d.slice(5).replace("-","/")));
+    if(LN_WTAG[x.w]) meta.push(LN_WTAG[x.w]);
+    var ev = (typeof ftEnvOf === "function") ? ftEnvOf(x).map(function(k){ return LN_ENV_IC[k] || ""; }).join("") : ""; if(ev) meta.push(ev);
+    var hid = more && !on && !lnQ && !lnOpen[g];
+    return '<button class="setb lnpick" data-t="'+esc(String(x.t).toLowerCase())+'" data-g="'+esc(g)+'" data-more="'+(more?1:0)+'" data-on="'+(on?1:0)+'"'
+      + ' style="margin:0 0 4px '+(kid?'16px':'0')+';width:calc(100% - '+(kid?16:0)+'px);padding:7px 10px;text-align:left;font-size:14px;line-height:1.45;min-height:0'+(on?';border:1px solid #e0a86a;color:#e0a86a;background:#2a2318':'')+(hid?';display:none':'')+'"'
+      + ' onclick="'+fnOf(x)+'">'+(on?'● ':(kid?'└ ':''))+esc(x.t)
+      + (meta.length ? ' <small style="display:inline;margin-left:6px;font-size:12px;color:#8ea3b8;font-weight:400">'+meta.join(' ')+'</small>' : '')+'</button>';
+  };
+  var head = function(t, g){ return '<div class="lnh" data-g="'+esc(g)+'" style="font-size:12.5px;color:#e0a86a;margin:10px 0 4px'+(lnQ?';display:none':'')+'">'+t+'</div>'; };
+  var h = '<input class="inp" type="search" id="ln_q" style="margin:0 0 4px" value="'+esc(lnQ)+'" placeholder="🔍 タスクを探す（文字で絞る）" oninput="lnFilter(this.value)">';
+  /* 📦 親ごと（子が1件以上一覧にある親） */
+  var parents = [];
+  list.forEach(function(x){ if(x.parent && parents.indexOf(x.parent) < 0) parents.push(x.parent); });
+  var used = {};
+  parents.forEach(function(pn){
+    var g = "p:"+pn, px = names[pn];
+    var pl = (/^📦/.test(pn) ? '' : '📦 ') + esc(pn) + '（子 '+kidsOf[pn].length+'）';
+    h += px ? '<div class="lnh" data-g="'+esc(g)+'" style="margin:10px 0 4px'+(lnQ?';display:none':'')+'"></div>' + row(px, g, false, false).replace('>'+(isOn(px)?'● ':'')+esc(px.t), '>'+(isOn(px)?'● ':'')+pl) : head(pl, g);
+    if(px) used[px.t] = 1;
+    kidsOf[pn].forEach(function(k){ h += row(k, g, true, false); used[k.t] = 1; });
+  });
+  /* 親子のないもの */
+  var rest = list.filter(function(x){ return !used[x.t]; });
+  if(wFirst) rest = rest.slice().sort(function(x,y){ var r={next:0,week:1}; return (r[x.w]!=null?r[x.w]:2)-(r[y.w]!=null?r[y.w]:2); });
+  var G = [{g:"over", lb:"🔴 期限が過ぎたもの", L:[], n:99}, {g:"rest", lb:(parents.length ? "📋 親子のないもの" : "📋 タスク"), L:[], n:6}, {g:"ai", lb:"🤖 From AI", L:[], n:0}];
+  rest.forEach(function(x){ (ftIsAI(x) ? G[2] : (x.d && x.d < today && !wFirst) ? G[0] : G[1]).L.push(x); });
+  G.forEach(function(gr){
+    if(!gr.L.length) return;
+    h += head(gr.lb+'（'+gr.L.length+'件）', gr.g);
+    gr.L.forEach(function(x, j){ h += row(x, gr.g, false, j >= gr.n); });
+    var hidN = gr.L.filter(function(x, j){ return j >= gr.n && !isOn(x); }).length;
+    if(hidN) h += '<button class="btn link lnmorebtn" data-g="'+gr.g+'" style="padding:4px;text-align:left'+(lnQ?';display:none':'')+'" onclick="lnOpen[\''+gr.g+'\']=!lnOpen[\''+gr.g+'\'];render()">'+(lnOpen[gr.g] ? '▲ たたむ' : 'ほか '+hidN+'件 ▼')+'</button>';
+  });
+  h += '<p id="ln_qn" style="margin:2px 0 8px;color:#8ea3b8;font-size:12.5px;display:none"></p>';
+  return h;
+}
+function lnFilter(v){
+  lnQ = String(v||"");
+  var q = lnQ.trim().toLowerCase(), n = 0;
+  document.querySelectorAll(".lnpick").forEach(function(b){
+    var show = q ? (b.getAttribute("data-t").indexOf(q) >= 0) : (b.getAttribute("data-more") !== "1" || lnOpen[b.getAttribute("data-g")] || b.getAttribute("data-on") === "1");
+    b.style.display = show ? "" : "none"; if(show && q) n++;
+  });
+  document.querySelectorAll(".lnh,.lnmorebtn").forEach(function(e){ e.style.display = q ? "none" : ""; });
+  var c = document.getElementById("ln_qn"); if(c){ c.style.display = q ? "" : "none"; c.textContent = q ? ("「"+lnQ.trim()+"」を含むタスク "+n+"件") : ""; }
+}
 function viewLn(h){
   var o = lnObj(); if(!o) return h;
   var hd = function(t){ return '<p style="margin:14px 0 6px;font-weight:600;line-height:1.5">'+t+'</p>'; };
@@ -10414,7 +10477,7 @@ function viewLn(h){
     var a = T.filter(function(x){ return (exclude||[]).indexOf(x.t) < 0; });
     if(!a.length) return sub('タスクの一覧がまだありません。<button class="btn link" style="padding:0;width:auto;display:inline" onclick="scKeep();save();ftFromClip()">📋 Task Sorter の一覧を取り込む</button>（「🎯 routine へ今日のタスクを送る」を押してから）。書いてもかまいません。');
     if(where === "mon") a = a.slice().sort(function(x,y){ var r={next:0,week:1}; return (r[x.w]!=null?r[x.w]:2)-(r[y.w]!=null?r[y.w]:2); });   /* v100: 月曜は来週の分を先に */
-    return '<div class="row" style="flex-wrap:wrap;gap:6px;margin:0 0 8px">'+a.map(function(x){ return chip(o[where] && o[where].t===x.t, esc(x.t)+(LN_WTAG[x.w]||""), "lnUse('"+where+"','"+q(x.t)+"')"); }).join('')+'</div>';
+    return lnPickHtml(a, function(x){ return !!(o[where] && o[where].t===x.t); }, function(x){ return "lnUse('"+where+"','"+q(x.t)+"')"; }, where === "mon");   /* v121 */
   };
   var whenChips = function(where){ return '<div class="row" style="flex-wrap:wrap;gap:6px;margin:4px 0 8px">'+LN_WHEN.map(function(w){ return chip(o[where].when===w[0], w[1]+'（'+lnWhenDate(w[0]).slice(5).replace("-","/")+'）', "lnWhen('"+where+"','"+w[0]+"')"); }).join('')+'</div>'; };
   var tm = (typeof ftMsg!=="undefined" && ftMsg && Date.now()-ftMsgAt < 60000) ? sub(esc(ftMsg)) : "";
@@ -10426,7 +10489,7 @@ function viewLn(h){
     h += sub(new Date().getHours()>=17 ? '17時を過ぎたので2つまで。' : '17時前なので3つまで（17時からは2つ）。');
     h += tm;
     if(T.length){
-      h += '<div class="row" style="flex-wrap:wrap;gap:6px;margin:0 0 8px">'+T.map(function(x){ return chip(o.today.indexOf(x.t)>=0, (o.today.indexOf(x.t)>=0?'● ':'')+esc(x.t), "lnToggleToday('"+q(x.t)+"')"); }).join('')+'</div>';
+      h += lnPickHtml(T, function(x){ return o.today.indexOf(x.t) >= 0; }, function(x){ return "lnToggleToday('"+q(x.t)+"')"; });   /* v121 */
     }else h += sub('タスクの一覧がまだありません。<button class="btn link" style="padding:0;width:auto;display:inline" onclick="scKeep();save();ftFromClip()">📋 Task Sorter の一覧を取り込む</button>');
     o.today.filter(function(t){ return !T.some(function(x){ return x.t===t; }); }).forEach(function(t){ h += '<div class="row" style="gap:6px;margin:0 0 6px">'+chip(true, '● '+esc(t), "lnToggleToday('"+q(t)+"')")+'</div>'; });
     h += '<div class="row" style="gap:6px"><input class="inp" type="text" id="ln_add" placeholder="一覧に無いものを書く" style="flex:1"><button class="btn ghost" style="margin-top:0;width:auto;flex:0 0 auto" onclick="lnAddToday()">＋</button></div>';
