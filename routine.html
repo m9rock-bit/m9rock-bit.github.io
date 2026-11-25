@@ -839,6 +839,25 @@ function defaults(){ return [
       "40|場所の一手：歩けるなら少し歩く（トイレ・廊下・ホーム）／立てるなら立って肩を5回まわす／座ったままなら肩をすくめて落とすを5回|体を少し動かします",
       "20|次にやることを1つだけ決める。紙があれば書く、無ければ心の中で言う。決めるのはそれ1つだけ|次にやることを、1つだけ決めます"
     ]) },
+  /* v128（2026-11-26 指示_2026-11-26 お願い2・3）: 🌙 夕食のあと。必須は 🪥 だけ（最初の1〜2週間）。
+     ♨️・🎧・🧘 は「できたら」＝↷ スキップで飛ばしてよい。中身は他のセットと同じく「セットを編集」から直せる。
+     🧘 のストレッチ（約5分・道具なし・子どもの横でも）＝ふくらはぎ／脚の付け根の前（腸腰筋）／牛の顔の脚と腕／脚を上げて足首を回す。 */
+  { id:"afterdinner", icon:"🌙", name:"夕食のあと", limit:1320,
+    note:"夕食を食べ終えて席を立ったら。🪥 歯みがきだけで終えても完了です。ストレッチは痛みが出たらその場で止めてください。",
+    steps:[
+      "60|🪥 席を立ったら、マウスウォッシュで歯みがき（必須はこれだけ。ここで終えても完了です）|歯みがき",
+      "60|♨️ できたら：湯たんぽ・温アイマスクを用意する（要らなければ ↷ スキップ）|湯たんぽと、温アイマスク",
+      "900|🎧 できたら：YouTube を音声で。食べ物を持たず、台所から離れた場所で（要らなければ ↷ スキップ）|ユーチューブを音声で",
+      "30|🧘 できたら：ストレッチ① ふくらはぎ・右（壁に手をつき右脚を後ろへ。かかとを床につけたまま伸ばす。要らなければ ↷ で⑨まで飛ばせます）|ふくらはぎ、右",
+      "30|🧘 ② ふくらはぎ・左（同じように左脚を後ろへ）|ふくらはぎ、左",
+      "30|🧘 ③ 脚の付け根の前・右（右ひざを床についた片ひざ立ち。おへそを少し引いて、腰を前へ）|脚の付け根、右",
+      "30|🧘 ④ 脚の付け根の前・左（左ひざを床について同じように）|脚の付け根、左",
+      "30|🧘 ⑤ 牛の顔の脚・右が上（座って右ひざを左ひざの上に重ねる。きつければあぐらで。背すじを伸ばして少し前へ）|牛の顔の脚、右が上",
+      "30|🧘 ⑥ 牛の顔の脚・左が上|牛の顔の脚、左が上",
+      "30|🧘 ⑦ 牛の顔の腕・右が上（右手を上から背中へ、左手を下から。届かなければタオルを持つ）|牛の顔の腕、右が上",
+      "30|🧘 ⑧ 牛の顔の腕・左が上|牛の顔の腕、左が上",
+      "60|🧘 ⑨ 仰向けで脚を壁かソファに上げ、足首をゆっくり回す|脚を上げて、足首を回します"
+    ]},
   { id:"rescue", icon:"🛟", name:"崩れたあとの復帰（1手だけ）", limit:180, rescue:true,
     note:"やり直しではありません。今日をここで終わらせて、次の合図まで戻るためのものです。",
     steps:[
@@ -903,7 +922,8 @@ var DB = { v:19, sets:null, chime:true, voice:true, third:true, noteOpen:false, 
 try{
   if(!Array.isArray(DB.sc)) DB.sc = [];
   if(!Array.isArray(DB.plans)) DB.plans = [];
-  if(!DB.relax || typeof DB.relax!=="object") DB.relax = { set:"ベッドタイムルーティン", from:"20:15", to:"22:00", day:"" };   /* v106: 🛋 ゆるめる（★読み戻しにも足してある） */
+  if(!DB.relax || typeof DB.relax!=="object") DB.relax = { set:"ベッドタイムルーティン", from:"20:15", to:"22:00", day:"" };
+  if(!DB.relaxEve || typeof DB.relaxEve!=="object") DB.relaxEve = { set:"夕食のあと", from:"19:00", to:"20:30", day:"" };   /* v128: 🛋 の枠を時間帯で分ける（夕食後〜20:30＝🌙 夕食のあと／20:30〜＝ベッドタイム）★読み戻しにも足してある */   /* v106: 🛋 ゆるめる（★読み戻しにも足してある） */
   if(!DB.outlook || typeof DB.outlook!=="object") DB.outlook = {};   /* v106: 🌅 今日の見通し（★読み戻しにも足してある） */   /* v99: ✂️ で決めた「いつ・最初の5分」（★読み戻しにも足してある） */   /* v97: 🕞 セルフコンディションの記録（★読み戻しにも足してある） */
   var raw = localStorage.getItem(KEY);
   if(raw){
@@ -911,6 +931,9 @@ try{
     if(Array.isArray(p.sc)) DB.sc = p.sc;   /* v97 */
     if(Array.isArray(p.plans)) DB.plans = p.plans;   /* v99 */
     if(p.relax && typeof p.relax==="object") DB.relax = p.relax;   /* v106 */
+    if(p.relaxEve && typeof p.relaxEve==="object") DB.relaxEve = p.relaxEve;   /* v128 */
+    if(p.mig_ad128===true) DB.mig_ad128 = true;   /* v128: 🌙 夕食のあと を一度だけ差し込んだ印（★無いと消しても戻る） */
+    if(p.scSceneOv && typeof p.scSceneOv==="object") DB.scSceneOv = p.scSceneOv;   /* v128: ⏳ の「仕事中／家」の切り替え（その日だけ） */
     if(p.outlook && typeof p.outlook==="object") DB.outlook = p.outlook;   /* v106 */
     if(typeof p.chime==="boolean") DB.chime = p.chime;
     if(typeof p.voice==="boolean") DB.voice = p.voice;
@@ -1123,6 +1146,17 @@ if(!DB.mig_reward67 && !curId){
     var line = "60|" + RW67;
     if(at >= 0) s.steps.splice(at+1, 0, line); else s.steps.push(line);
   });
+  save();
+}
+/* v128: 🌙 夕食のあと を一度だけ差し込む（🛟 の前）。以後は編集・削除した内容が正（v50 の教訓） */
+if(!DB.mig_ad128){
+  DB.mig_ad128 = true;
+  if(!DB.sets.some(function(s){return s.id==="afterdinner";})){
+    var adz = defaults().filter(function(s){return s.id==="afterdinner";})[0];
+    var at128 = DB.sets.length;
+    DB.sets.forEach(function(s,i){ if(s.rescue && i<at128) at128 = i; });
+    if(adz) DB.sets.splice(at128, 0, adz);
+  }
   save();
 }
 if(!DB.mig_breather){
@@ -1660,7 +1694,7 @@ function parkBtn(){
 
 /* --- 状態 --- */
 /* v27: 版の表示（ホーム最下部）。中身を変えたら、ここも必ず上げる。 */
-var APPVER = "切り替えルーティン v124 ・ 2026-11-25";
+var APPVER = "切り替えルーティン v129 ・ 2026-11-26";
 var view = "home";
 var curId = null;
 var startAt = 0;
@@ -4650,12 +4684,14 @@ function render(){
   else if(view==="scale") h = viewScale();
   else if(view==="backup") h = viewBackup();
   else if(view==="relaxPick") h = viewRelaxPick();   /* v106 */
+  else if(view==="prefs") h = viewPrefs();   /* v128 */
   if(view==="home" || view==="run") h = planBanner() + h;   /* v99: ✂️ で決めた「最初の5分」をその日に出す */
   if(view==="done" || view==="focusDone" || (view==="home" && !curId)) h = scPendCard(view) + h;   /* v102: 🕞 の記録がまだなら上に出す */
   if(view==="home" || view==="run") h = scWaitCard() + relaxBanner() + olCard() + h;   /* v106: ⏳ 15分・🛋 ゆるめる・🌅 今日の見通し */
   if(view==="home" || view==="run"){   /* v100: 午前のうちに（朝の仕事準備の実行中にも出す）今日の一覧を取り込んでいなければ1行だけ出す（✂️・🎯 で使う） */
     var _f = (typeof lnFresh==="function") ? lnFresh() : null;
-    if(_f && _f.stale && new Date().getHours() < 12) h = '<p style="margin:0 0 8px;color:#e8c99a;font-size:12.5px;line-height:1.7">📋 今日のタスク一覧はまだ取り込んでいません（✂️ 今日の線・🎯 で使います）　<a class="btn link" style="padding:0;width:auto;display:inline;font-size:12.5px" href="'+esc(lnSendUri())+'">Obsidianでコピー</a>　<button class="btn link" style="padding:0;width:auto;display:inline;font-size:12.5px" onclick="ftFromClip()">📋 取り込む</button></p>' + h;
+    if(_f && _f.stale && new Date().getHours() < 12 && HOME_SIMPLE && view==="home") h = '<p style="margin:0 0 8px"><button class="btn link" style="padding:0;width:auto;display:inline;font-size:12.5px" onclick="ftFromClip()">📋 取り込む</button></p>' + h;
+    else if(_f && _f.stale && new Date().getHours() < 12) h = '<p style="margin:0 0 8px;color:#e8c99a;font-size:12.5px;line-height:1.7">📋 今日のタスク一覧はまだ取り込んでいません（✂️ 今日の線・🎯 で使います）　<a class="btn link" style="padding:0;width:auto;display:inline;font-size:12.5px" href="'+esc(lnSendUri())+'">Obsidianでコピー</a>　<button class="btn link" style="padding:0;width:auto;display:inline;font-size:12.5px" onclick="ftFromClip()">📋 取り込む</button></p>' + h;
   }
   document.getElementById("app").innerHTML = h;
   foldNotes();   /* v40 */
@@ -4804,8 +4840,27 @@ function viewMisc(){
   return h;
 }
 
+/* v128（指示_2026-11-26_2 お願い2「ホーム画面の文字数が多すぎる」）: 大見出し・説明の段落を外し、セットは名前と分数だけ、
+   設定は ⚙ から別画面（viewPrefs）へ。時間帯でいちばん上に1つだけ出す（homeTop）。機能・データは1つも消していない。
+   説明は「？」で開く（homeHelp）。戻すときは HOME_SIMPLE を false にする。 */
+var HOME_SIMPLE = true, homeHelp = false;
+function homeTopKey(){
+  var mm = rxNowMin();
+  if(mm < 9*60) return "";                       /* 〜9時＝🌅 今日の見通し（olCard が上に出る） */
+  if(rxEveNow()) return "";                      /* 夕食後〜20:30＝🌙 夕食のあと（relaxBanner）＋🕞 */
+  if(mm >= rxMin((DB.relaxEve||{}).to||"20:30")) return DB.sleepActive ? "" : "sleep";   /* 20:30〜＝🛌 */
+  if(mm >= 15*60) return "sc";                   /* 15時〜＝🕞 */
+  return "focus";                                /* 日中＝🎯 集中ブロック */
+}
+function homeTop(){
+  var k = homeTopKey();
+  if(k === "focus") return '<button class="setb" style="border-color:#e0a86a;background:#211d18" onclick="focusGo()">🎯 集中ブロック<small>いまは '+SLOTN[slotAt(Date.now())]+'</small></button>';
+  /* "sc"（15時〜）は下の並びの先頭が 🕞 なので、同じボタンを2つ出さない */
+  if(k === "sleep") return '<button class="setb" style="border-color:#7aa0c4;background:#161c24" onclick="sleepStart()">🛌 就寝</button>';
+  return "";
+}
 function viewHome(){
-  var h = '<h1>切り替えルーティン</h1>'
+  var h = HOME_SIMPLE ? '' : '<h1>切り替えルーティン</h1>'
     + '<p class="sub">押した瞬間が合図です。タイマーの中でやり切れたら完了。<br>途中から始めても、飛ばしても構いません。</p>';
   /* v22 (2026-09-05 ご依頼): 途中で閉じた（＝iOSにタブを捨てられた）回の戻り口。
      勝手に再開しない。押したときだけ続きに戻る。離れていた時間は数えない。 */
@@ -4865,8 +4920,10 @@ function viewHome(){
      🌊 を削除していても 🍵 だけは出る（逆も同じ）。 */
   var _ug = urgeSet() && curId!=="urge", _bz = breatherSet() && curId!=="breather";
   /* v97: 🕞 セルフコンディションを先頭に。🌊 の2つはホームから外した（セットは消していない・#open=watch|eat はそのまま動く） */
+  var _top = HOME_SIMPLE ? homeTopKey() : "";
+  if(HOME_SIMPLE && !curId) h += homeTop();
   if(true){
-    h += '<div class="sec">いま来たとき</div>';
+    if(!HOME_SIMPLE) h += '<div class="sec">いま来たとき</div>';
     if(openMsg && Date.now()-openMsgAt < 120000) h += '<p style="color:#e8c99a;font-size:13px;line-height:1.7;margin:0 0 6px">'+esc(openMsg)+'</p>';   /* v77 */
     h += '<div class="emgrid">'
        + '<button class="setb" style="border-color:#c49a6a;background:#211b14" onclick="scGo(\'home\')">🕞 セルフコンディション</button>'   /* v97 */
@@ -4879,8 +4936,10 @@ function viewHome(){
             「ふだん目に入るか」を確かめていなかった（2度の配置ミス）。 */
        + mealCards()
        + '</div>';
-    /* v71: カードから外した説明は、ここに1行ずつまとめる（消していない）。 */
-    h += '<p style="color:#8ea3b8;font-size:12px;line-height:1.75;margin:0 0 4px">'
+    /* v71: カードから外した説明は、ここに1行ずつまとめる（消していない）。v128: ふだんは「？」の中 */
+    if(HOME_SIMPLE && !homeHelp) h += '<button class="btn link" style="padding:2px 6px;font-size:12px;width:auto;margin:0 0 8px" onclick="homeHelp=true;render()">？</button>';
+    else h += (HOME_SIMPLE ? '<button class="btn link" style="padding:2px 6px;font-size:12px;width:auto;margin:0" onclick="homeHelp=false;render()">？ を閉じる</button>' : '')
+       + '<p style="color:#8ea3b8;font-size:12px;line-height:1.75;margin:0 0 4px">'
        + '🕞 セルフコンディション＝揺らいだ・食べたくなったとき。状態を選ぶ → 原因を一言 → 次の1つ。<br>'   /* v97 */
        + (_bz ? '🍵 ひと息＝脳がつかれた・2回目が来た・再開する前に。<b>約7分</b>、合図の音と声で進むのでイヤホンで。<br>' : '')
        + (mealUri(MEAL.cmdLog) ? '🍽️ 食事を記録＝Meal Log を開きます（まとめて翌朝でも大丈夫です）。' : '')
@@ -4936,7 +4995,7 @@ function viewHome(){
          }).join('')
        + '<button class="btn ghost" style="margin-top:0;width:auto;padding:6px 10px" onclick="go(\'scenes\')">⚙</button>'
        + '</div>';
-    if(!anyTagged()){
+    if(!anyTagged() && !HOME_SIMPLE){
       h += '<p class="note" style="margin:-4px 0 10px"><b>タブはまだ空です。</b>「⚙」から、それぞれのタブに出すセットを選べます。'
          + '<br>選ぶまでは「すべて」と同じ、いまの並びのままです。</p>';
     }
@@ -4979,15 +5038,15 @@ function viewHome(){
          🌗 側だけ flex:none で上書き）。 */
     h += '<div class="row" style="gap:6px;margin-bottom:10px">'
        + '<button class="setb" style="margin-bottom:0" onclick="start(\''+s.id+'\')">'+esc(s.icon)+' '+esc(s.name)
-       + '<small>'+durLabel(limitOf(s))+' ・ '+countLabel(s)
-       + (s.note ? '<br>'+esc(s.note) : '')+'</small></button>'
-       + '</div>';   /* v58: 🌗 はご依頼でホームから外した（仕組みは残してある） */
+       + '<small>'+durLabel(limitOf(s))+(HOME_SIMPLE ? '' : ' ・ '+countLabel(s)
+       + (s.note ? '<br>'+esc(s.note) : ''))+'</small></button>'
+       + '</div>';   /* v58: 🌗 はご依頼でホームから外した（仕組みは残してある）。v128: 名前と分数だけ（経緯メモは編集画面に残る） */
   });
   /* v90: 畳んだ分の入口。押せばその場で出る（設定も操作も要らない） */
   if(stale.length){
     if(!careShowStale){
       h += '<button class="btn ghost" onclick="careStale()">⋯ 長く使っていないセット（'+stale.length+'本）'
-         + '<small style="display:block;opacity:.7;margin-top:2px">直近30日に使っていないものを畳んでいます。1本も消していません。使えば自動でここから出ます。</small></button>';
+         + (HOME_SIMPLE ? '' : '<small style="display:block;opacity:.7;margin-top:2px">直近30日に使っていないものを畳んでいます。1本も消していません。使えば自動でここから出ます。</small>')+'</button>';
     }else{
       /* v90: class="note" は「くわしく」へ畳まれる仕組みがあるので使わない（見出しが消える） */
       h += '<p style="margin:12px 0 6px;color:#c9d1de;font-size:13px"><b>長く使っていないセット（'+stale.length+'本）</b>　'
@@ -4995,7 +5054,7 @@ function viewHome(){
       stale.forEach(function(s){
         h += '<div class="row" style="gap:6px;margin-bottom:10px">'
            + '<button class="setb" style="margin-bottom:0;opacity:.8" onclick="start(\''+s.id+'\')">'+esc(s.icon)+' '+esc(s.name)
-           + '<small>'+durLabel(limitOf(s))+' ・ '+countLabel(s)+(s.note ? '<br>'+esc(s.note) : '')+'</small></button>'
+           + '<small>'+durLabel(limitOf(s))+(HOME_SIMPLE ? '' : ' ・ '+countLabel(s)+(s.note ? '<br>'+esc(s.note) : ''))+'</small></button>'
            + '</div>';
       });
     }
@@ -5005,11 +5064,15 @@ function viewHome(){
     h += '<p class="note">このタブに入れたセットがまだありません。「セットを編集」で、出したいセットに同じタグを入れてください。'
        + '<br><b>「すべて」を押せば、いつでも全部に戻れます。</b></p>';
   }
+  if(HOME_SIMPLE){
+    if(_top !== "focus") h += '<button class="setb" onclick="focusGo()">🎯 集中ブロック<small>いまは '+SLOTN[slotAt(Date.now())]+'</small></button>';
+  }else{
   h += '<div class="sec">時間を区切って進める</div>';
   h += '<button class="setb" onclick="focusGo()">🎯 集中ブロック'
      + '<small>いまは '+SLOTN[slotAt(Date.now())]+' ・ 休憩まで '+durLabel(DB.focus.len[slotAt(Date.now())]*60)
      + '<br>区切り： '+segLabel(slotAt(Date.now()))
      + '<br>時間を区切って進めるためのタイマーです。仕事の日にも、休日にも。</small></button>';
+  }
   /* v23（問9のH）: 子供と一緒の枠。仕事の集中ブロックとは別の入口にしている。
      同じボタンの中に混ぜると、休日にも仕事の長さ（90〜120分）が最初に目に入るため。 */
   /* v24: 声かけの言い換え（見るだけ）。イライラしたときのセットはホームの一覧側に出ている。 */
@@ -5017,7 +5080,9 @@ function viewHome(){
      ただし「どんな中身か1度見ておきたい」ときのために、小さな入口だけ残す。 */
   /* v58: 🧸 の試し通しはご依頼でホームから外した。 */
 
-  if(!DB.sleepActive){
+  if(!DB.sleepActive && HOME_SIMPLE){
+    if(_top !== "sleep") h += '<button class="setb" onclick="sleepStart()">🛌 就寝</button>';
+  }else if(!DB.sleepActive){
     h += '<div class="sec">夜</div>';
     h += '<button class="setb" onclick="sleepStart()">🛌 就寝'
        + '<small>イヤホン切替→ストレッチ5分→プレイリスト切替→見守り画面へ、自動で進みます。'
@@ -5026,6 +5091,19 @@ function viewHome(){
        編集画面の奥まで探しに行かせない（9/5のタグの件と同じ轍を踏まない）。 */
   }
   /* v58: 「崩れてしまったとき」（🛟）はご依頼でホームから外した。セットは編集画面に残してある。 */
+  if(HOME_SIMPLE){
+    h += '<div class="row" style="gap:6px;margin-top:14px">'
+       + '<button class="btn ghost" style="margin-top:0" onclick="location.href=\'log.html\'">📤 記録を送る</button>'
+       + '<button class="btn ghost" style="margin-top:0" onclick="go(\'prefs\')">⚙ 設定・編集</button></div>';
+    h += '<p style="text-align:center;opacity:.45;margin-top:14px;font-size:12px;color:#8ea3b8">'+APPVER+'</p>';
+    return h;
+  }
+  return h + prefsBody();
+}
+/* v128: 設定（約20項目）とセットの編集などは ⚙ の別画面へ（中身は v127 までホームの下にあったものそのまま） */
+function viewPrefs(){ return '<button class="btn link" style="padding:6px" onclick="go(\'home\')">← ホーム</button>' + prefsBody() + '<button class="btn link" style="padding:6px" onclick="go(\'home\')">← ホーム</button>'; }
+function prefsBody(){
+  var h = '';
   h += '<div class="sec">設定</div>';
   /* v67: 🎵 音楽を聞いている。離席中の音（new Audio）がSpotifyを止めるため、
      セットに依らず1つのスイッチで止められるようにした。設定のいちばん上に置く。 */
@@ -6393,6 +6471,7 @@ function ftImportText(txt){
     /* v120: env（作業環境の印）と親（pa＝親の名前・pp＝親のパス。Template_Focus_Send が送る）を残す。env は v111 から送られていたのに、ここで落としていた */
     if(x.env) o1.env = Array.isArray(x.env) ? x.env.map(String) : String(x.env);
     if(x.pa){ o1.parent = String(x.pa); if(x.pp) o1.pp = String(x.pp); }
+    if(x.f5) o1.f5 = String(x.f5);   /* v129: 🌙 締めチェックで決めた「最初の5分」（Template_Focus_Send が送る） */
     return o1;   /* v104: i＝📥 Inbox の印・tags（Task Sorter が送るようになったら使う） */   /* v100: w＝"week"（明日〜7日）／"next"（来週の月曜）／空＝今日まで */
   }).filter(function(x){ return x.t; });
   DB.focus.tasksAt = String(o.at||"");
@@ -7890,7 +7969,8 @@ function viewFocusPlan(){
     h += askPickHtml(L, today, function(x, i, att, show, e){
       var inN = p.items.filter(function(it){ return it.t === x.t; }).length, ed = (planEditI === i);
       return '<div class="card ftpick" '+att+' style="padding:8px 12px;margin-top:6px'+(inN?';border-color:#e0a86a':'')+(show?'':';display:none')+'">'
-        + '<div style="line-height:1.45;margin-bottom:6px"><b>' + (x.parent ? '↳ ' : '') + (ftIsAI(x) ? '🤖 ' : x.k==="P" ? '🏠 ' : '') + esc(x.t) + '</b>'
+        + '<div style="line-height:1.45;margin-bottom:6px">' + (x.parent ? '<div style="color:#8ea3b8;font-size:11.5px">📦 ' + esc(String(x.parent).replace(/^📦\s*/, '')) + ' ›</div>' : '') + '<b>' + (x.parent ? '└ ' : '')   /* v125: 親の名前を小さく添える（指示_2026-11-25_6 お願い2） */
+        + '' + (ftIsAI(x) ? '🤖 ' : x.k==="P" ? '🏠 ' : '') + esc(x.t) + '</b>'
         + (x.isNew ? ' <small>＋新規</small>' : '')
         + ((x.d && x.d < today) ? ' <small>🔴'+esc(x.d.slice(5))+'</small>' : (x.d ? ' <small>'+esc(x.d.slice(5))+'</small>' : ''))
         + (e ? ' <small>'+e+'</small>' : '')
@@ -8190,6 +8270,7 @@ function fNameHtml(x, lb, big){
   var h = '';
   if(x && x.parent) h += '<span style="color:#8ea3b8;font-size:'+(big?'12.5':'11.5')+'px">'+(/^📦/.test(x.parent)?'':'📦 ')+esc(x.parent)+' › </span>'+(big?'<br>':'');
   h += big ? '<span style="font-size:19px;font-weight:700;line-height:1.5">'+esc(lb)+'</span>' : '<b>'+esc(lb)+'</b>';
+  if(big && x && x.f5) h += '<br><span style="color:#cfd8e3;font-size:13px">最初の5分：'+esc(x.f5)+'</span>';   /* v129 */
   return h;
 }
 function fNowName(x){
@@ -8378,6 +8459,32 @@ function fSegDrop(k){
   ftMsg = "✕ 「"+lb+"」を今回の見通しから外しました（タスクは一覧に残ります）"; ftMsgAt = Date.now();
   save(); render();
 }
+/* v126（2026-11-25 指示_2026-11-25_5・見回り代行）: 親を決めたとき／親のタスクを見ているときに、
+   「＋ 最初の子：分からないことを書き出してAIに投げる」を1つ押すだけで足す。名前は「<親の名前（頭の📦は外す）>：分からないことを書き出してAIに投げる」。
+   送る op は今ある add（env:["pc"]）＋ parent ＋ tag（light）のまま＝新しい op は作らない。仕事／Private は親に合わせる・日付は今日。
+   同じ名前の子がもう一覧にあればボタンを出さない（二重に作らない）。 */
+function fKidName(pt){ return String(pt||"").replace(/^\s*📦\s*/, "").trim() + "：分からないことを書き出してAIに投げる"; }
+function fKidHas(pt){ var n = fKidName(pt); return (DB.focus.tasks||[]).some(function(y){ return y && y.t === n; }); }
+function fKidBtnHtml(pt){
+  if(!pt) return ''; ftInit();
+  if(fKidHas(pt)) return '';
+  var i = -1; DB.focus.tasks.forEach(function(y, j){ if(i < 0 && y && y.t === pt) i = j; });
+  if(i < 0) return '';
+  return '<button class="btn ghost" style="margin-top:6px;text-align:left" onclick="fFirstKid('+i+')">＋ 最初の子：分からないことを書き出してAIに投げる<br><small style="color:#8ea3b8">親「'+esc(String(pt).replace(/^\s*📦\s*/, ""))+'」の子として今日に足します</small></button>';
+}
+function fFirstKid(i){
+  ftInit(); var pr = DB.focus.tasks[i]; if(!pr) return;
+  var n = fKidName(pr.t);
+  if(fKidHas(pr.t)){ ftMsg = "「"+n+"」はもう一覧にあります"; ftMsgAt = Date.now(); render(); return; }
+  var d = ftDate("今日"), k = (pr.k === "P") ? "P" : "W";
+  var x = { p:"", t:n, d:d, k:k, isNew:true, parent:pr.t, tags:["light"], env:["pc"] };
+  DB.focus.tasks.push(x);
+  ftAddOp(n, d, k, ["pc"]);
+  ftOp({ op:"parent", p:"", t:n, parent:pr.t, pp:pr.p||"" });
+  ftOp({ op:"tag", p:"", t:n, add:["light"] });
+  save();
+  ftMsg = "＋ 「"+n+"」を「"+pr.t+"」の最初の子にしました（今日・💻・light。📤 で戻します）"; ftMsgAt = Date.now(); render();
+}
 /* ---- 🗂 整理 ---- */
 function fNewOp(x, op, memo){ if(DB.focus.newOps !== false) ftOp(op); else ftOp({op:"memo", p:x.p, t:x.t, m:memo}); save(); }
 function fOrgDo(k){
@@ -8438,6 +8545,9 @@ function fOrgHtml(){
        + '</div><div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">'
        + b('🏷 タグ', 'tag') + b('🔗 親', 'parent') + b('🌐 環境', 'env') + b('✏️ 名前', 'rename') + b('📝 メモ', 'memo')
        + '</div>';
+    /* v126: 親を決めたあと／親のタスクのとき、最初の子をボタン1つで */
+    if(x.parent) h += fKidBtnHtml(x.parent);
+    if(fKidsOf(x) > 0 || /📦/.test(x.t)) h += fKidBtnHtml(x.t);
   }
   return h + '<button class="btn link" onclick="fOrg=null;render()">閉じる</button></div>';
 }
@@ -10027,18 +10137,18 @@ function viewSc(){
   }else if(scStep === "wait"){
     h += hd('⏳ 15分のあいだに（1つ選ぶ）');
     h += sub('15分たったら、ホームの上で「まだ食べたい？」と聞きます。食べるなら、そこから先に記録します。');
-    var _rs = relaxSet();
-    if(_rs) h += '<button class="setb" style="margin-bottom:8px;border-color:#8a7ac4" onclick="scWaitStart(\'relax\')">🛋 '+esc(_rs.icon+" "+_rs.name)+'<small>いつものゆるめるセット</small></button>';
-    h += '<button class="setb" style="margin-bottom:8px" onclick="scWaitStart(\'out\')">📺 アプリの外で過ごす（YouTube・ゲーム）<small>iPhone のタイマーに15分を渡します（画面を離れても鳴ります）</small></button>';
-    if(breatherSet())      h += '<button class="setb" style="margin-bottom:8px" onclick="scWaitStart(\'rest\')">🍵 ひと息<small>約7分。最後に次にやることを1つだけ決めます</small></button>';
-    if(setOf("breath478")) h += '<button class="setb" style="margin-bottom:8px" onclick="scWaitStart(\'breath\')">🌬️ 呼吸法</button>';
-    if(setOf("moveplace")) h += '<button class="setb" style="margin-bottom:8px" onclick="scWaitStart(\'move\')">🚶 場所を変える</button>';
-    if(new Date().getHours() >= 15) h += '<button class="setb" style="margin-bottom:8px;border-color:#c49a6a" onclick="scWaitStart(\'ln\')">✂️ 今日の線を引く</button>';
-    /* v107: 「次の1つ」の 🎯・✍️ もこの一覧で選べるように（15分の待ちと次にやることを1回で。🤖 AIへ 11/21 09:07） */
-    h += '<button class="setb" style="margin-bottom:8px" onclick="scWaitStart(\'focus\')">🎯 集中ブロック<small>'+(c.cause ? '題名に「'+esc(scFirstLine(c.cause))+'」を入れて始めます' : 'その都度決める形で始めます')+'</small></button>';
-    if(new Date().getHours() < 15) h += '<button class="setb" style="margin-bottom:8px;border-color:#c49a6a" onclick="scWaitStart(\'ln\')">✂️ 今日の線を引く</button>';
-    h += '<button class="setb" style="margin-bottom:8px" onclick="scWaitStart(\'dig\')">✍️ 深掘り<small>頭の中を全部書き出す → いちばん重いものに印</small></button>';
+    /* v128（指示_2026-11-26_2 お願い1）: 場面ごとに3つ＋「そのまま待つ」だけ。残りは「⋯ ほか」の中（1つも消していない）。
+       仕事中＝平日 9:00〜18:00（🍵・🚶・✂️）／家・夜＝それ以外と休日（🎧・🛋〈夕食後〜20:30 は 🌙 夕食のあと〉・🍵）。
+       合わない日（在宅など）は上の1行で切り替え（その日だけ）。🌬️ は 🍵 の中身と重なるので「ほか」へ。 */
+    var _scn = scScene(), _bt = scWaitBtns(c), _main = (_scn === "work") ? ["rest","move","ln"] : ["out","relax","rest"];
+    h += '<button class="btn link" style="padding:4px;font-size:12px;margin:-4px 0 6px" onclick="scSceneFlip()">いま：'+(_scn==="work" ? '💼 仕事中' : '🏠 家・夜')+'　（'+(_scn==="work" ? '🏠 家' : '💼 仕事中')+'に切り替える）</button>';
+    _main.forEach(function(k){ if(_bt[k]) h += _bt[k]; });
     h += '<button class="btn ghost" onclick="scWaitStart(\'none\')">そのまま待つ（ホームへ）</button>';
+    var _more = ["out","relax","rest","move","ln","breath","focus","dig"].filter(function(k){ return _main.indexOf(k) < 0 && _bt[k]; });
+    if(_more.length){
+      if(!scWaitMore) h += '<button class="btn link" style="padding:6px;font-size:12px" onclick="scWaitMore=true;render()">⋯ ほか（'+_more.length+'）</button>';
+      else { h += '<div style="margin-top:6px;opacity:.9">'; _more.forEach(function(k){ h += _bt[k]; }); h += '</div><button class="btn link" style="padding:6px;font-size:12px" onclick="scWaitMore=false;render()">畳む</button>'; }
+    }
     h += '<button class="btn link" style="padding:7px" onclick="scTo(\'urge\')">← 数字に戻る</button>';
   }else if(scStep === "state"){
     h += sub((c.urge!=null ? '食べたい衝動：'+c.urge+'　・　' : '')+(c.hun!=null ? '空腹：'+c.hun+'　・　' : '')+'点数はつけません。');
@@ -10744,8 +10854,16 @@ function pbEnvOf(x){
   return [];
 }
 function pbEnvToggle(){ pbEnvOpen = !pbEnvOpen; render(); }
+/* v129（指示_2026-11-26_3・見回り代行）: 🌙 締めチェックで決めた「最初の5分」も帯に出す（表示だけ）。
+   取り込んだ一覧（DB.focus.tasks）のうち、今日まで（w なし）・未完了・f5 あり・帯の ✂️ と同じ名前でないもの。
+   押せるのは 🎯 集中ブロック だけ（✅・次の出勤日へ は Obsidian 側のタスクなので出さない）。新しいデータは持たない。 */
+function pbF5(a){
+  var L = (DB.focus && DB.focus.tasks) || [], today = lnD(new Date()), names = (a||[]).map(function(x){ return x.task; });
+  return L.filter(function(x){ return x && x.f5 && !x.done && !x.w && (!x.d || x.d <= today) && names.indexOf(x.t) < 0; });
+}
+function pbF5Go(i){ var b = pbF5(plansDue()); var x = b[i]; if(!x) return; lnToPlan([x.t]); ftMsg = "最初の5分："+x.f5+"（"+x.t+"）"; ftMsgAt = Date.now(); render(); }
 function planBanner(){
-  var a = plansDue(); if(!a.length) return "";
+  var a = plansDue(), b5 = pbF5(a); if(!a.length && !b5.length) return "";
   var LB = { rest:"📌 今日の最初の5分", mon:"📌 月曜の朝いちばん", worry:"📌 決めておいたこと", check:"🗓 確認する時間", am:"☀️ 午前（10時〜）にやる", commute:"🚃 通勤中（8:30〜10:30）にやる" };   /* v124 */
   var h = '<div style="border:1px solid #c49a6a;border-radius:10px;padding:8px 10px;margin:0 0 10px;background:#1f1a14">';
   var EV = a.map(pbEnvOf), any = EV.some(function(e){ return e.length; });
@@ -10768,6 +10886,11 @@ function planBanner(){
        + '<button class="btn ghost" style="margin-top:0;width:auto;flex:0 0 auto;padding:5px 10px" onclick="planLater('+i+')">次の出勤日へ</button>'
        + '</div></div>';
   });
+  b5.forEach(function(x, i){
+    h += '<div class="pbitem" style="margin:2px 0 6px"><div style="font-size:12px;color:#e0a86a">📌 今日の最初の5分（締めチェックで決めた）</div>'
+       + '<div style="font-size:14px;line-height:1.6">'+esc(x.t)+'<br><span style="color:#cfd8e3">最初の5分：'+esc(x.f5)+'</span></div>'
+       + '<div class="row" style="flex-wrap:wrap;gap:6px;margin-top:4px"><button class="btn ghost" style="margin-top:0;width:auto;flex:0 0 auto;padding:5px 10px" onclick="pbF5Go('+i+')">🎯 集中ブロック</button></div></div>';
+  });   /* v129 */
   if(hid) h += '<button class="btn ghost" style="margin-top:2px;width:auto;padding:4px 10px;font-size:12px" onclick="pbEnvToggle()">'+(pbEnvOpen ? '▲ 別の環境を畳む' : '▼ 別の環境 '+hid+'件')+'</button>';
   return h + '</div>';
 }
@@ -11023,17 +11146,36 @@ function scAteNow(t, isLink){
   setTimeout(function(){ if(scCur && (!t || scCur.t===t)){ scCur = null; scStep = "state"; } if(view==="sc") view = curId ? "run" : "home"; render(); }, isLink ? 1000 : 0);
   return true;
 }
+/* v128: ⏳ 15分のあいだに の場面（仕事中／家・夜）とボタン */
+var scWaitMore = false;
+function scSceneAuto(){ var d = new Date(), wd = d.getDay(), hh = d.getHours(); return (wd >= 1 && wd <= 5 && hh >= 9 && hh < 18) ? "work" : "home"; }
+function scScene(){ var o = DB.scSceneOv; if(o && o.day === olDay() && (o.v === "work" || o.v === "home")) return o.v; return scSceneAuto(); }
+function scSceneFlip(){ DB.scSceneOv = { day: olDay(), v: (scScene() === "work" ? "home" : "work") }; save(); render(); }
+function scWaitBtns(c){
+  var b = {}, S = '<button class="setb" style="margin-bottom:8px';
+  var _rs = relaxSet();
+  if(_rs) b.relax = S+';border-color:#8a7ac4" onclick="scWaitStart(\'relax\')">'+(_rs.icon==="🛋" ? '' : '🛋 ')+esc(_rs.icon+" "+_rs.name)+'</button>';
+  b.out = S+'" onclick="scWaitStart(\'out\')">🎧 YouTube を音声で（食べ物から離れた場所で）<small>ゲームでも</small></button>';
+  if(breatherSet())      b.rest = S+'" onclick="scWaitStart(\'rest\')">🍵 ひと息<small>約7分</small></button>';
+  if(setOf("moveplace")) b.move = S+'" onclick="scWaitStart(\'move\')">🚶 場所を変える</button>';
+  b.ln = S+';border-color:#c49a6a" onclick="scWaitStart(\'ln\')">✂️ 今日の線を引く</button>';
+  if(setOf("breath478")) b.breath = S+'" onclick="scWaitStart(\'breath\')">🌬️ 呼吸法</button>';
+  b.focus = S+'" onclick="scWaitStart(\'focus\')">🎯 集中ブロック'+(c && c.cause ? '<small>題名に「'+esc(scFirstLine(c.cause))+'」を入れて始めます</small>' : '')+'</button>';
+  b.dig = S+'" onclick="scWaitStart(\'dig\')">✍️ 深掘り</button>';
+  return b;
+}
 function scWaitStart(k){
+  scWaitMore = false;
   scKeep(); scEnsure();
   var x = scCur, now = Date.now();
-  var LB = { relax:"🛋 "+(relaxSet() ? relaxSet().name : "ゆるめるセット"), out:"📺 アプリの外で", rest:"🍵 ひと息", breath:"🌬️ 呼吸法", move:"🚶 場所を変える", ln:"✂️ 今日の線を引く", focus:"🎯 集中ブロック", dig:"✍️ 深掘り", none:"そのまま待つ" };
+  var LB = { relax:"🛋 "+(relaxSet() ? relaxSet().name : "ゆるめるセット"), out:"🎧 YouTube を音声で", rest:"🍵 ひと息", breath:"🌬️ 呼吸法", move:"🚶 場所を変える", ln:"✂️ 今日の線を引く", focus:"🎯 集中ブロック", dig:"✍️ 深掘り", none:"そのまま待つ" };
   x.wait = { t:now, end:now + SC_WAIT_MS, res:"", how:k };
   x.next = "⏳15分のあいだに: " + (LB[k] || k);
   save();
   if(k === "ln"){ var nx = x.next; lnGo(); x.next = nx; save(); scWaitTimer(k); return; }
   if(k === "breath" || k === "rest" || k === "move" || k === "focus" || k === "dig"){ var nx2 = x.next; scNext(k); x.next = nx2; save(); scWaitTimer(k); return; }   /* v107: focus・dig も */
   scCur = null; scStep = "state";
-  if(k === "relax"){ var s = relaxSet(); if(s){ DB.relax.day = olDay(); save(); scRunSet(s.id); scWaitTimer(k); return; } }
+  if(k === "relax"){ var s = relaxSet(); if(s){ relaxCfg().day = olDay(); save(); scRunSet(s.id); scWaitTimer(k); return; } }
   view = curId ? "run" : "home"; render();
   scWaitTimer(k);
 }
@@ -11073,23 +11215,33 @@ function scWaitCard(){
 
 /* 🛋 ゆるめる（毎日 20:15〜22:00 にホームの先頭。セットは DB.relax.set の名前で探す） */
 function olDay(){ return fbNoteName(Date.now()); }
-function relaxSet(){ var nm = (DB.relax && DB.relax.set) || ""; for(var i=0;i<DB.sets.length;i++){ if(DB.sets[i].name === nm) return DB.sets[i]; } return null; }
+/* v128: 🛋 の枠を時間帯で2つに（DB.relaxEve＝夕食後〜20:30 の 🌙 夕食のあと／DB.relax＝それ以降のベッドタイム）。
+   ⏳ 15分の 🛋 も、ホームの先頭の帯も、いまの時刻の枠に従う。 */
 function rxMin(s){ var m = String(s||"").split(":"); return (parseInt(m[0],10)||0)*60 + (parseInt(m[1],10)||0); }
+function rxNowMin(){ var d = new Date(); return d.getHours()*60 + d.getMinutes(); }
+function rxEveNow(){ var e = DB.relaxEve || {}, mm = rxNowMin(); return mm >= rxMin(e.from||"19:00") && mm < rxMin(e.to||"20:30"); }
+function relaxCfg(){ return (rxEveNow() && DB.relaxEve) ? DB.relaxEve : DB.relax; }
+function relaxSetOf(r){ var nm = (r && r.set) || ""; for(var i=0;i<DB.sets.length;i++){ if(DB.sets[i].name === nm) return DB.sets[i]; } return null; }
+function relaxSet(){ return relaxSetOf(relaxCfg()); }
 function relaxBanner(){
-  var r = DB.relax || {}, d = new Date(), mm = d.getHours()*60 + d.getMinutes();
-  if(mm < rxMin(r.from||"20:15") || mm > rxMin(r.to||"22:00")) return "";
+  var r = relaxCfg() || {}, mm = rxNowMin(), eve = (r === DB.relaxEve);
+  if(!eve && (mm < rxMin(r.from||"20:15") || mm > rxMin(r.to||"22:00"))) return "";
   if(r.day === olDay()) return "";
   var s = relaxSet();
   if(s && curId === s.id) return "";
   if(!s) return '<div style="border:1px solid #8a7ac4;border-radius:10px;padding:8px 10px;margin:0 0 10px;background:#1a1726"><div style="font-size:13px;color:#c4b8f0">🛋 ゆるめる時間です。セット「'+esc(r.set||"")+'」が見つかりません。</div><button class="btn ghost" onclick="go(\'relaxPick\')">🛋 のセットを選ぶ</button></div>';
-  return '<button class="setb" style="border-color:#8a7ac4;background:#1a1726;margin-bottom:4px" onclick="relaxGo()">🛋 ゆるめる時間 ▶ '+esc(s.icon+" "+s.name)+'<small>20:30 のアラームの合図。押せばそのまま始まります</small></button>'
+  return '<button class="setb" style="border-color:#8a7ac4;background:#1a1726;margin-bottom:4px" onclick="relaxGo()">'+(eve ? '' : '🛋 ゆるめる時間 ▶ ')+esc(s.icon+" "+s.name)+'<small>'+(eve ? '席を立ったら。🪥 だけで完了です' : '20:30 のアラームの合図')+'</small></button>'
        + '<div class="row" style="gap:6px;margin:0 0 10px"><button class="btn link" style="padding:5px;font-size:12px" onclick="relaxSkip()">今日はやめておく</button><button class="btn link" style="padding:5px;font-size:12px" onclick="go(\'relaxPick\')">セットを選び直す</button></div>';
 }
-function relaxGo(){ var s = relaxSet(); if(!s) return; DB.relax.day = olDay(); save(); scRunSet(s.id); }
-function relaxSkip(){ DB.relax.day = olDay(); save(); render(); }
-function relaxPickSet(i){ var s = DB.sets[i]; if(!s) return; DB.relax.set = s.name; save(); go("home"); }
+function relaxGo(){ var r = relaxCfg(), s = relaxSetOf(r); if(!s) return; r.day = olDay(); save(); scRunSet(s.id); }
+function relaxSkip(){ relaxCfg().day = olDay(); save(); render(); }
+var relaxPickW = "";   /* v128: "eve"＝🌙 夕食のあとの枠／"bed"＝20:30〜の枠／""＝いまの枠 */
+function relaxPickTarget(){ return relaxPickW==="eve" ? DB.relaxEve : (relaxPickW==="bed" ? DB.relax : relaxCfg()); }
+function relaxPickSet(i){ var s = DB.sets[i]; if(!s) return; relaxPickTarget().set = s.name; relaxPickW = ""; save(); go("home"); }
 function viewRelaxPick(){
-  var h = '<h1>🛋 ゆるめるセットを選ぶ</h1><p class="sub">毎日 20:15〜22:00 にホームの先頭に出すセットです。いまは「'+esc((DB.relax||{}).set||"")+'」。</p>';
+  var r = relaxPickTarget(), eve = (r === DB.relaxEve);
+  var h = '<h1>🛋 '+(eve ? '夕食のあと（'+esc(r.from||"19:00")+'〜'+esc(r.to||"20:30")+'）' : 'ベッドタイム（'+esc((DB.relaxEve||{}).to||"20:30")+'〜）')+'のセットを選ぶ</h1><p class="sub">いまは「'+esc(r.set||"")+'」。</p>'
+    + '<button class="btn link" style="padding:5px" onclick="relaxPickW=\''+(eve?'bed':'eve')+'\';render()">'+(eve ? '20:30〜の枠を選ぶ' : '夕食のあとの枠を選ぶ')+'</button>';
   DB.sets.forEach(function(s, i){ h += '<button class="setb" style="margin-bottom:6px" onclick="relaxPickSet('+i+')">'+esc(s.icon+" "+s.name)+'</button>'; });
   return h + '<button class="btn link" onclick="go(\'home\')">← 戻る</button>';
 }
@@ -11290,6 +11442,9 @@ function viewSweep(){
        + btn('▶ もう3分', 'swMore()') + btn('✂️ 分ける', "swAct('split')") + btn('✏️ 名前', "swAct('rename')") + '</div>';
     h += '<div class="row" style="flex-wrap:wrap">'
        + btn('🏷 タグ', 'swTagPick()') + btn('🔗 親', 'swParentPick()') + btn('🌐 環境', "sw.mode='env';render()") + '</div>';
+    /* v126: 親を選んだあと／親のタスクのとき、最初の子をボタン1つで */
+    if(x && x.parent) h += fKidBtnHtml(x.parent);
+    if(x && (fKidsOf(x) > 0 || /📦/.test(x.t))) h += fKidBtnHtml(x.t);
     h += sub('🏷・🔗 は付けたあと、続けて行き先も選べます（付けるだけなら「⏭ 次へ」）。');
   }else if(sw.mode === "parent"){
     var L = ftOpenList().filter(function(y){ return y !== x && !y.parent; });
