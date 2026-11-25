@@ -1660,7 +1660,7 @@ function parkBtn(){
 
 /* --- 状態 --- */
 /* v27: 版の表示（ホーム最下部）。中身を変えたら、ここも必ず上げる。 */
-var APPVER = "切り替えルーティン v119 ・ 2026-11-25";
+var APPVER = "切り替えルーティン v120 ・ 2026-11-25";
 var view = "home";
 var curId = null;
 var startAt = 0;
@@ -6389,7 +6389,11 @@ function ftImportText(txt){
   try{ o = JSON.parse(s.slice(i + key.length).trim()); }catch(e){ return -1; }
   if(!o || !Array.isArray(o.tasks)) return -1;
   DB.focus.tasks = o.tasks.map(function(x){
-    return { p:String(x.p||""), t:String(x.t||""), d:String(x.d||""), k:(x.k==="P"?"P":"W"), w:String(x.w||""), i:!!x.i, tags:Array.isArray(x.tags)?x.tags.map(String):[] };   /* v104: i＝📥 Inbox の印・tags（Task Sorter が送るようになったら使う） */   /* v100: w＝"week"（明日〜7日）／"next"（来週の月曜）／空＝今日まで */
+    var o1 = { p:String(x.p||""), t:String(x.t||""), d:String(x.d||""), k:(x.k==="P"?"P":"W"), w:String(x.w||""), i:!!x.i, tags:Array.isArray(x.tags)?x.tags.map(String):[] };
+    /* v120: env（作業環境の印）と親（pa＝親の名前・pp＝親のパス。Template_Focus_Send が送る）を残す。env は v111 から送られていたのに、ここで落としていた */
+    if(x.env) o1.env = Array.isArray(x.env) ? x.env.map(String) : String(x.env);
+    if(x.pa){ o1.parent = String(x.pa); if(x.pp) o1.pp = String(x.pp); }
+    return o1;   /* v104: i＝📥 Inbox の印・tags（Task Sorter が送るようになったら使う） */   /* v100: w＝"week"（明日〜7日）／"next"（来週の月曜）／空＝今日まで */
   }).filter(function(x){ return x.t; });
   DB.focus.tasksAt = String(o.at||"");
   DB.focus.tasksImp = Date.now();   /* v100: 取り込んだ時刻を routine 側で持つ（✂️ で一覧の鮮度を出すため） */
@@ -8255,7 +8259,7 @@ function aiSwitchNextPlanned(){
 function fSplitOpen(){
   var x = ftCur(); if(!x) return;
   if(x.local){ ftAct('split'); return; }
-  fCloseAll(); fSplitUI = { step:"input" }; render();
+  fCloseAll(); fSplitUI = { step:"input", tg:"self" }; render();
   setTimeout(function(){ var el = document.getElementById("fs_text"); if(el) el.focus(); }, 30);
 }
 function fSplitHtml(){
@@ -8263,7 +8267,12 @@ function fSplitHtml(){
   var x = ftCur();
   if(fSplitUI.step === "input"){
     if(!x){ fSplitUI = null; return ''; }
-    return '<div class="card" style="padding:10px 12px;border-color:#8fa86a"><label style="margin-top:0">✂️ 「'+esc(x.t)+'」を分ける（1行に1つ）</label>'
+    var tgP = (fSplitUI.tg === "parent" && x.parent);
+    var tsw = x.parent ? '<div class="row" style="margin:0 0 6px">'
+        + '<button class="btn'+(tgP?' ghost':'')+'" style="margin-top:0;padding:8px 4px;font-size:13.5px" onclick="fSplitTarget(\'self\')">いまの「'+esc(x.t.length > 12 ? x.t.slice(0,12)+'…' : x.t)+'」を分ける</button>'
+        + '<button class="btn'+(tgP?'':' ghost')+'" style="margin-top:0;padding:8px 4px;font-size:13.5px" onclick="fSplitTarget(\'parent\')">📦 親に子を足す</button></div>' : '';
+    return '<div class="card" style="padding:10px 12px;border-color:#8fa86a"><label style="margin-top:0">'+(tgP ? '✂️ 親「'+esc(x.parent)+'」に子を足す（1行に1つ）' : '✂️ 「'+esc(x.t)+'」を分ける（1行に1つ）')+'</label>'
+      + tsw
       + '<textarea class="inp" id="fs_text" rows="5" style="width:100%;min-height:120px;box-sizing:border-box;font-size:16px;line-height:1.6" placeholder="論点を3つ書き出す&#10;AIに構成案を頼む&#10;構成案に自分の判断を3行足す"></textarea>'
       + '<p style="font-size:12.5px;color:#8ea3b8;line-height:1.6;margin:4px 0 0">入力しているあいだ、画面の時計は止まって見えますが、時間は進んでいます。</p>'
       + '<div class="row"><button class="btn" onclick="fSplitDo()">分ける</button><button class="btn ghost" onclick="fSplitUI=null;render()">やめる</button></div></div>';
@@ -8276,20 +8285,24 @@ function fSplitHtml(){
     + '<button class="btn ghost" onclick="fSplitIns(\'end\')">⤓ この先のいちばん後ろに足す</button>'
     + '<button class="btn ghost" onclick="fSplitIns(\'none\')">📋 一覧に置くだけ（今回はやらない）</button></div>';
 }
+function fSplitTarget(t){ if(!fSplitUI) return; var el = document.getElementById("fs_text"), v = el ? el.value : ""; fSplitUI.tg = t; render(); var e2 = document.getElementById("fs_text"); if(e2){ e2.value = v; e2.focus(); } }
 function fSplitDo(){
   var x = ftCur(), el = document.getElementById("fs_text"); if(!x || !el) return;
   var seen = {};
+  var tgP = (fSplitUI.tg === "parent" && x.parent), pn = tgP ? x.parent : x.t;
   var names = String(el.value||"").split(/\n/).map(function(n){ return ftClean(String(n).replace(/^\s*(?:[-・*•]|\d+[.)．])\s*/, "")); })
-    .filter(function(n){ if(!n || n === x.t || seen[n]) return false; seen[n] = 1; return true; });
-  if(!names.length){ fSplitUI = null; render(); return; }
-  ftOp({op:"split", p:x.p, t:x.t, kids:names});
+    .filter(function(n){ if(!n || n === x.t || n === pn || seen[n] || planTaskOf(n)) return false; seen[n] = 1; return true; });
+  if(!names.length){ fSplitUI = null; ftMsg = "分ける名前がありませんでした（同じ名前のタスクが一覧にあるものは入れません）"; ftMsgAt = Date.now(); render(); return; }
+  /* v120: 親に子を足すときは、親（pa・pp）を split する＝Task Sorter が親の子として作る（いまの子の兄弟になる） */
+  if(tgP) ftOp({op:"split", p:x.pp||"", t:x.parent, kids:names});
+  else ftOp({op:"split", p:x.p, t:x.t, kids:names});
   ftInit();
   var at = DB.focus.tasks.indexOf(x); if(at < 0) at = DB.focus.tasks.length - 1;
   var today = ftDate("今日");
-  var kids = names.map(function(n){ return { p:"", t:n, d:today, k:x.k, parent:x.t }; });
+  var kids = names.map(function(n){ var o = { p:"", t:n, d:today, k:x.k, parent:pn }; if(tgP && x.pp) o.pp = x.pp; return o; });
   Array.prototype.splice.apply(DB.focus.tasks, [at+1, 0].concat(kids));
   save();
-  fSplitUI = { step:"choice", kids:names, p:x.t };
+  fSplitUI = { step:"choice", kids:names, p:pn };
   render();
 }
 function fSplitIns(where){
