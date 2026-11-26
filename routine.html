@@ -660,6 +660,9 @@ function brEstimate(x){ var g = brOfPurpose(brPurposeOf(x))[0]; return g ? brTot
 /* --- 既定のルーティン ---------------------------------------
    すべて既存の記録から採っています（新しく思いついた行動は入れていません）。
    steps は「秒|文言」の形式。すべてアプリ内で編集できます。 */
+/* v138（2026-11-26 🤖 AIへ 16:01「場所を変えたあとに、いま焦っていることや不安なことを15分 Quickmemo に書き出す形にしたら少し落ち着いた。今ただ場所を変えるだけの案内」）:
+   🚶 場所を変える の2項目めに「着いたら書き出す（15分）」。4列目 qmemo ＝ Obsidian の Quick Memo を開くボタン（appOf）。書いた中身は routine に取り込まない。 */
+var MOVE_WRITE_STEP = "900|着いたら、いま焦っていること・不安なことを Quick Memo に書き出す（15分・整えなくて大丈夫です）|いま焦っていること、不安なことを、そのまま書き出します|qmemo";
 function defaults(){ return [
   { id:"home", icon:"🏠", name:"在宅勤務・夕方の切り替え", limit:900,
     note:"仕事を終える瞬間に押します。在宅は「帰る」動作がないので、これが唯一の切れ目です。",
@@ -761,9 +764,9 @@ function defaults(){ return [
   { id:"cutline", icon:"✂️", name:"今日の線を引く", limit:40, auto:true, voice:true, hidden:true,
     note:"10/25「夕方4時半ごろに線を引いてみようと意識したら、少し気持ちが楽になった」から。",
     steps:["40|今日はここまで、と決める。残りは明日の自分に渡す（書かなくて大丈夫です）|今日はここまで、と決めます"] },
-  { id:"moveplace", icon:"🚶", name:"場所を変える", limit:60, auto:true, voice:true, hidden:true,
+  { id:"moveplace", icon:"🚶", name:"場所を変える", limit:960, auto:true, voice:true, hidden:true,
     note:"10/26「16:30の衝動のとき、カフェや作業スペースに移動することで保てていた」から。",
-    steps:["60|いまの席から離れる。カフェ・作業スペース・トイレ・廊下、どこでも構いません|席から離れます"] },
+    steps:["60|いまの席から離れる。カフェ・作業スペース・トイレ・廊下、どこでも構いません|席から離れます", MOVE_WRITE_STEP] },
   { id:"talkpartner", icon:"🗣", name:"ひとこと声をかける", limit:60, auto:true, voice:true, hidden:true,
     note:"10/25「キッチンで夫と話をしながらできて、夫婦のコミュニケーションになった」から。",
     steps:["60|近くにいる人に、ひとこと声をかける。内容は何でも構いません|ひとこと、声をかけます"] },
@@ -1246,6 +1249,16 @@ if(!DB.mig_care90){
   });
   save();
 }
+/* v138: 🚶 場所を変える が1項目のまま（いじっていない）なら、書き出しの項目を足す。編集済みなら触らない。 */
+if(!DB.mig_move138){
+  DB.mig_move138 = true;
+  DB.sets.forEach(function(s){
+    if(s.id==="moveplace" && s.steps && s.steps.length===1 && String(s.steps[0]).indexOf("60|いまの席から離れる")===0){
+      s.steps.push(MOVE_WRITE_STEP); s.limit = (parseInt(s.limit,10)||60) + 900;
+    }
+  });
+  save();
+}
 if(!DB.mig_br62){
   DB.mig_br62 = true;
   DB.sets.forEach(function(s){ if(s.id==="breath478") s.media = true; });
@@ -1694,7 +1707,7 @@ function parkBtn(){
 
 /* --- 状態 --- */
 /* v27: 版の表示（ホーム最下部）。中身を変えたら、ここも必ず上げる。 */
-var APPVER = "切り替えルーティン v137 ・ 2026-11-26";
+var APPVER = "切り替えルーティン v138 ・ 2026-11-26";
 /* v133（2026-11-26 提案_2026-11-25_2 回答「アを前提にしつつ、メモを書くは不要」・見回り代行）:
    🎯 集中ブロックの 📝 メモ ボタン（実行中のタスク欄・🗂 整理）を隠す。ftAct('memo') と op:"memo" の仕組みは残す（☀️・🚃 の印や 📤 の戻しで使っているため）。
    戻すときは FOCUS_MEMO_BTN を true に。 */
@@ -2987,11 +3000,14 @@ function appOf(x){
     var u = mealUri(MEAL.cmdClose);
     return u ? { icon:"📝", name:"今日を閉じる", url:u } : null;
   }
+  if(k==="qmemo") return { icon:"📝", name:"Quick Memo", url:qmemoUri() };   /* v138 */
   if(APPS[k]) return APPS[k];
   if(/^https?:\/\//.test(k)) return { icon:"🔗", name:"リンクを開く", url:k };
   return null;
 }
+function qmemoUri(){ return "obsidian://open?vault="+encodeURIComponent((typeof FB!=="undefined" && FB.vault)||"My Valut")+"&file="+encodeURIComponent("10_Action/Quick Memo"); }   /* v138 */
 function openApp(k){
+  if(k==="qmemo"){ openUrl(qmemoUri()); return; }   /* v138: Obsidian の Quick Memo */
   /* v83: close は Obsidian（別アプリ）なので新規タブではなく openUrl で開く */
   if(k==="close"){
     var cu = mealUri(MEAL.cmdClose);
@@ -6151,6 +6167,9 @@ function viewRunAuto(s){
      （「✓ できた — 次へ」＝.btn.big）と同じ見た目・同じ幅いっぱいの
      ボタンに格上げし、押し間違えにくい一時停止/再開は下の小さめのボタンへ
      退けた。押す機能そのもの（autoSkip）は変えていない。 */
+  /* v138: 自動で進むセットでも、項目の4列目（qmemo 等）の「◯◯を開く」を主ボタンの上に出す（🚶 場所を変える の書き出し用） */
+  var apA = appOf(cur);
+  if(apA) h += '<button class="btn ghost" style="margin-bottom:6px" onclick="openApp(\''+esc(cur.app)+'\')">'+apA.icon+' '+esc(apA.name)+'を開く</button>';
   h += '<button class="btn big" onclick="autoSkip()">次へ ▶</button>';
   /* v73: 押し間違えたとき用の ◀ 前へ。主ボタン（次へ ▶）より小さく、一時停止と横に並べる */
   h += '<div class="row" style="margin-top:9px">'
@@ -10375,7 +10394,7 @@ function viewSc(){
     if(new Date().getHours() >= 15) h += _ln;   /* v99: 15時からはいちばん上 */
     if(setOf("breath478")) h += '<button class="setb" style="margin-bottom:8px" onclick="scNext(\'breath\')">🌬️ 呼吸法<small>一覧から選んで、音と声で進みます</small></button>';
     if(breatherSet())      h += '<button class="setb" style="margin-bottom:8px" onclick="scNext(\'rest\')">🍵 ひと息<small>約7分。最後に次にやることを1つだけ決めます</small></button>';
-    if(setOf("moveplace")) h += '<button class="setb" style="margin-bottom:8px" onclick="scNext(\'move\')">🚶 場所を変える<small>別の部屋・近くのカフェ・席を離れる</small></button>';
+    if(setOf("moveplace")) h += '<button class="setb" style="margin-bottom:8px" onclick="scNext(\'move\')">🚶 場所を変える<small>席を離れる → 着いたら焦り・不安を Quick Memo に15分書き出す</small></button>';
     h += '<button class="setb" style="margin-bottom:8px" onclick="scNext(\'focus\')">🎯 集中ブロック<small>'+(c.cause ? '題名に「'+esc(scFirstLine(c.cause))+'」を入れて始めます' : 'その都度決める形で始めます')+'</small></button>';
     if(new Date().getHours() < 15) h += _ln;
     h += '<button class="setb" style="margin-bottom:8px" onclick="scNext(\'dig\')">✍️ 深掘り<small>頭の中を全部書き出す → いちばん重いものに印</small></button>';
@@ -11391,7 +11410,7 @@ function scWaitBtns(c){
   if(_rs) b.relax = S+';border-color:#8a7ac4" onclick="scWaitStart(\'relax\')">'+(_rs.icon==="🛋" ? '' : '🛋 ')+esc(_rs.icon+" "+_rs.name)+'</button>';
   b.out = S+'" onclick="scWaitStart(\'out\')">🎧 YouTube を音声で（食べ物から離れた場所で）<small>ゲームでも</small></button>';
   if(breatherSet())      b.rest = S+'" onclick="scWaitStart(\'rest\')">🍵 ひと息<small>約7分</small></button>';
-  if(setOf("moveplace")) b.move = S+'" onclick="scWaitStart(\'move\')">🚶 場所を変える</button>';
+  if(setOf("moveplace")) b.move = S+'" onclick="scWaitStart(\'move\')">🚶 場所を変える<small>着いたら焦り・不安を Quick Memo に書き出す</small></button>';
   b.ln = S+';border-color:#c49a6a" onclick="scWaitStart(\'ln\')">✂️ 今日の線を引く</button>';
   if(setOf("breath478")) b.breath = S+'" onclick="scWaitStart(\'breath\')">🌬️ 呼吸法</button>';
   b.focus = S+'" onclick="scWaitStart(\'focus\')">🎯 集中ブロック'+(c && c.cause ? '<small>題名に「'+esc(scFirstLine(c.cause))+'」を入れて始めます</small>' : '')+'</button>';
