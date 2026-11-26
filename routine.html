@@ -1694,7 +1694,11 @@ function parkBtn(){
 
 /* --- 状態 --- */
 /* v27: 版の表示（ホーム最下部）。中身を変えたら、ここも必ず上げる。 */
-var APPVER = "切り替えルーティン v132 ・ 2026-11-26";
+var APPVER = "切り替えルーティン v137 ・ 2026-11-26";
+/* v133（2026-11-26 提案_2026-11-25_2 回答「アを前提にしつつ、メモを書くは不要」・見回り代行）:
+   🎯 集中ブロックの 📝 メモ ボタン（実行中のタスク欄・🗂 整理）を隠す。ftAct('memo') と op:"memo" の仕組みは残す（☀️・🚃 の印や 📤 の戻しで使っているため）。
+   戻すときは FOCUS_MEMO_BTN を true に。 */
+var FOCUS_MEMO_BTN = false;
 var view = "home";
 var curId = null;
 var startAt = 0;
@@ -6596,6 +6600,46 @@ function ftOp(o){ ftInit(); o.at = Date.now(); DB.focus.ops.push(o); save(); }
 function ftPending(){ ftInit(); return DB.focus.ops.length; }
 function ftYmd(x){ return x.getFullYear()+"-"+("0"+(x.getMonth()+1)).slice(-2)+"-"+("0"+x.getDate()).slice(-2); }
 /* 今日／明日／あさって／曜日（次に来るその曜日）／来週（＝次の月曜）／11/12／2026-11-12 */
+/* v135（2026-11-26 個人秘書チャット「日付を整理すると文字で打つ画面が出る。カレンダー形式の選択式にできますか」）:
+   📅 日付（集中ブロック・🗂 整理・🧹）と 🌙 締めチェックの 📆 日付を指定 を、カレンダーから1タップで選ぶ形にした。
+   上に よく使う日（今日・明日・あさって・来週月曜）。‹ › で月を動かす。✏️ で今までどおり文字でも入れられる。
+   選んだ日は cb("YYYY-MM-DD") で返す。記録の形（op due の d）は変えていない。 */
+var calSt = null;
+function calIso(d){ return d.getFullYear()+"-"+("0"+(d.getMonth()+1)).slice(-2)+"-"+("0"+d.getDate()).slice(-2); }
+function calPick(title, def, cb){
+  var base = /^\d{4}-\d{2}-\d{2}$/.test(def||"") ? new Date(def+"T12:00:00") : new Date();
+  calSt = { title:title, sel:(def||""), y:base.getFullYear(), m:base.getMonth(), cb:cb };
+  calDraw();
+}
+function calClose(){ var e = document.getElementById("calOv"); if(e) e.remove(); calSt = null; }
+function calDone(v){ var st = calSt; calClose(); if(st && v) st.cb(v); }
+function calMove(n){ if(!calSt) return; calSt.m += n; if(calSt.m < 0){ calSt.m = 11; calSt.y--; } if(calSt.m > 11){ calSt.m = 0; calSt.y++; } calDraw(); }
+function calType(){ if(!calSt) return; var r = prompt("📅 日付（今日／明日／金 などの曜日／来週／12/2／2026-12-02）", ""); if(r === null) return; var d = ftDate(r); if(!d){ alert("日付として読めませんでした: "+r); return; } calDone(d); }
+function calDraw(){
+  if(!calSt) return;
+  var ov = document.getElementById("calOv");
+  if(!ov){ ov = document.createElement("div"); ov.id = "calOv"; ov.style.cssText = "position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px"; ov.onclick = function(e){ if(e.target === ov) calClose(); }; document.body.appendChild(ov); }
+  var now = new Date(); now.setHours(12,0,0,0); var today = calIso(now);
+  var add = function(n){ var d = new Date(now); d.setDate(d.getDate()+n); return calIso(d); };
+  var quick = [["今日", today], ["明日", add(1)], ["あさって", add(2)], ["来週月曜", lnNextMon()]];
+  var bs = "border:1px solid #3a4656;background:#1e2733;color:#e6edf3;border-radius:10px;font-size:15px;cursor:pointer;";
+  var h = '<div style="background:#151b23;border:1px solid #6a8fa8;border-radius:14px;padding:14px;width:100%;max-width:360px;color:#e6edf3;font-family:inherit">'
+        + '<div style="font-size:14px;margin-bottom:8px;line-height:1.5;word-break:break-word">'+esc(calSt.title)+'</div>'
+        + '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">' + quick.map(function(q){ return '<button style="'+bs+'padding:7px 10px;flex:1 1 auto" onclick="calDone(\''+q[1]+'\')">'+q[0]+'<br><small style="color:#8ea3b8">'+(+q[1].slice(5,7))+'/'+(+q[1].slice(8))+'</small></button>'; }).join('') + '</div>'
+        + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">'
+        + '<button style="'+bs+'padding:6px 14px" onclick="calMove(-1)">‹</button><b>'+calSt.y+'年 '+(calSt.m+1)+'月</b><button style="'+bs+'padding:6px 14px" onclick="calMove(1)">›</button></div>'
+        + '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;text-align:center">';
+  ["日","月","火","水","木","金","土"].forEach(function(w, i){ h += '<div style="font-size:12px;color:'+(i===0?'#e08a8a':i===6?'#8ab4e0':'#8ea3b8')+'">'+w+'</div>'; });
+  var first = new Date(calSt.y, calSt.m, 1, 12), days = new Date(calSt.y, calSt.m+1, 0, 12).getDate();
+  for(var i = 0; i < first.getDay(); i++) h += '<div></div>';
+  for(var d = 1; d <= days; d++){
+    var iso = calIso(new Date(calSt.y, calSt.m, d, 12)), wd = (first.getDay()+d-1)%7, past = iso < today;
+    var st = bs+"padding:9px 0;" + (iso === calSt.sel ? "background:#e0a86a;color:#151b23;border-color:#e0a86a;font-weight:bold;" : iso === today ? "border-color:#e0a86a;" : "") + (past ? "opacity:.4;" : "") + (iso !== calSt.sel && wd===0 ? "color:#e08a8a;" : iso !== calSt.sel && wd===6 ? "color:#8ab4e0;" : "");
+    h += '<button style="'+st+'" onclick="calDone(\''+iso+'\')">'+d+'</button>';
+  }
+  h += '</div><div style="display:flex;gap:6px;margin-top:10px"><button style="'+bs+'padding:9px;flex:1" onclick="calType()">✏️ 文字で入れる</button><button style="'+bs+'padding:9px;flex:1" onclick="calClose()">キャンセル</button></div></div>';
+  ov.innerHTML = h;
+}
 function ftDate(s){
   s = String(s||"").trim().replace(/\s/g,"");
   if(!s) return "";
@@ -6649,9 +6693,9 @@ function ftEndSeg(){
 function ftAct(kind){ ftActX(ftCur(), kind, true); }
 /* v87: 終わりの画面からも同じ操作（inBlock=false のときは区切りを終えない） */
 function ftActI(i, kind){ ftInit(); var x = DB.focus.tasks[i]; if(x) ftActX(x, kind, false); }
-function ftActX(x, kind, inBlock){
+function ftActX(x, kind, inBlock, pd){
   if(!x) return;
-  if(x.local) return ftActLocal(x, kind, inBlock);   /* v108 */
+  if(x.local) return ftActLocal(x, kind, inBlock, pd);   /* v108 */
   /* v88（提案_2026-11-09 ③）: 🗑️ 不要。Obsidian ではファイルを消さず、完了＋「不要」のメモにして Archive へ（Task Sorter の 🎯 戻すで） */
   if(kind === "drop"){
     if(!confirm("「"+x.t+"」を不要にしますか？\n（Obsidian ではファイルを消さず、完了＋「不要」のメモにします。戻すのはブロックの終わりにまとめて）")) return;
@@ -6698,9 +6742,8 @@ function ftActX(x, kind, inBlock){
     ftMsg = "✏️ 「"+nn+"」にしました"; ftMsgAt = Date.now(); render(); return;
   }
   if(kind === "due"){
-    var ds = prompt("📅 新しい日付（今日／明日／あさって／金 などの曜日／来週＝次の月曜／11/12／2026-11-12）", "明日");
-    if(ds === null) return;
-    var d = ftDate(ds); if(!d){ alert("日付として読めませんでした: "+ds); return; }
+    var d = pd;   /* v135: 手で打つ欄 → カレンダーから選ぶ */
+    if(!d){ calPick("📅 「"+x.t+"」の新しい日付", x.d || ftDate("明日"), function(v){ ftActX(x, "due", inBlock, v); }); return; }
     if(x.isNew){ DB.focus.ops.forEach(function(o){ if(o.op === "add" && o.t === x.t) o.d = d; }); }
     else ftOp({op:"due", p:x.p, t:x.t, d:d});
     x.d = d; save();
@@ -6714,7 +6757,7 @@ function ftActX(x, kind, inBlock){
   }
 }
 /* v108: 「このブロックだけ」の項目の操作。Obsidian へは何も戻さない（📌 で登録したときだけ add を作る） */
-function ftActLocal(x, kind, inBlock){
+function ftActLocal(x, kind, inBlock, pd){
   var msg = function(s){ ftMsg = s; ftMsgAt = Date.now(); };
   if(kind === "done" || kind === "drop"){
     x.done = true; if(kind === "drop"){ x.dropped = true; planForget(x.t); }
@@ -6745,8 +6788,8 @@ function ftActLocal(x, kind, inBlock){
     render(); return;
   }
   if(kind === "due"){
-    var ds = prompt("📅 日付（今日／明日／来週 など）", "明日"); if(ds === null) return;
-    var d = ftDate(ds); if(!d){ alert("日付として読めませんでした: "+ds); return; }
+    var d = pd;   /* v135 */
+    if(!d){ calPick("📅 「"+x.t+"」の日付", x.d || ftDate("明日"), function(v){ ftActLocal(x, "due", inBlock, v); }); return; }
     x.d = d; save(); msg("📅 「"+x.t+"」を "+d+" にしました（このブロックだけ）"); render(); return;
   }
   msg("このブロックだけの項目にはメモを残せません（📌 で登録すると残せます）"); render();
@@ -6772,7 +6815,7 @@ function ftPanel(){
      + '</div><div class="row">'
      + '<button class="btn ghost" onclick="ftAct(\'rename\')">✏️ 名前</button>'
      + '<button class="btn ghost" onclick="ftAct(\'due\')">📅 日付</button>'
-     + '<button class="btn ghost" onclick="ftAct(\'memo\')">📝 メモ</button>'
+     + (FOCUS_MEMO_BTN ? '<button class="btn ghost" onclick="ftAct(\'memo\')">📝 メモ</button>' : '')   /* v133 */
      + '</div>';
   if(ftPending()) h += '<p class="note">まだ Obsidian に戻していない変更：'+ftPending()+'件</p>';
   return h;
@@ -6790,18 +6833,73 @@ function ftStartCard(){
   h += '</div>';
   return h;
 }
-function ftRetText(){
+function ftRetText(list){
   ftInit();
   var dt = new Date(), hm = ("0"+dt.getHours()).slice(-2)+":"+("0"+dt.getMinutes()).slice(-2);
-  var ops = DB.focus.ops.map(function(o){ var c = {}; for(var k in o){ if(k !== "at") c[k] = o[k]; } return c; });
+  var ops = (list || DB.focus.ops).map(function(o){ var c = {}; for(var k in o){ if(k !== "at") c[k] = o[k]; } return c; });
   return "\n##### " + ftYmd(dt) + " " + hm + " 🎯 集中ブロックから（" + ops.length + "件）\n```json focus-return\n" + JSON.stringify(ops) + "\n```\n";
 }
-function ftRetUri(){
+function ftRetUri(list){
   var u = "obsidian://advanced-uri?";
   if(FB.vault) u += "vault="+encodeURIComponent(FB.vault)+"&";
-  return u + "filepath="+encodeURIComponent(FT_RET_PATH)+"&mode=append&data="+encodeURIComponent(ftRetText());
+  return u + "filepath="+encodeURIComponent(FT_RET_PATH)+"&mode=append&data="+encodeURIComponent(ftRetText(list));
 }
+/* v137（2026-11-26 個人秘書チャット「まとめて直してください」）:
+   ① 送り直しをなくす：📤 で送った／📋 でコピーした時点で、その分を DB.focus.opsLast（直前に送った分）へ移し、DB.focus.ops を空にする。
+      次の 📤 はそのあとの変更だけ。「✅ 届いた」を押す手間はなくした（届かなかったときは ↩ もう一度送る／📋 もう一度コピー で直前の分を出し直す）。
+      送った ＋新規 のタスクは isNew を外す（このあと日付や名前を変えたら、due・rename の op として送る）。
+   ② 表示：1枚のカード「📤 Obsidian へ戻す まだ送っていない変更 n件」＋種類ごとの件数＋▸ 中身を見る。
+      大きいボタンは iPhone＝Obsidian を開いて戻す／会社PC＝📋 コピーして戻す。送ったあとは「✓ 何時に何件送りました」の1行だけ。
+      集中ブロックの画面の上に「📤 n」（押すとその場でこのカード）。
+   ★書き出す形（```json focus-return）は変えていない。Task Sorter は同じ op を飛ばすので、もう一度送っても二重にはならない。 */
+var ftOpsOpen = false, ftSendOpen = false;
+var FT_OPLB = { add:"＋新規", done:"✅完了", split:"✂️分ける", due:"📅日付", rename:"✏️名前", drop:"🗑不要", someday:"💤Someday", tag:"🏷タグ", parent:"🔗親", env:"🌐環境", memo:"📝メモ" };
+function ftOpsSummary(ops){
+  var c = {}, order = [];
+  ops.forEach(function(o){ var k = o.op; if(!c[k]){ c[k] = 0; order.push(k); } c[k]++; });
+  return order.map(function(k){ return (FT_OPLB[k] || k)+" "+c[k]; }).join(" ・ ");
+}
+function ftOpsListHtml(ops){
+  return '<div style="font-size:12.5px;line-height:1.6;color:#cfd8e3;margin:4px 0 2px;max-height:14em;overflow:auto">'
+    + ops.map(function(o){ var ex = o.op === "rename" ? " → "+(o.to||"") : o.op === "due" ? " → "+(o.d||"") : o.op === "split" ? "（"+((o.kids||[]).length)+"つに）" : o.op === "parent" ? " › 親: "+(o.parent||"") : ""; return '<div>'+(FT_OPLB[o.op]||o.op)+'　'+esc(o.t||"")+esc(ex)+'</div>'; }).join('') + '</div>';
+}
+function ftMarkSent(){
+  ftInit();
+  var sent = DB.focus.ops.slice(0); if(!sent.length) return 0;
+  sent.forEach(function(o){ if(o.op === "add") DB.focus.tasks.forEach(function(x){ if(x && x.isNew && x.t === o.t) x.isNew = false; }); });
+  DB.focus.opsLast = sent; DB.focus.opsLastAt = Date.now();
+  DB.focus.ops = []; DB.focus.opsSentAt = 0; save();
+  return sent.length;
+}
+function ftHm(t){ var d = new Date(t); return ("0"+d.getHours()).slice(-2)+":"+("0"+d.getMinutes()).slice(-2); }
 function ftSendBtn(){
+  ftInit();
+  var n = ftPending(), L = DB.focus.opsLast || [], at = DB.focus.opsLastAt || 0;
+  var recent = L.length && at && (Date.now() - at < 12*3600*1000);
+  if(!n && !recent) return "";
+  var pc = (typeof scIsPC === "function") && scIsPC();
+  var h = '<div class="card" style="border-color:#6a8fa8">';
+  if(n){
+    h += '<label style="margin-top:0">📤 Obsidian へ戻す　まだ送っていない変更 <b>'+n+'件</b></label>'
+       + '<div style="font-size:12.5px;color:#8ea3b8;line-height:1.6">'+esc(ftOpsSummary(DB.focus.ops))
+       + ' <button class="btn link" style="width:auto;display:inline;padding:0 4px;margin:0;font-size:12.5px" onclick="ftOpsOpen=!ftOpsOpen;render()">'+(ftOpsOpen ? '▾ たたむ' : '▸ 中身を見る')+'</button></div>'
+       + (ftOpsOpen ? ftOpsListHtml(DB.focus.ops) : '');
+    if(pc){
+      h += '<button class="btn" onclick="ftCopy()">📋 コピーして戻す（'+n+'件）</button>'
+         + '<a class="btn link" style="display:block;text-align:center;padding:6px;font-size:12.5px" href="'+esc(ftRetUri())+'" onclick="ftSent()">Obsidian が開くなら、こちらで直接戻す</a>'
+         + '<p class="note" style="margin:2px 0 0">コピーしたら Task Sorter の「📋 クリップボードから戻しを取り込む」で反映されます。</p>';
+    }else{
+      h += '<a class="btn" id="ftSend" style="display:block;text-align:center;text-decoration:none" href="'+esc(ftRetUri())+'" onclick="ftSent()">Obsidian を開いて戻す（'+n+'件）</a>'
+         + '<button class="btn link" style="display:block;width:100%;text-align:center;padding:6px;font-size:12.5px" onclick="ftCopy()">📋 コピーして戻す（Obsidian が開かないとき）</button>';
+    }
+  }
+  if(recent){
+    h += '<div style="font-size:12.5px;color:#8fd19e;line-height:1.6;margin-top:'+(n ? '8px;border-top:1px solid #2a3340;padding-top:6px' : '0')+'">✓ '+ftHm(at)+' に'+L.length+'件送りました。Task Sorter の「🎯 戻す」で反映されます</div>'
+       + '<div style="font-size:12.5px;margin-top:2px"><a style="color:#8ea3b8" href="'+esc(ftRetUri(L))+'" onclick="ftResent()">↩ もう一度送る</a>　・　<a style="color:#8ea3b8" href="javascript:void(0)" onclick="ftCopy(true)">📋 もう一度コピー</a></div>';
+  }
+  return h + '</div>';
+}
+function ftSendBtnOld(){
   var n = ftPending(); if(!n) return "";
   if(!DB.focus.opsSentAt && typeof scIsPC === "function" && scIsPC()) return ftSendBtnPC(n);   /* v124 */
   /* v88（提案_2026-11-09 ③）: 押しても消さない。「届きましたか？」で ✅ を押したときだけ消す。届かないときの予備に 📋 コピー */
@@ -6821,9 +6919,10 @@ function ftSendBtn(){
 }
 /* 送信は <a href> のタップで行う。ここで描き直すと開こうとしているリンクが消えるので、少し待ってから（fbMarkSent と同じ考え方）
    v88: 押した時点では消さない（Obsidian が開かなかったときに黙って失われていた）。印だけ付ける */
+function ftResent(){ ftInit(); DB.focus.opsLastAt = Date.now(); save(); setTimeout(render, 1500); }
 function ftSent(){
   ftInit();
-  DB.focus.opsSentAt = Date.now(); save();
+  ftMarkSent();   /* v137: 送った分は「直前に送った分」へ。次の 📤 はそのあとの変更だけ */
   setTimeout(render, 1500);
 }
 function ftSentOk(){
@@ -6831,11 +6930,11 @@ function ftSentOk(){
   DB.focus.opsLast = DB.focus.ops.slice(0); DB.focus.ops = []; DB.focus.opsSentAt = 0; save();
   ftMsg = "✅ 戻しました。Task Sorter の「🎯 集中ブロックから戻す」で反映してください。"; ftMsgAt = Date.now(); render();
 }
-function ftCopy(){
+function ftCopy(again){
   ftInit();
-  var t = ftRetText();
+  var t = again ? ftRetText(DB.focus.opsLast || []) : ftRetText();
   var done = function(ok){
-    DB.focus.opsSentAt = Date.now(); save();
+    if(again){ DB.focus.opsLastAt = Date.now(); save(); } else ftMarkSent();   /* v137 */
     ftMsg = ok ? "📋 コピーしました。Obsidian の Task Sorter →「📋 クリップボードから戻しを取り込む」で反映されます。" : "コピーできませんでした。出てきた欄の中身を全部コピーしてください。";   /* v124 */
     ftMsgAt = Date.now(); render();
     if(!ok) prompt("下を全部選んでコピーし、「🎯 集中ブロックからの戻し」のいちばん下に貼り付けてください", t);
@@ -8336,6 +8435,26 @@ function viewFocus(){
    ⑤ 🤖 AIに投げた：待ち時間 3／5／10／15／30分 → 待つあいだ見通しの次のタスク（または一覧から）へ移り、時間が来たら元のタスクに戻る（v93 の寄り道を使う）。
    ★Obsidian へ戻す op は既存の種類だけ（done・due・split・rename・memo・drop・someday・tag・parent）。Task Sorter 側の読み方は変えていない。 */
 var fOrg = null, fSplitUI = null, fMoreOpen = false;
+/* v134（2026-11-26 個人秘書チャットのご依頼）: 集中ブロックの中で、いま取り組んでいるタスク以外を新しく足し、そのまま 🗂 整理（タグ・親・環境・日付など）できる。
+   置き場所は 🗓 この先の見通し の真上。「▸ ほかの操作」の中の ＋ タスクを追加 はこれにまとめた（そこからは外した）。
+   fOrgTgt … 整理の対象（DB.focus.tasks の番号）。null のときは今までどおり、いま取り組んでいるタスク。
+   送る op は今あるもの（add・tag・parent・env・due 等）のまま＝Task Sorter の読み方は変えていない。 */
+var fOrgTgt = null;
+function fOrgX(){
+  if(fOrgTgt !== null){ var y = (DB.focus.tasks||[])[fOrgTgt]; if(y && !y.done) return y; fOrgTgt = null; fOrg = null; return null; }
+  return ftCur();
+}
+function fAddAndOrg(){
+  var i = ftNewTask(); if(i < 0){ render(); return; }
+  var y = DB.focus.tasks[i];
+  if(!y || y.local || y === ftCur()){ render(); return; }   /* このブロックだけのタスク・いまのタスクは整理の対象にしない */
+  fCloseAll(); fOrgTgt = i; fOrg = "menu"; render();
+}
+function fAddOrgHtml(){
+  var h = '<button class="btn ghost" style="margin-top:6px" onclick="fAddAndOrg()">＋ タスクを足して整理（タグ・親・環境・日付）</button>';
+  if(fOrgTgt !== null) h += fOrgHtml();
+  return h;
+}
 function fClock(sec){ var d = new Date(Date.now() + Math.max(0, sec)*1000); return ("0"+d.getHours()).slice(-2)+":"+("0"+d.getMinutes()).slice(-2); }
 function fKidsOf(x){ ftInit(); return x ? DB.focus.tasks.filter(function(y){ return !y.done && y.parent === x.t; }).length : 0; }
 function fNameHtml(x, lb, big){
@@ -8356,6 +8475,7 @@ function fNowName(x){
 function fRunAskHtml(flash, e){
   var x = ftCur(), nx = fSeg+1 < fSegs.length, nextLb = nx ? (fLabels[fSeg+1]||"") : "";
   var h = ftMsgHtml();
+  if(ftPending()) h += '<div style="text-align:right;margin:-2px 0 4px"><button class="btn link" style="width:auto;display:inline;padding:0 4px;margin:0;font-size:12.5px;color:#e0a86a" onclick="ftSendOpen=!ftSendOpen;render()">📤 '+ftPending()+'（まだ送っていない変更）'+(ftSendOpen ? ' ▾' : ' ▸')+'</button></div>' + (ftSendOpen ? ftSendBtn() : '');   /* v137 */
   if(fOver){
     var ov = Math.max(0, e - fSegEnd(fSeg));
     h += '<div class="card" style="border-color:#e0a86a;background:#211d18">'
@@ -8377,14 +8497,14 @@ function fRunAskHtml(flash, e){
             : '<div class="row"><button class="btn ghost" style="margin-top:4px" onclick="focusSkip()">次へ ▶</button><button class="btn ghost" style="margin-top:4px" onclick="fAiOpen()">🤖 AIに投げた</button></div>')
        + '</div>';
   }
-  h += fSplitHtml() + fOrgHtml() + fAiPanel() + fOutlookHtml();
+  h += fSplitHtml() + (fOrgTgt === null ? fOrgHtml() : '') + fAiPanel() + fAddOrgHtml() + fOutlookHtml();   /* v134 */
   return h;
 }
 function fMoreWrap(tail){
-  if(!fMoreOpen) return '<button class="btn link" style="opacity:.85" onclick="fMoreOpen=true;render()">▸ ほかの操作（一時停止・タイマー・呼吸・ひと息・＋タスク・ここで終える）</button>';
-  return '<button class="btn link" style="opacity:.85" onclick="fMoreOpen=false;render()">▾ ほかの操作をたたむ</button>' + ftAddBtn() + tail;
+  if(!fMoreOpen) return '<button class="btn link" style="opacity:.85" onclick="fMoreOpen=true;render()">▸ ほかの操作（一時停止・タイマー・呼吸・ひと息・ここで終える）</button>';
+  return '<button class="btn link" style="opacity:.85" onclick="fMoreOpen=false;render()">▾ ほかの操作をたたむ</button>' + tail;   /* v134: ＋ タスクは見通しの上へ */
 }
-function fCloseAll(){ fOrg = null; fSplitUI = null; aiPick = false; }
+function fCloseAll(){ fOrg = null; fOrgTgt = null; fSplitUI = null; aiPick = false; }
 function fOrgToggle(){ var o = fOrg; fCloseAll(); fOrg = o ? null : "menu"; render(); }
 function fAiOpen(){ var o = aiPick; fCloseAll(); if(!o){ aiPick = true; var c = ftCur(); aiTaskSel = c ? c.t : (aiTask || null); } render(); }
 /* ---- 🤖 AIに投げた ---- */
@@ -8560,7 +8680,7 @@ function fFirstKid(i){
 /* ---- 🗂 整理 ---- */
 function fNewOp(x, op, memo){ if(DB.focus.newOps !== false) ftOp(op); else ftOp({op:"memo", p:x.p, t:x.t, m:memo}); save(); }
 function fOrgDo(k){
-  var x = ftCur(); if(!x) return;
+  var x = fOrgX(); if(!x) return;
   if(k === "tomorrow" || k === "mon"){
     var d = (k === "tomorrow") ? ftDate("明日") : lnNextMon();
     if(x.isNew){ DB.focus.ops.forEach(function(o){ if(o.op === "add" && o.t === x.t) o.d = d; }); }
@@ -8573,16 +8693,23 @@ function fOrgDo(k){
   }
   if(k === "parent" || k === "tag" || k === "env"){ fOrg = k; render(); return; }
   if(k === "am" || k === "commute"){ if(fSlotSet(x, k) !== false){ fOrg = null; } render(); return; }   /* v124 */
-  fOrg = null; ftAct(k);
+  if(k === "kari"){   /* v136（B.M.C. 提案_2026-11-25_2 ②・見回り代行）: 親のある子だけ、期日を外して 🔸 仮の日へ戻す。Task Sorter「🎯 戻す」が op:"kari" を読む */
+    if(!x.parent) return;
+    if(x.isNew){ DB.focus.ops.forEach(function(o){ if(o.op === "add" && o.t === x.t) o.d = ""; }); }
+    else ftOp({op:"kari", p:x.p, t:x.t});
+    x.d = ""; save(); ftMsg = "🔸 「"+x.t+"」を仮の日に戻しました（期日を外しました）"; ftMsgAt = Date.now(); fOrg = null; render(); return;
+  }
+  var tg = (fOrgTgt !== null); fOrg = null; fOrgTgt = null;
+  if(tg) ftActX(x, k, false); else ftAct(k);   /* v134: 足したタスクは区切りを終えずに */
 }
 function fOrgParent(i){
-  var x = ftCur(), pr = DB.focus.tasks[i]; if(!x || !pr || pr === x) return;
+  var x = fOrgX(), pr = DB.focus.tasks[i]; if(!x || !pr || pr === x) return;
   fNewOp(x, {op:"parent", p:x.p, t:x.t, parent:pr.t, pp:pr.p}, "🔗 親: "+pr.t);
   x.parent = pr.t; save();
   ftMsg = "🔗 「"+x.t+"」を「"+pr.t+"」の子にしました"; ftMsgAt = Date.now(); fOrg = "menu"; render();
 }
 function fOrgTag(i){
-  var x = ftCur(); if(!x) return;
+  var x = fOrgX(); if(!x) return;
   var t = (i >= 0) ? swTagCur[i] : null;
   if(!t){ var r = prompt("🏷 付けるタグ（「、」で区切ると複数）", ""); if(r === null) return; t = r; }
   var tags = String(t).split(/[、,，\s]+/).map(function(s){ return s.replace(/^#/,"").trim(); }).filter(Boolean); if(!tags.length) return;
@@ -8591,10 +8718,10 @@ function fOrgTag(i){
   ftMsg = "🏷 「"+x.t+"」に "+tags.join("・")+" を付けました"; ftMsgAt = Date.now(); fOrg = "menu"; render();
 }
 function fOrgHtml(){
-  var x = ftCur(); if(!fOrg) return ''; if(!x){ fOrg = null; return ''; }
+  var x = fOrgX(); if(!fOrg) return ''; if(!x){ fOrg = null; return ''; }
   if(x.local) return '<div class="card" style="padding:10px 12px">'+ftPanel()+'<button class="btn link" onclick="fOrg=null;render()">閉じる</button></div>';
   var b = function(l, k){ return '<button class="btn ghost" style="margin-top:0;flex:1 1 30%;min-width:30%;padding:9px 4px;font-size:14px" onclick="fOrgDo(\''+k+'\')">'+l+'</button>'; };
-  var h = '<div class="card" style="padding:10px 12px;border-color:#6a8fa8"><label style="margin-top:0">🗂 「'+esc(x.t)+'」を整理</label>';
+  var h = '<div class="card" style="padding:10px 12px;border-color:#6a8fa8"><label style="margin-top:0">'+(fOrgTgt !== null ? '＋ 足した' : '🗂 ')+'「'+esc(x.t)+'」を整理</label>';
   if(fOrg === "parent"){
     var L = ftOpenList().filter(function(y){ return y !== x && y.parent !== x.t; });
     L.sort(function(a, c){ return (fKidsOf(c) - fKidsOf(a)) || ((/📦/.test(c.t)?1:0) - (/📦/.test(a.t)?1:0)); });
@@ -8615,13 +8742,13 @@ function fOrgHtml(){
     h += '<div style="display:flex;flex-wrap:wrap;gap:6px">'
        + DEST.filter(function(p){ return p[0] !== "commute" || canCommute(x); }).map(function(p){ return b(p[1].replace(/（.*$/, p[0] === "am" ? "" : ""), DK[p[0]]); }).join('')
        + '</div><div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">'
-       + b('🏷 タグ', 'tag') + b('🔗 親', 'parent') + b('🌐 環境', 'env') + b('✏️ 名前', 'rename') + b('📝 メモ', 'memo')
+       + b('🏷 タグ', 'tag') + b('🔗 親', 'parent') + b('🌐 環境', 'env') + (x.parent ? b('🔸 仮の日に', 'kari') : '') + b('✏️ 名前', 'rename') + (FOCUS_MEMO_BTN ? b('📝 メモ', 'memo') : '')
        + '</div>';
     /* v126: 親を決めたあと／親のタスクのとき、最初の子をボタン1つで */
     if(x.parent) h += fKidBtnHtml(x.parent);
     if(fKidsOf(x) > 0 || /📦/.test(x.t)) h += fKidBtnHtml(x.t);
   }
-  return h + '<button class="btn link" onclick="fOrg=null;render()">閉じる</button></div>';
+  return h + '<button class="btn link" onclick="fOrg=null;fOrgTgt=null;render()">閉じる</button></div>';
 }
 
 /* --------- 集中：休憩の合図 --------- */
@@ -10684,15 +10811,15 @@ function lnCands(o){ lnDecOf(o); return lnTasksToday().filter(function(x){ retur
 function lnLabelOf(k){ for(var i = 0; i < LN_DEC.length; i++) if(LN_DEC[i][0] === k) return LN_DEC[i][1]; return k; }
 function lnAmCount(o){ lnDecOf(o); return Object.keys(o.dec).filter(function(t){ return o.dec[t].k === "am"; }).length; }
 function lnCurX(o){ var L = lnCands(o).filter(function(x){ return !o.dec[x.t]; }); return L[0] || null; }
-function lnDecide(k){
+function lnDecide(k, pd){
   scKeep(); var o = lnObj(); if(!o) return; lnDecOf(o);
   var x = lnCurX(o); if(!x) return;
   var d = "";
   if(k === "tomorrow" || k === "am") d = lnWhenDate("tomorrow");
   else if(k === "mon") d = lnNextMon();
   else if(k === "date"){
-    var r = prompt("📆 先送りする日付（明日／金 などの曜日／来週＝次の月曜／12/2／2026-12-02）", "来週"); if(r === null) return;
-    d = ftDate(r); if(!d){ alert("日付として読めませんでした: "+r); return; }
+    if(pd) d = pd;   /* v135 */
+    else { calPick("📆 「"+x.t+"」を先送りする日", lnNextMon(), function(v){ lnDecide("date", v); }); return; }
   }
   if(k === "am" && lnAmCount(o) >= LN_AM_MAX){ fbToast("☀️ 翌日の午前は"+LN_AM_MAX+"つまでです。"); return; }
   if(k === "commute"){ var ex = (o.envA && o.envA[x.t]) || ftEnvOf(x); if(ex.indexOf("off") < 0 && ex.indexOf("mob") < 0){ fbToast("🚃 は 📴 か 📱 の印があるタスクだけです。先に 🌐 環境で付けてください。"); return; }
@@ -11134,7 +11261,7 @@ function scCopyList(csv, close){
   var cur = scCur && scCur.t;
   var done = function(ok){
     if(ok){
-      var now = Date.now(); list.forEach(function(x){ x.obs = now; }); if(withOps) DB.focus.opsSentAt = now; save();
+      var now = Date.now(); list.forEach(function(x){ x.obs = now; }); if(withOps) ftMarkSent(); save();
       fbToast("📋 コピーしました。Obsidian の Task Sorter →「📋 クリップボードから戻しを取り込む」で入ります。");
       if(close){ if(scCur && scCur.t === cur){ scCur = null; scStep = "state"; } if(view === "sc") view = curId ? "run" : "home"; }
       render();
@@ -11189,7 +11316,7 @@ function envChips(cur, fn){
 }
 function envToggled(cur, k){ var a = cur.slice(0), i = a.indexOf(k); if(i >= 0) a.splice(i, 1); else a.push(k); return a; }
 /* 🗂 整理の 🌐 */
-function fOrgEnv(k){ var x = ftCur(); if(!x) return; fEnvSet(x, envToggled(ftEnvOf(x), k)); render(); }
+function fOrgEnv(k){ var x = fOrgX(); if(!x) return; fEnvSet(x, envToggled(ftEnvOf(x), k)); render(); }
 /* 🧹 の 🌐 */
 function swEnv(k){ var x = swCur(); if(!x) return; fEnvSet(x, envToggled(ftEnvOf(x), k)); render(); }
 function swSlot(slot){ var x = swCur(); if(!x) return; if(fSlotSet(x, slot) === false) return; swLog(slot); swNext(); }
@@ -11465,10 +11592,11 @@ function swStop(){ if(sw) sw.mode = "end"; render(); }
 function swClose(){ if(swTimer) clearInterval(swTimer); swTimer = null; sw = null; view = "home"; render(); }
 function swLog(a){ if(sw) sw.log.push({ t:(swCur()||{}).t || "", a:a }); }
 /* 既存の操作（確認・入力は既存のまま）。行き先が決まったら次へ */
-function swAct(kind){
+function swAct(kind, pd){
   var x = swCur(); if(!x) return;
+  if(kind === "due" && !pd){ calPick("📅 「"+x.t+"」の新しい日付", x.d || ftDate("明日"), function(v){ swAct("due", v); }); return; }   /* v135 */
   var d0 = x.d, n0 = DB.focus.ops.length;
-  ftActX(x, kind, false);
+  ftActX(x, kind, false, pd);
   var moved = x.done || (kind==="due" && x.d !== d0) || (kind==="split" && DB.focus.ops.length > n0);
   if(kind==="rename") sw.q[sw.i] = x.t;
   if(moved){ swLog(kind); swNext(); }
