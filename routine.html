@@ -1694,7 +1694,7 @@ function parkBtn(){
 
 /* --- 状態 --- */
 /* v27: 版の表示（ホーム最下部）。中身を変えたら、ここも必ず上げる。 */
-var APPVER = "切り替えルーティン v129 ・ 2026-11-26";
+var APPVER = "切り替えルーティン v132 ・ 2026-11-26";
 var view = "home";
 var curId = null;
 var startAt = 0;
@@ -4690,7 +4690,7 @@ function render(){
   if(view==="home" || view==="run") h = scWaitCard() + relaxBanner() + olCard() + h;   /* v106: ⏳ 15分・🛋 ゆるめる・🌅 今日の見通し */
   if(view==="home" || view==="run"){   /* v100: 午前のうちに（朝の仕事準備の実行中にも出す）今日の一覧を取り込んでいなければ1行だけ出す（✂️・🎯 で使う） */
     var _f = (typeof lnFresh==="function") ? lnFresh() : null;
-    if(_f && _f.stale && new Date().getHours() < 12 && HOME_SIMPLE && view==="home") h = '<p style="margin:0 0 8px"><button class="btn link" style="padding:0;width:auto;display:inline;font-size:12.5px" onclick="ftFromClip()">📋 取り込む</button></p>' + h;
+    if(_f && _f.stale && new Date().getHours() < 12 && ((HOME_SIMPLE && view==="home") || (RUN_SIMPLE && view==="run"))) h = '<p style="margin:0 0 8px"><button class="btn link" style="padding:0;width:auto;display:inline;font-size:12.5px" onclick="ftFromClip()">📋 取り込む</button></p>' + h;
     else if(_f && _f.stale && new Date().getHours() < 12) h = '<p style="margin:0 0 8px;color:#e8c99a;font-size:12.5px;line-height:1.7">📋 今日のタスク一覧はまだ取り込んでいません（✂️ 今日の線・🎯 で使います）　<a class="btn link" style="padding:0;width:auto;display:inline;font-size:12.5px" href="'+esc(lnSendUri())+'">Obsidianでコピー</a>　<button class="btn link" style="padding:0;width:auto;display:inline;font-size:12.5px" onclick="ftFromClip()">📋 取り込む</button></p>' + h;
   }
   document.getElementById("app").innerHTML = h;
@@ -5548,7 +5548,7 @@ function viewRun(){
        後半の言い回しを短くした（意味は残している）。
      ★.note の中の同じ一文は消した。2か所に出すと、どちらかが古くなる。 */
   hTop += '<div class="bigsub">'+(tapPausedNow() ? '⏸ 一時停止中（この項目の時計は止まっています）' : (sl<0 ? 'この項目は予定を過ぎています' : 'この項目の残り時間'))
-     + (curStep<st.length ? '　・　全体は <b style="color:#e0a86a">'+etaLabel()+'</b> ごろ終わり' : '')
+     + ((curStep<st.length && !RUN_SIMPLE) ? '　・　全体は <b style="color:#e0a86a">'+etaLabel()+'</b> ごろ終わり' : '')   /* v131: 終わる時刻は1行目にあるので重ねない */
      + '</div>';
   hTop += '<div class="bar"><i style="width:'+spct+'%"></i></div>';
   hTop += '</div>';
@@ -5568,6 +5568,20 @@ function viewRun(){
     }else{
       hTop += '<button class="btn big" onclick="toggleStep('+curStep+')">✓ '+(foldOn?'手をつけた':'できた')+' — 次へ</button>';
     }
+    if(RUN_SIMPLE){
+      /* v131（2026-11-26 個人秘書チャット「セット実施中の画面が非常に見づらい。ホーム同様、重複する機能は整理」）:
+         上のかたまりは ✓ と「↷ スキップ・⏸ 一時停止・⋯」の1行だけ。−1分・＋1分・＋5分は ⋯ の中（消していない）。 */
+      hTop += '<div class="row" style="margin-top:7px">'
+         + '<button class="btn ghost" style="margin-top:0" onclick="skipStep()">↷ スキップ</button>'
+         + ((joyOn() || blOn()) ? '' : '<button class="btn ghost" style="margin-top:0'+(tapPausedNow()?';background:#3a3020;color:#e8c99a':'')+'" onclick="tapPauseToggle()">'+(tapPausedNow()?'▶ 再開する':'⏸ 一時停止')+'</button>')
+         + '<button class="btn ghost" style="margin-top:0;flex:0 0 auto;width:auto;padding:0 14px'+(runMore?';border:1px solid #e0a86a;color:#e0a86a':'')+'" onclick="runMore=!runMore;render()">⋯</button>'
+         + '</div>';
+      if(runMore) hTop += '<div class="row" style="margin-top:7px">'
+         + '<button class="btn ghost" style="margin-top:0" onclick="extendStep(-60)">−1分</button>'
+         + '<button class="btn ghost" style="margin-top:0" onclick="extendStep(60)">＋1分</button>'
+         + '<button class="btn ghost" style="margin-top:0" onclick="extendStep(300)">＋5分</button>'
+         + '</div>';
+    }else{
     hTop += '<div class="row" style="margin-top:9px">'
        /* v51（2026-10-01）: 短くする側。延長しかなかったので足した。 */
        + '<button class="btn ghost" style="margin-top:0" onclick="extendStep(-60)">−1分 短く</button>'
@@ -5580,7 +5594,8 @@ function viewRun(){
        + '<button class="btn ghost" style="margin-top:0" onclick="skipStep()">↷ スキップ</button>'
        + ((joyOn() || blOn()) ? '' : '<button class="btn ghost" style="margin-top:0'+(tapPausedNow()?';background:#3a3020;color:#e8c99a':'')+'" onclick="tapPauseToggle()">'+(tapPausedNow()?'▶ 再開する':'⏸ 一時停止')+'</button>')
        + '</div>';
-    hTop += emUI();   /* v70: 🌊 見たい・🌊 食べたい・🍵 ひと息・🍰 予約・🍽️ 記録 を上に固定 */
+    }
+    hTop += emUI(RUN_SIMPLE);   /* v131: 小さい1列＋📥 タスク */ /* v70: 🌊 見たい・🌊 食べたい・🍵 ひと息・🍰 予約・🍽️ 記録 を上に固定 */
     /* v35（2026-09-10 ご依頼 ＝ 指示_2026-09-10 R4）: 離席中に鳴るものを
        ここに1か所へまとめた。v32の「残り30秒で鳴るタイマー」もこの中に畳んである。 */
     h += awayBlock(s);
@@ -5746,6 +5761,8 @@ function viewRun(){
            + '<button class="btn ghost" style="margin-top:0" onclick="closeInput()">やめる</button>'
            + '<button class="btn save" style="margin-top:0" onclick="runAdd('+(i+1)+')">足す</button>'
            + '</div></div>';
+      }else if(RUN_SIMPLE && runEdit !== i){
+        hList += '<button class="btn link" style="padding:2px 4px;margin:-6px 0 8px;font-size:12px;width:auto" onclick="runEdit='+i+';render()">✏️ この項目を直す（並べ替え・メモ・名前・次に足す・消す）</button>';
       }else{
         hList += '<div class="stbtns" style="margin:-4px 0 10px">'
            /* v21 (2026-09-03 ご依頼): 実行中に順番を入れ替える。
@@ -5783,7 +5800,7 @@ function viewRun(){
        + '<button class="btn save" style="margin-top:0" onclick="runAdd('+(curStep+1)+')">足す</button>'
        + '</div></div>';
   }else{
-    h += '<button class="btn ghost" onclick="openInput(\'add:end\')">＋ いまの項目の次に1つ足す</button>';
+    if(!RUN_SIMPLE) h += '<button class="btn ghost" onclick="openInput(\'add:end\')">＋ いまの項目の次に1つ足す</button>';   /* v131: ✏️ の「次に足す」と同じなので畳む */
   }
   h += '<p class="note"><b>行をタップすると、その項目へ移ります（完了にはなりません）。</b>完了は上の「✓ できた — 次へ」です。<br>'
      + '<b>移ると、それまでの項目は「中断中」になり、そこまでに使った時間はその項目に残ります。</b>戻ってくれば、その続きから数え直します。順番が前後しても、かかった時間は項目ごとに合計で記録されます。<br>'
@@ -5810,8 +5827,9 @@ function viewRun(){
    ★🧸 自身の実行中には出さない（二重に飛ばない）
    ★寄り道であることを画面に書く。押しても、いまのセットは消えない */
 /* ===== v58: 実行中の 🌊・🍵 ===== */
-function emUI(){
+function emUI(compact){
   if(curId==="urge" || curId==="breather") return '';
+  if(compact) return emUIc();
   var b = [];
   if(urgeSet()){
     b.push('<button class="btn ghost" style="margin-top:0;padding:10px 6px;border-color:#5f93a8;color:#bfdbe8" onclick="urgeGo(\'watch\')">🌊 見たい</button>');
@@ -5837,6 +5855,58 @@ function emUI(){
   return '<div class="row emrow" style="margin-top:9px;gap:6px;flex-wrap:wrap">'+b.join("")+'</div>'
        + '<p style="color:#8ea3b8;font-size:12px;line-height:1.7;margin:4px 0 0">押すと、いまのセットを控えてそちらを始めます。<b>終わる・やめると、自動でこの続きに戻ります。</b></p>';
 }
+/* ===== v131（2026-11-26 個人秘書チャット）: 実行中の画面を整理・📥 タスクを足す =====
+   ご指示「朝のセットを実施する際に Obsidian タスクを追加する機能がほしい（メールをチェックしたとき Inbox に足す動線）」
+        「セット実施中の画面が非常に見づらいので、ホーム画面と同様重複する機能は整理して」
+   ★RUN_SIMPLE＝false で v130 の見た目に戻る。機能は1つも消していない（畳んだだけ）。
+   ★📥 タスク：🕞 の書き出しと同じ形（scTaskUri＝advanced-uri mode=new・active_inbox: true・期日は今日）で、1件ずつ作る。
+     memo は「▶ セット名 の途中で」。仕事／Private の種類は前回のものを覚えておく。入力中は描き直さない（inputOpen="task"）。 */
+var runScPaused = false;
+function runScGo(){
+  runScPaused = false;
+  if(curId && !tapPausedNow()){ var _s = setOf(curId); if(_s && !_s.auto && !(joyOn() || blOn()) && curStep < stepsOf(_s).length){ tapPauseToggle(); runScPaused = tapPausedNow(); } }
+  inputOpen = null; scGo("run");
+}
+var RUN_SIMPLE = true, runMore = false, runEdit = -1, runTk = { t:"", k:"W", done:[] };
+function emUIc(){
+  var b = [], st = 'margin-top:0;padding:7px 2px;font-size:12px;line-height:1.3;min-width:0';
+  var btn = function(ic, lb, col, fn){ return '<button class="btn ghost" style="'+st+';border-color:'+col+'" onclick="'+fn+'">'+ic+'<br>'+lb+'</button>'; };
+  /* v132（2026-11-26 個人秘書チャット「見たい、食べたいもセルフコンディションと同じなので置き換えるのが妥当では」）:
+     実行中の 🌊 見たい・🌊 食べたい を 🕞 セルフコンディション1つに。押すとセットを ⏸ 一時停止して 🕞 へ、閉じると再開して戻る。
+     ★urgeGo と 🌊 のセットは消していない（ホーム・旧表示 RUN_SIMPLE=false からは今までどおり）。 */
+  b.push(btn('🕞','セルフ','#c49a6a','runScGo()'));
+  if(breatherSet()) b.push(btn('🍵','ひと息','#8fa86a','breatherGo()'));
+  var _mb = mealUri(MEAL.cmdLog); if(_mb) b.push(btn('🍽️','記録','#a08fb9',"openUrl('"+_mb+"')"));
+  b.push(btn('📥','タスク','#c49a6a','runTkOpen()'));
+  var _mc = mealUri(MEAL.cmdClose); if(_mc) b.push(btn('📝','閉じる','#7a9ec4',"openUrl('"+_mc+"')"));
+  var h = '<div class="row emrow" style="margin-top:9px;gap:5px;flex-wrap:nowrap">'+b.join("")+'</div>';
+  if(inputOpen === "task") h += runTkHtml();
+  return h;
+}
+function runTkOpen(){ inputOpen = (inputOpen === "task") ? null : "task"; render(); setTimeout(function(){ var el = document.getElementById("rt_t"); if(el) el.focus(); }, 30); }
+function runTkKind(k){ var el = document.getElementById("rt_t"); if(el) runTk.t = el.value; runTk.k = k; render(); }
+function runTkHtml(){
+  var c = function(k, lb){ return '<button class="btn ghost" style="margin-top:0;width:auto;flex:0 0 auto;padding:4px 8px;font-size:12px'+(runTk.k===k?';border:1px solid #e0a86a;color:#e0a86a':'')+'" onclick="runTkKind(\''+k+'\')">'+lb+'</button>'; };
+  var h = '<div class="iobox" style="margin-top:8px"><label style="margin-top:0">📥 タスクを Inbox に足す（期日は今日）</label>'
+        + '<input class="inp" type="text" id="rt_t" value="'+esc(runTk.t)+'" placeholder="例：〇〇さんに見積の返事をする" oninput="runTk.t=this.value">'
+        + '<div class="row" style="flex-wrap:wrap;gap:5px;margin:6px 0 0">'+c("W","💼 仕事")+SC_PKINDS.map(function(k){ return c(k, "🏠 "+k); }).join('')+'</div>'
+        + '<div class="row" style="margin-top:8px">'
+        + '<button class="btn ghost" style="margin-top:0" onclick="closeInput()">閉じる</button>'
+        + '<a class="btn save" style="margin-top:0;display:block;text-align:center;text-decoration:none" href="#" onclick="return runTkGo(this)">📥 作る（Obsidian）</a>'
+        + '</div>';
+  if(runTk.done.length) h += '<p class="note" style="margin:6px 0 0">この回で作った：'+runTk.done.map(esc).join(' ／ ')+'</p>';
+  return h + '</div>';
+}
+function runTkGo(a){
+  var el = document.getElementById("rt_t"), t = String(el ? el.value : runTk.t).replace(/\s+/g," ").trim();
+  if(!t){ if(el) el.focus(); return false; }
+  var s = setOf(curId);
+  a.href = scTaskUri(t, runTk.k || "W", "▶ "+(s ? s.name : "セット")+" の途中で");
+  runTk.done.push(t); runTk.t = "";
+  setTimeout(function(){ render(); }, 1000);
+  return true;
+}
+document.addEventListener("visibilitychange", function(){ if(!document.hidden && view==="run" && inputOpen==="task") render(); });
 /* ===== v58: 呼吸の行に来たときの一覧 ===== */
 function viewBrPick(s){
   var tabs = brPurposes();
@@ -6087,7 +6157,7 @@ function viewRunAuto(s){
      （タップ式には v14 から入っていたが、こちらには無かった） */
   /* v26（2026-09-05 ご指摘）: 自動で進むセットでも、🧸 を下まで探しに行かせない。
      「次へ ▶」「一時停止」のすぐ下に置く。 */
-  h += emUI();   /* v58: 🧸 をやめて 🌊・🍵 に（ご依頼「いまきたと一息がセットの途中でも」） */
+  h += emUI(RUN_SIMPLE);   /* v131 */ /* v58: 🧸 をやめて 🌊・🍵 に（ご依頼「いまきたと一息がセットの途中でも」） */
   h += blUI();   /* v45: 下から「次へ ▶」の近くへ移した */
   /* v59（指示_2026-10-07 ①）: 自動で進むセットの ✏️ 項目を直す を、いちばん下から
      「次へ ▶」のかたまりの直下へ移した（v45 の 📋 と同じ理由）。要素は増やしていない。
@@ -6475,6 +6545,7 @@ function ftImportText(txt){
     return o1;   /* v104: i＝📥 Inbox の印・tags（Task Sorter が送るようになったら使う） */   /* v100: w＝"week"（明日〜7日）／"next"（来週の月曜）／空＝今日まで */
   }).filter(function(x){ return x.t; });
   DB.focus.tasksAt = String(o.at||"");
+  pinSync();   /* v130: ✂️ で決めた 📌 を、取り込んだ Obsidian の今の状態に合わせる */
   DB.focus.tasksImp = Date.now();   /* v100: 取り込んだ時刻を routine 側で持つ（✂️ で一覧の鮮度を出すため） */
   save();
   return DB.focus.tasks.length;
@@ -8077,6 +8148,7 @@ function viewFocusStart(){
   var sl = fSlotNow(), segs = segsFor(sl);
   var h = '<h1>🎯 集中ブロック</h1>'
     + '<p class="sub">押した瞬間から、休憩までの時間を数えます。<br>途中の区切りは「次へ移る合図」です。仕事の日にも、休日にも使えます。</p>';
+  h += pinCardHtml();   /* v130: 📌 最初にやること（1件目からすぐ始める） */
   /* v108（2026-11-21 🤖 AIへ 11:53・動線図をご確認のうえ「この形で作る」）: 入口を ①何をやる？ → ②どう進める？（3つ）にまとめた。
      「順に回して始める」「1つに集中して始める」と ✍ 手で書く欄はなくした（関数 focusBegin('rotate'|'one') は残置・入口だけ外した）。 */
   h += ftScopeCard();
@@ -10064,7 +10136,9 @@ function scHint(i){
   var el = document.getElementById("sc_cause"); if(el){ el.focus(); try{ el.setSelectionRange(el.value.length, el.value.length); }catch(e){} }
 }
 function scTo(step){ scKeep(); save(); scStep = step; render(); }
-function scClose(){ scKeep(); if(scCur && scCur.t && !scCur.next) scCur.next = "閉じた"; save(); scCur = null; scStep = "state"; view = curId ? "run" : "home"; render(); }
+function scClose(){ scKeep(); if(scCur && scCur.t && !scCur.next) scCur.next = "閉じた"; save(); scCur = null; scStep = "state"; view = curId ? "run" : "home";
+  if(runScPaused && curId && tapPausedNow()){ runScPaused = false; tapPauseToggle(); return; }   /* v132: 実行中から来たときは再開して戻る */
+  runScPaused = false; render(); }
 function scFirstLine(t){ var a = String(t||"").split(/\n/).map(function(x){return x.trim();}).filter(Boolean); return (a[0]||"").slice(0,60); }
 function scRunSet(id){
   if(curId === id) { view = "run"; render(); return; }
@@ -10854,45 +10928,78 @@ function pbEnvOf(x){
   return [];
 }
 function pbEnvToggle(){ pbEnvOpen = !pbEnvOpen; render(); }
-/* v129（指示_2026-11-26_3・見回り代行）: 🌙 締めチェックで決めた「最初の5分」も帯に出す（表示だけ）。
-   取り込んだ一覧（DB.focus.tasks）のうち、今日まで（w なし）・未完了・f5 あり・帯の ✂️ と同じ名前でないもの。
-   押せるのは 🎯 集中ブロック だけ（✅・次の出勤日へ は Obsidian 側のタスクなので出さない）。新しいデータは持たない。 */
+/* ===== v130（2026-11-26 個人秘書チャット。ご指示「Task Sorter ですでに変更したものが残り続ける／並びすぎて見づらい／朝はホームではなく集中ブロックに」
+   ご回答：ホームから外すのは朝（正午まで）だけ／集中ブロックでは1件目をすぐ始める形）=====
+   ① pinSync：📋 取り込むのたびに、✂️ で決めた 📌（DB.plans）を Obsidian の一覧と名前で突き合わせる。
+      一覧に無い＝完了・Someday・改名など → 済みにして下ろす（gone:"obsidian"。データは消さない）。
+      期日が先に動いた → その日に合わせる。今日決めたもの・まだ Obsidian に戻していない（ops にある）ものは触らない。
+   ② 📌 最初にやること：✂️ の分と 🌙 締めチェックの分（v129 の f5）を1つの一覧に。1件2行（名前1行＋▶ 最初の5分）、上から3件・残りは畳む。
+      ボタンは「▶ 1件目から始める」1つ。✅ やった・次の出勤日へ は各行の ⋯ の中。
+   ③ 置き場所：正午まではホームに出さない（🎯 集中ブロックの最初の画面に出す）。正午からはホームに1行の入口だけ。
+   ★データの形（DB.plans・🎯TASKS・📤 の ops）は変えていない。 */
 function pbF5(a){
   var L = (DB.focus && DB.focus.tasks) || [], today = lnD(new Date()), names = (a||[]).map(function(x){ return x.task; });
   return L.filter(function(x){ return x && x.f5 && !x.done && !x.w && (!x.d || x.d <= today) && names.indexOf(x.t) < 0; });
 }
-function pbF5Go(i){ var b = pbF5(plansDue()); var x = b[i]; if(!x) return; lnToPlan([x.t]); ftMsg = "最初の5分："+x.f5+"（"+x.t+"）"; ftMsgAt = Date.now(); render(); }
-function planBanner(){
-  var a = plansDue(), b5 = pbF5(a); if(!a.length && !b5.length) return "";
-  var LB = { rest:"📌 今日の最初の5分", mon:"📌 月曜の朝いちばん", worry:"📌 決めておいたこと", check:"🗓 確認する時間", am:"☀️ 午前（10時〜）にやる", commute:"🚃 通勤中（8:30〜10:30）にやる" };   /* v124 */
-  var h = '<div style="border:1px solid #c49a6a;border-radius:10px;padding:8px 10px;margin:0 0 10px;background:#1f1a14">';
-  var EV = a.map(pbEnvOf), any = EV.some(function(e){ return e.length; });
-  var envNow = (any && DB.focus && DB.focus.envNow) || "", hid = 0;
-  if(any){
-    h += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px">'
-       + ["off","mob","pc","home"].map(function(k){ var on = envNow===k;
-           return '<button class="btn ghost" style="margin-top:0;width:auto;flex:0 0 auto;padding:4px 8px;font-size:12px'+(on?';border:1px solid #e0a86a;color:#e0a86a':'')+'" onclick="askEnvSet(\''+k+'\')">'+ENV_LB[k]+'</button>'; }).join('')
-       + '</div>';
-  }
-  a.forEach(function(x, i){
-    var off = envNow && EV[i].length && EV[i].indexOf(envNow) < 0;
-    if(off) hid++;
-    var ee = EV[i].map(function(k){ return ENV_LB[k].split(" ")[0]; }).join("");
-    h += '<div class="pbitem" style="margin:2px 0 6px'+((off && !pbEnvOpen)?';display:none':'')+(off?';opacity:.7':'')+'"><div style="font-size:12px;color:#e0a86a">'+LB[x.kind]+'（'+(new Date(x.made).getMonth()+1)+'/'+new Date(x.made).getDate()+' に決めた）</div>'
-       + '<div style="font-size:14px;line-height:1.6">'+esc(x.task)+(ee ? ' <small>'+ee+'</small>' : '')+(x.f5 ? '<br><span style="color:#cfd8e3">最初の5分：'+esc(x.f5)+'</span>' : '')+(x.kind==="check" ? '<br><span style="color:#8ea3b8;font-size:12px">いま考えてよい時間です。計画にできたら「🎯」へ。</span>' : '')+'</div>'
-       + '<div class="row" style="flex-wrap:wrap;gap:6px;margin-top:4px">'
-       + '<button class="btn ghost" style="margin-top:0;width:auto;flex:0 0 auto;padding:5px 10px" onclick="planDone('+i+')">✅ やった</button>'
-       + '<button class="btn ghost" style="margin-top:0;width:auto;flex:0 0 auto;padding:5px 10px" onclick="planFocus('+i+')">🎯 集中ブロック</button>'
-       + '<button class="btn ghost" style="margin-top:0;width:auto;flex:0 0 auto;padding:5px 10px" onclick="planLater('+i+')">次の出勤日へ</button>'
-       + '</div></div>';
+function pinSync(){
+  var L = DB.focus.tasks || []; if(!L.length || !DB.plans) return;
+  var pend = (DB.focus.ops||[]).map(function(o){ return o.t; }), now = Date.now(), today = lnD(new Date());
+  DB.plans.forEach(function(x){
+    if(!x || x.done || !x.task) return;
+    if(x.made && now - x.made < 12*3600*1000) return;
+    if(pend.indexOf(x.task) >= 0) return;
+    var y = null; for(var i=0;i<L.length;i++){ if(L[i].t === x.task){ y = L[i]; break; } }
+    if(!y){ x.done = true; x.doneAt = now; x.gone = "obsidian"; return; }
+    if(y.d && x.due && y.d > x.due && y.d > today){ x.due = y.d; x.at = ""; }
   });
-  b5.forEach(function(x, i){
-    h += '<div class="pbitem" style="margin:2px 0 6px"><div style="font-size:12px;color:#e0a86a">📌 今日の最初の5分（締めチェックで決めた）</div>'
-       + '<div style="font-size:14px;line-height:1.6">'+esc(x.t)+'<br><span style="color:#cfd8e3">最初の5分：'+esc(x.f5)+'</span></div>'
-       + '<div class="row" style="flex-wrap:wrap;gap:6px;margin-top:4px"><button class="btn ghost" style="margin-top:0;width:auto;flex:0 0 auto;padding:5px 10px" onclick="pbF5Go('+i+')">🎯 集中ブロック</button></div></div>';
-  });   /* v129 */
-  if(hid) h += '<button class="btn ghost" style="margin-top:2px;width:auto;padding:4px 10px;font-size:12px" onclick="pbEnvToggle()">'+(pbEnvOpen ? '▲ 別の環境を畳む' : '▼ 別の環境 '+hid+'件')+'</button>';
+}
+var PIN_KIND = { mon:"月曜", worry:"気がかり", check:"確認", am:"午前", commute:"通勤中" };
+function pinList(){
+  var a = plansDue(), out = [];
+  a.forEach(function(x, i){ var y = planTaskOf(x.task); if(y && y.done) return; out.push({ t:x.task, f5:x.f5||(y&&y.f5)||"", kind:x.kind, pi:i }); });
+  pbF5(a).forEach(function(x){ out.push({ t:x.t, f5:x.f5, kind:"", pi:-1 }); });
+  return out;
+}
+var pinOpen = false, pinMore = -1;
+function pinRowHtml(x, k){
+  var ch = PIN_KIND[x.kind] ? ' <small style="color:#e0a86a;border:1px solid #6b5a3e;border-radius:6px;padding:0 4px">'+PIN_KIND[x.kind]+'</small>' : '';
+  var h = '<div style="display:flex;align-items:flex-start;gap:6px;margin:0 0 6px;border-top:'+(k?'1px solid #2a3340':'0')+';padding-top:'+(k?'6px':'0')+'">'
+        + '<div style="flex:1 1 auto;min-width:0"><div style="font-size:14px;line-height:1.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+(k+1)+'. '+esc(x.t)+ch+'</div>'
+        + (x.f5 ? '<div style="font-size:12.5px;color:#cfd8e3;line-height:1.5">▶ '+esc(x.f5)+'</div>' : '') + '</div>';
+  if(x.pi >= 0) h += '<button class="btn ghost" style="margin-top:0;width:auto;flex:0 0 auto;padding:2px 8px;font-size:12px" onclick="pinMore='+(pinMore===k?-1:k)+';render()">⋯</button>';
+  h += '</div>';
+  if(x.pi >= 0 && pinMore === k) h += '<div class="row" style="flex-wrap:wrap;gap:6px;margin:0 0 6px">'
+       + '<button class="btn ghost" style="margin-top:0;width:auto;flex:0 0 auto;padding:4px 10px;font-size:12.5px" onclick="pinMore=-1;planDone('+x.pi+')">✅ やった</button>'
+       + '<button class="btn ghost" style="margin-top:0;width:auto;flex:0 0 auto;padding:4px 10px;font-size:12.5px" onclick="pinMore=-1;planLater('+x.pi+')">次の出勤日へ</button></div>';
+  return h;
+}
+function pinCardHtml(){
+  var L = pinList(); if(!L.length) return "";
+  var h = '<div style="border:1px solid #c49a6a;border-radius:10px;padding:8px 10px;margin:0 0 10px;background:#1f1a14">'
+        + '<div style="font-size:13px;color:#e0a86a;margin-bottom:6px">📌 最初にやること '+L.length+'件</div>';
+  var show = pinOpen ? L : L.slice(0, 3);
+  show.forEach(function(x, k){ h += pinRowHtml(x, k); });
+  if(L.length > 3) h += '<button class="btn link" style="padding:4px;font-size:12px" onclick="pinOpen=!pinOpen;render()">'+(pinOpen ? '▲ 畳む' : '▼ ほか '+(L.length-3)+'件')+'</button>';
+  h += '<button class="btn" style="margin-top:4px" onclick="pinStart()">▶ 1件目から始める</button>';
   return h + '</div>';
+}
+/* 1件目＝いまの1つ、2・3件目＝🗓 この先の見通し。枠は時間帯の「休憩まで」。✂️ の 📌 は始めた時点で済みにする（planFocus と同じ） */
+function pinStart(){
+  var L = pinList(); if(!L.length) return;
+  if(fStart && !fDone){ focusBack(); return; }
+  var a = plansDue(), use = L.slice(0, 3);
+  use.forEach(function(x){ var y = lnEnsureTask(x.t); if(y && x.f5 && !y.f5) y.f5 = x.f5; if(x.pi >= 0 && a[x.pi]){ a[x.pi].done = true; a[x.pi].doneAt = Date.now(); } });
+  var p = planInit(), sl = slotAt(Date.now()); fSlot = sl;
+  var cap = (DB.focus.len && DB.focus.len[sl]) || 60;
+  p.until = ""; p.cap = cap;
+  p.items = use.map(function(x, k){ return { t:x.t, m: k === 0 ? Math.min(25, cap) : Math.max(5, Math.floor((cap - Math.min(25, cap)) / Math.max(1, use.length-1))) }; });
+  save(); pinOpen = false; pinMore = -1;
+  planGo();
+}
+function planBanner(){
+  var L = pinList(); if(!L.length) return "";
+  if(new Date().getHours() < 12) return "";   /* 朝（正午まで）はホームに出さない＝🎯 集中ブロックの最初の画面へ */
+  return '<button class="setb" style="margin:0 0 10px;border-color:#c49a6a;background:#1f1a14" onclick="focusGo()">📌 最初にやること '+L.length+'件<small>'+esc(L[0].t)+(L[0].f5 ? ' ▶ '+esc(L[0].f5) : '')+' → 🎯</small></button>';
 }
 
 
@@ -11251,7 +11358,7 @@ var OL_FLAGS = [["A","いつもの流れが崩れる"],["B","一人の時間が�
 var OL_HEAD = "🚩 いつもと違う日（朝に確かめる）";   /* 旧い名前 */
 var OL_HEAD_NEW = "🌅 今日の見通し";                  /* 新しい名前。v109: 切り替えは HEAD_SWITCH（仕様書_2026-11-21 §3-4） */
 function olHeadFor(ts){ return headOf(ts, OL_HEAD, OL_HEAD_NEW); }
-var olSel = {}, olLater = "";
+var olSel = {}, olLater = "", olRunOpen = false;
 function olToggle(k){ olSel[k] = !olSel[k]; render(); }
 function olKeys(){ return OL_FLAGS.map(function(f){ return f[0]; }).filter(function(k){ return olSel[k]; }); }
 function olUri(){
@@ -11275,6 +11382,7 @@ function olCard(){
     return "";
   }
   if(d.getHours() >= 12 || olLater === olDay()) return "";
+  if(view === "run" && RUN_SIMPLE && !olRunOpen) return '<button class="btn link" style="padding:0 0 8px;width:auto;display:block;font-size:12.5px;color:#e8c99a" onclick="olRunOpen=true;render()">🌅 今日の見通しを決める ▸</button>';   /* v131: 実行中は1行に畳む */
   var h = '<div style="border:1px solid #c4a06a;border-radius:10px;padding:9px 10px;margin:0 0 10px;background:#211e18">'
         + '<div style="font-size:14px;color:#e8c99a;margin-bottom:2px">🌅 今日の見通し</div>'
         + '<div style="font-size:12px;color:#8ea3b8;margin-bottom:6px">当てはまるものを押して（いくつでも）。どれも無ければそのまま「決めた」へ。採点はしません。</div>';
@@ -11486,7 +11594,7 @@ function scKindChips(i){
   var c = function(k, lb){ return '<button class="btn ghost" style="margin-top:0;width:auto;flex:0 0 auto;padding:5px 9px;font-size:12.5px'+(cur===k?';border:1px solid #e0a86a;color:#e0a86a':'')+'" onclick="scSetKind('+i+',\''+k+'\')">'+lb+'</button>'; };
   return '<div class="row" style="flex-wrap:wrap;gap:5px;margin:6px 0 0">'+c("W","💼 仕事")+SC_PKINDS.map(function(k){ return c(k, "🏠 "+k); }).join('')+'</div>';
 }
-function scTaskUri(title, kind){
+function scTaskUri(title, kind, memo){   /* v131: memo を渡せるように（無ければ従来どおり） */
   var d = new Date(), ymd = lnD(d), iso = d.toISOString();
   var priv = (kind !== "W");
   var t = String(title).replace(/\s+/g," ").trim();
@@ -11497,7 +11605,7 @@ function scTaskUri(title, kind){
     + "title: "+q(t + (priv ? " #Private" : ""))+"\n"
     + "date: "+ymd+"\nstart: "+ymd+"\ndue: "+ymd+"\n"
     + 'allDay: true\nstartTime: "09:00"\nendTime: "18:00"\ncompleted: null\n'
-    + 'memo: "🕞 セルフコンディションから"\nrelated_note: ""\n'
+    + "memo: "+q(memo || "🕞 セルフコンディションから")+"\nrelated_note: \"\"\n"
     + (priv ? "tags:\n  - Private\n  - "+kind+"\n" : "tags:\n")
     + 'outlook_event_id: ""\nactive_inbox: true\n'
     + "createdAt: "+iso+"\nupdatedAt: "+iso+"\n---\n";
