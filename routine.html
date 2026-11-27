@@ -829,6 +829,24 @@ function defaults(){ return [
        鳴らなかったときのために、3手目で「聞こえなければ目は閉じない」を先に伝えている。
      ★中身は他のセットと同じく「セットを編集」から直せる（ホームの一覧には出さないが、
        編集の一覧には出る＝🌊・🧸 と同じ扱い）。 */
+  /* v139（2026-11-27 Coworkチャット・ご依頼「夜の5分のメニュー／routine でできるように／独立セットで・🍵 と同じ形」）:
+     🧘 夜の5分。子どもが浴槽にいるあいだ（片付けが終わったあとの5〜10分）に、キッチンを出てフローリングで。
+     ★🍵 と同じ「寄り道」＝ワンオペなどの実行中に開いても、終わると元のセットの続きに戻る（autoBack に night5 を追加）。
+     ★ホームの一覧には出す（🍵・🌊 と違い「衝動が来た瞬間」のものではなく、予定された5分なので。残業日・休日にも使える）。
+     ★前半3つが筋トレ（ジムのルーティンA/B/Cに無い 臀部・肩の外旋・体幹）、後半3つがストレッチ。
+       後半で終わるのは、緩んだ状態で子どものサポート（髪・歯の仕上げ）に入るため。
+     ★きつい日は前半を ↷ スキップで飛ばして後半だけでよい（🔋1の日に追い込む枠にしない）。 */
+  { id:"night5", icon:"🧘", name:"夜の5分（筋トレとストレッチ）", limit:300,
+    auto:true, voice:true,
+    note:"風呂の近くのフローリングで。前半3つが筋トレ、後半3つがストレッチ。呼ばれたら ⏸。きつい日は前半を ↷ で飛ばして後半だけでOK。ダンベルとバンドは、子どもを風呂に入れるときに出しておく。",
+    steps:[
+      "45|グルートブリッジ 15回（ダンベルを腰に乗せる。上で1秒止める）|お尻を持ち上げる15回",
+      "45|バンドで肩の外旋 左右15回ずつ（肘を体につけて、前腕を外へ）|肩の外まわし",
+      "45|デッドバグ 左右8回ずつ（仰向け・腰を床に押しつけたまま手足を伸ばす）|デッドバグ",
+      "60|仰向けフィギュア4（足首を反対の膝へ、太ももを胸へ。左右30秒）|お尻の外側を伸ばす",
+      "60|牛の顔・腕（左手が上を40秒・右手が上を20秒。届かなくてOK）|背中で手を近づける",
+      "45|合蹠＋深呼吸3回（足裏を合わせて座り、背すじを伸ばす）|合蹠と深呼吸"
+    ] },
   { id:"breather", icon:"🍵", name:"ひと息（脳がつかれた）", limit:410,
     auto:true, voice:true, media:true,
     note:"約7分、勝手に進みます。合図の音と声で進むので、イヤホンで。2回目の欲求が来たとき、仕事を再開する前に。",
@@ -960,6 +978,7 @@ try{
        開き直すたびに復活する**（読み戻しは列挙した項目だけを拾う作りのため）。 */
     if(p.mig_urge===true) DB.mig_urge = true;
     if(p.mig_breather===true) DB.mig_breather = true;
+    if(p.mig_night5===true) DB.mig_night5 = true;   /* v139: 🧘 夜の5分 を一度だけ差し込んだ印（★この行が無いと、削除しても開き直すたびに復活する。読み戻しは列挙した項目だけを拾う作りのため） */
     if(Array.isArray(p.brProgs)) DB.brProgs = p.brProgs;   /* v58: 呼吸の置き場（★無いと開き直すたびに既定へ戻る） */
     if(p.mig_br58===true) DB.mig_br58 = true;            /* v58 */   /* v57: 🍵（★無いと削除しても復活する） */
     if(p.mig_med60===true) DB.mig_med60 = true;
@@ -1050,6 +1069,10 @@ try{
   if(typeof f.spotify !== "boolean") f.spotify = FOCUS_DEF.spotify;
   if(f.spMode !== "own" && f.spMode !== "default") f.spMode = FOCUS_DEF.spMode;
   if(typeof f.spotifyUrl !== "string") f.spotifyUrl = "";
+  /* v140（2026-11-27 🤖 AIへ 08:34「集中ブロックに置いたセットでも、セットごとのタイマー設定が効くように」・見回り代行）:
+     「時間を決めてセットをやる」ときのアラームの既定を ⏱ 項目ごと → セットの設定どおり に。保存済みの値が旧既定（項目ごと／未設定）なら一度だけ「セットの設定どおり」へ寄せる。
+     その後に自分で 項目ごと・なし を選び直した分は上書きしない（印 setAlarmV140）。記録の形は変えていない。 */
+  if(f.setAlarmV140 !== true){ if(f.setAlarm === "step" || f.setAlarm === undefined) f.setAlarm = "follow"; f.setAlarmV140 = true; }
   DB.focus = f;
 })();
 /* v23（2026-09-05・問9のG）: セットのタグと、シーン別のタブ。
@@ -1169,6 +1192,17 @@ if(!DB.mig_breather){
     var at6 = DB.sets.length;
     DB.sets.forEach(function(s,i){ if(s.rescue && i<at6) at6 = i; });
     DB.sets.splice(at6, 0, bz);
+  }
+  save();
+}
+/* v139: 🧘 夜の5分 を既存の端末にも足す（一度だけ）。削除されたら復活させない。 */
+if(!DB.mig_night5){
+  DB.mig_night5 = true;
+  if(!DB.sets.some(function(s){return s.id==="night5";})){
+    var n5 = defaults().filter(function(s){return s.id==="night5";})[0];
+    var at7 = DB.sets.length;
+    DB.sets.forEach(function(s,i){ if(s.rescue && i<at7) at7 = i; });
+    if(n5) DB.sets.splice(at7, 0, n5);
   }
   save();
 }
@@ -1707,7 +1741,7 @@ function parkBtn(){
 
 /* --- 状態 --- */
 /* v27: 版の表示（ホーム最下部）。中身を変えたら、ここも必ず上げる。 */
-var APPVER = "切り替えルーティン v138 ・ 2026-11-26";
+var APPVER = "切り替えルーティン v140 ・ 2026-11-27";
 /* v133（2026-11-26 提案_2026-11-25_2 回答「アを前提にしつつ、メモを書くは不要」・見回り代行）:
    🎯 集中ブロックの 📝 メモ ボタン（実行中のタスク欄・🗂 整理）を隠す。ftAct('memo') と op:"memo" の仕組みは残す（☀️・🚃 の印や 📤 の戻しで使っているため）。
    戻すときは FOCUS_MEMO_BTN を true に。 */
@@ -2896,7 +2930,7 @@ function brSkipRow(){
 }
 function brTabSet(q){ brTab = q; render(); }
 /* v58: 寄り道（🌊・🍵・🧸）の最中か。終わる・やめると元のセットの続きへ自動で戻る。 */
-function autoBack(){ return (curId==="anger" || curId==="urge" || curId==="breather") && inDetour(); }
+function autoBack(){ return (curId==="anger" || curId==="urge" || curId==="breather" || curId==="night5") && inDetour(); }   /* v139: 🧘 夜の5分 も寄り道 */
 /* v4: 手動で次のステップへ進める（合わないときのための逃げ道） */
 function autoSkip(){
   var s = setOf(curId); if(!s || !s.auto) return;
@@ -3001,12 +3035,15 @@ function appOf(x){
     return u ? { icon:"📝", name:"今日を閉じる", url:u } : null;
   }
   if(k==="qmemo") return { icon:"📝", name:"Quick Memo", url:qmemoUri() };   /* v138 */
+  /* v139: 4列目 night5 ＝ 🧘 夜の5分 を寄り道で開く。ほかのアプリと違いURLは無く、openApp 側で night5Go() を呼ぶ。 */
+  if(k==="night5") return { icon:"🧘", name:"夜の5分", url:"" };
   if(APPS[k]) return APPS[k];
   if(/^https?:\/\//.test(k)) return { icon:"🔗", name:"リンクを開く", url:k };
   return null;
 }
 function qmemoUri(){ return "obsidian://open?vault="+encodeURIComponent((typeof FB!=="undefined" && FB.vault)||"My Valut")+"&file="+encodeURIComponent("10_Action/Quick Memo"); }   /* v138 */
 function openApp(k){
+  if(k==="night5"){ night5Go(); return; }           /* v139: 🧘 夜の5分（寄り道。新規タブではなく同じ画面で始める） */
   if(k==="qmemo"){ openUrl(qmemoUri()); return; }   /* v138: Obsidian の Quick Memo */
   /* v83: close は Obsidian（別アプリ）なので新規タブではなく openUrl で開く */
   if(k==="close"){
@@ -4461,6 +4498,18 @@ function breatherGo(){
   save();
   start("breather");
 }
+/* v139: 🧘 夜の5分。🍵 とまったく同じ入り方（実行中のセットがあれば控えて寄り道、終わると続きへ戻る）。 */
+function night5Go(){
+  var n = setOf("night5"); if(!n) return;
+  if(curId === "night5") return;             /* 二重に飛ばない */
+  if(curId){
+    commitSeg();
+    detour = runSnap();
+    DB.detour = detour;
+  }
+  save();
+  start("night5");
+}
 
 /* ===== v114（2026-11-24 🤖 AIへ 17:14 → 指示_2026-11-24_3 お願い3）=====
    「セルフコンディションで『一息』を選んだあと、次にやることをセットの中身ではなく Obsidian のタスクから1つ選べる、
@@ -4594,7 +4643,7 @@ function alarmOf(s){
    5分ちょうど以上は従来どおり。セット全体（set）・通知（notify）・手で押す「⏰ 渡す」は変えていない。記録の形も変えていない。 */
 var STEP_MIN_SEC = 300;
 function stepTimerOK(st){ return !!st && Math.round(st.sec||0) >= STEP_MIN_SEC; }
-function fSetAlarmMode(){ var v = (DB.focus||{}).setAlarm; return (v==="follow" || v==="off") ? v : "step"; }
+function fSetAlarmMode(){ var v = (DB.focus||{}).setAlarm; return (v==="step" || v==="off") ? v : "follow"; }   /* v140: 既定を follow（セットの設定どおり）に */
 function fSetAlarmEff(s){ var m = fSetAlarmMode(); if(m==="follow"){ var a = alarmOf(s); return a==="step" ? "step" : ((a==="set" || a==="notify") ? "set" : "off"); } return m; }
 function alarmLabel(a){ for(var i=0;i<ALARM_UI.length;i++){ if(ALARM_UI[i][0]===a) return ALARM_UI[i][1]; } return ""; }
 function setAlarm(id, a){
@@ -8896,8 +8945,8 @@ function viewFocusSet(){
      + '<p class="note">⏱はショートカット「'+esc(DB.scName)+'」、🔔は「'+esc(DB.notifySc||"")+'」を使います（名前はホーム画面の設定で変えられます）。<br>'
      + '<b>iPhoneを閉じていても鳴らせるのは、これだけです。</b></p>'
      + '<label style="margin-top:8px">「時間を決めてセットをやる」ときのアラーム</label><div class="row" style="flex-wrap:wrap;gap:6px;margin-top:4px">'
-     + [["step","⏱ 項目ごと（既定）"],["follow","セットの設定どおり"],["off","なし"]].map(function(o){ return '<button class="btn '+(fSetAlarmMode()===o[0]?'save':'ghost')+'" style="margin-top:0;flex:1 1 30%" onclick="focusSave();DB.focus.setAlarm=\''+o[0]+'\';save();render()">'+o[1]+'</button>'; }).join('')
-     + '</div><p class="note">項目ごと＝縮めたあとの長さで、項目ごとにiPhoneのタイマーを渡します（5分未満の項目は渡しません）。iPhoneのタイマーは1本だけなので、ブロックの開始で渡した「休憩まで」のタイマーは上書きされます。</p>'
+     + [["follow","セットの設定どおり（既定）"],["step","⏱ 項目ごと"],["off","なし"]].map(function(o){ return '<button class="btn '+(fSetAlarmMode()===o[0]?'save':'ghost')+'" style="margin-top:0;flex:1 1 30%" onclick="focusSave();DB.focus.setAlarm=\''+o[0]+'\';save();render()">'+o[1]+'</button>'; }).join('')
+     + '</div><p class="note">セットの設定どおり＝各セットの「iPhoneへの渡し方」（⏱ セット全体／項目ごと／なし）に従います。🔔 通知だけのセットは、ここではセット全体のタイマーとして渡します。項目ごと＝縮めたあとの長さで、項目ごとにiPhoneのタイマーを渡します（5分未満の項目は渡しません）。iPhoneのタイマーは1本だけなので、ブロックの開始で渡した「休憩まで」のタイマーは上書きされます。</p>'
      /* v11: PCのデスクトップ通知 */
      + '<div class="toggle" style="margin-top:10px"><b>PCのデスクトップ通知を出す</b>'
      + '<button class="sw'+(f.notify?' on':'')+'" onclick="focusSave();DB.focus.notify=!DB.focus.notify;save();render()"><i></i></button></div>'
